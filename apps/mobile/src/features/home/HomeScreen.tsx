@@ -104,6 +104,7 @@ import { holdLaunchSplashForHomeRows, settleLaunchSplashHomeRows } from "./home-
 import { useWorkspaceTabs } from "../layout/workspace/WorkspaceTabsContext";
 import { ThreadListFilters } from "./ThreadListFilters";
 import { deriveHomeEmptyState } from "./home-empty-state";
+import { J3OpsSummaryBanner } from "../j3/J3OpsSummaryBanner";
 
 interface HomeScreenProps {
   /** Whether this list is the one on screen; see `useHomeRouteVisible`. */
@@ -704,6 +705,10 @@ export function HomeScreen(props: HomeScreenProps) {
           onProjectChange={props.onProjectChange}
         />
       ) : null}
+      <J3OpsSummaryBanner
+        threads={props.threads}
+        selectedEnvironmentId={props.selectedEnvironmentId}
+      />
     </>
   );
 

@@ -35,6 +35,7 @@ import { splitEnvironmentSections } from "./environmentSections";
 import { leaveSettingsPage } from "../settings/settings-navigation";
 import { workspaceHasColumns } from "../layout/workspace/workspace-selection-store";
 import { m } from "../../i18n/messages";
+import { J3ConnectionProbeCard } from "../j3/J3ConnectionProbeCard";
 
 type ConnectionsNewRouteParams = {
   readonly mode?: string;
@@ -284,6 +285,7 @@ function PairingForm({
                       "For machines on your local network or tailnet. The machine keeps its own provider credentials.",
                     ))}
             </Text>
+            <J3ConnectionProbeCard hostInput={hostInput} />
           </View>
 
           {hasCloudPublicConfig() ? <T3ConnectSection /> : null}

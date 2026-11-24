@@ -81,6 +81,7 @@ import {
 } from "./threadListV2";
 import { useSelectWorkspaceDetail } from "../layout/workspace/useSelectWorkspaceDetail";
 import { NativeScrollView } from "../../native/NativeScrollViewMarker";
+import { J3OpsSummaryBanner } from "../j3/J3OpsSummaryBanner";
 
 type SidebarListItem =
   | ThreadListV2ListItem
@@ -642,6 +643,13 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
                 scrollEventThrottle={16}
                 showsVerticalScrollIndicator={false}
                 style={styles.threadList}
+                ListHeaderComponent={
+                  <J3OpsSummaryBanner
+                    threads={launchingThreads}
+                    selectedEnvironmentId={options.selectedEnvironmentId}
+                    compact
+                  />
+                }
                 ListEmptyComponent={listEmpty}
               />
             </GestureDetector>
@@ -695,6 +703,13 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps) {
                 scrollEventThrottle={16}
                 showsVerticalScrollIndicator={false}
                 style={styles.threadList}
+                ListHeaderComponent={
+                  <J3OpsSummaryBanner
+                    threads={launchingThreads}
+                    selectedEnvironmentId={options.selectedEnvironmentId}
+                    compact
+                  />
+                }
                 ListEmptyComponent={listEmpty}
               />
             </GestureDetector>

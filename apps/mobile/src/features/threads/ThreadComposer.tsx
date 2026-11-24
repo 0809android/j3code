@@ -127,6 +127,7 @@ import {
   useThreadSettingsSheetPresentation,
   type NavigationWithFinishTransitioning,
 } from "./use-thread-settings-sheet-presentation";
+import { J3QuickPromptsBar } from "../j3/J3QuickPromptsBar";
 
 export const COMPOSER_COLLAPSED_CHROME = 60;
 export const THREAD_COMPOSER_BOTTOM_GUTTER = COMPOSER_BOTTOM_GUTTER;
@@ -794,6 +795,22 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
             onPress={openSettings}
           />
         ) : null}
+
+        <J3QuickPromptsBar
+          visible={
+            !props.hidden &&
+            !isSubmissionLocked &&
+            !isVoiceInputPresented &&
+            !composerMenu.trigger &&
+            props.canOperateThread &&
+            draftMessage.trim().length === 0
+          }
+          disabled={isSubmissionLocked}
+          onSelectPrompt={(prompt) => {
+            props.onChangeDraftMessage(prompt);
+            inputRef.current?.focus();
+          }}
+        />
 
         <ComposerSurface
           animateLayout={false}
