@@ -122,6 +122,15 @@ import {
   AgentSessionScanError,
 } from "./agentSessions.ts";
 import {
+  LegacyImportError,
+  LegacyImportRestartInput,
+  LegacyImportRestartResult,
+  LegacyImportRunInput,
+  LegacyImportRunResult,
+  LegacyImportScanInput,
+  LegacyImportScanResult,
+} from "./legacyImport.ts";
+import {
   AssetAccessError,
   AssetCreateUrlInput,
   AssetCreateUrlResult,
@@ -505,6 +514,9 @@ export const WS_METHODS = {
   filesystemGetMetadata: "filesystem.getMetadata",
   agentSessionsScan: "agentSessions.scan",
   agentSessionsImport: "agentSessions.import",
+  legacyImportScan: "legacyImport.scan",
+  legacyImportRun: "legacyImport.run",
+  legacyImportRestart: "legacyImport.restart",
   assetsCreateUrl: "assets.createUrl",
   assetsPersistChatAttachments: "assets.persistChatAttachments",
   attachmentsCreateUploadUrl: "attachments.createUploadUrl",
@@ -1733,6 +1745,24 @@ const WsAgentSessionsScanRpc = Rpc.make(WS_METHODS.agentSessionsScan, {
   error: Schema.Union([AgentSessionScanError, EnvironmentAuthorizationError]),
 });
 
+const WsLegacyImportScanRpc = Rpc.make(WS_METHODS.legacyImportScan, {
+  payload: LegacyImportScanInput,
+  success: LegacyImportScanResult,
+  error: Schema.Union([LegacyImportError, EnvironmentAuthorizationError]),
+});
+
+const WsLegacyImportRunRpc = Rpc.make(WS_METHODS.legacyImportRun, {
+  payload: LegacyImportRunInput,
+  success: LegacyImportRunResult,
+  error: Schema.Union([LegacyImportError, EnvironmentAuthorizationError]),
+});
+
+const WsLegacyImportRestartRpc = Rpc.make(WS_METHODS.legacyImportRestart, {
+  payload: LegacyImportRestartInput,
+  success: LegacyImportRestartResult,
+  error: Schema.Union([LegacyImportError, EnvironmentAuthorizationError]),
+});
+
 const WsAgentSessionsImportRpc = Rpc.make(WS_METHODS.agentSessionsImport, {
   payload: AgentSessionImportInput,
   success: AgentSessionImportResult,
@@ -2629,6 +2659,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsFilesystemGetMetadataRpc,
   WsAgentSessionsScanRpc,
   WsAgentSessionsImportRpc,
+  WsLegacyImportScanRpc,
+  WsLegacyImportRunRpc,
+  WsLegacyImportRestartRpc,
   WsAssetsCreateUrlRpc,
   WsAssetsPersistChatAttachmentsRpc,
   WsAttachmentsCreateUploadUrlRpc,

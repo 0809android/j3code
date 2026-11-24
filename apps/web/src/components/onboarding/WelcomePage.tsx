@@ -115,6 +115,8 @@ import { SidebarInset } from "../ui/sidebar";
 import { toastManager } from "../ui/toast";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { cn } from "../../lib/utils";
+import { LegacyImportPrompt } from "./LegacyImportDialog";
+import { WelcomeLanguageSwitcher } from "./WelcomeLanguageSwitcher";
 import { formatRelativeTime } from "../../timestampFormat";
 
 const AGENT_ONBOARDING_THREAD_ID = ThreadId.make("onboarding-agent-setup");
@@ -279,6 +281,10 @@ export function WelcomePage({
         {isElectron ? <WorkspacePageHeader electron /> : null}
         <div className="min-h-0 flex-1 overflow-y-auto scrollbar-gutter-both">
           <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col px-6 pt-12 pb-8 sm:pt-20">
+            <div className="mb-10 flex justify-center">
+              <WelcomeLanguageSwitcher />
+            </div>
+            {isPrimary ? <LegacyImportPrompt environmentId={environmentId} /> : null}
             <h1 className="text-2xl font-semibold tracking-tight text-foreground">
               <T>Welcome to T3 Code</T>
             </h1>

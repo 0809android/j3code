@@ -121,6 +121,7 @@ import { useSearchableSetting } from "./settingsSearch";
 import { nativeLanguageName, SYSTEM_LANGUAGE } from "@t3tools/client-runtime/locales";
 import { SUPPORTED_LOCALES } from "../../i18n/locales";
 import { BackgroundActivitySettingsRow } from "./BackgroundActivitySettings";
+import { LegacyImportSettingsRow } from "./LegacyImportSettings";
 import { AdvancedSettings } from "./AdvancedSettings";
 import { PullRequestLinksOpenInAppSetting } from "./IntegrationsSettings";
 import { StorageCleanupSections } from "./StorageSettings";
@@ -1129,6 +1130,10 @@ export function GeneralSettingsPanel() {
             }
           />
         ) : null}
+      </SettingsSection>
+
+      <SettingsSection id="legacy-import" title={gt("Import")}>
+        <LegacyImportSettingsRow />
       </SettingsSection>
 
       <SettingsSection id="display" title={gt("Display")}>

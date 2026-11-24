@@ -71,6 +71,7 @@
   "cd03eb1b84271c02": "Agente",
   "bfe1a60f3f9c60fb": "Turno {turn} · {what}",
   "dfdaa6255a416140": "Resumo de {turns, plural, one {{turns} turno recente} other {{turns} turnos recentes}}, {textTurns, plural, =0 {sem texto das mensagens} one {com o texto das mensagens do último turno} other {com o texto das mensagens dos últimos {textTurns} turnos}}{truncated, select, yes {, encurtado para caber} other {}}",
+  "260c6b45f52d2f27": "Adiciona o texto das suas mensagens e das respostas do agente {textTurns, plural, one {no último turno} other {nos últimos {textTurns} turnos}}.",
   "afac52a5cc2dc801": "Não foi possível enviar sua resposta. Tente novamente.",
   "79d776428f4d0650": "Não foi possível carregar o arquivo. Reconecte e tente novamente.",
   "3ea34cbb1ca5ba9b": "Pré-visualização cancelada.",
@@ -2733,9 +2734,9 @@
   "db7b3a938c45e56c": "Atualização {version} pronta para baixar",
   "9a951140b69ba740": "Baixando atualização ({percent}%)",
   "7fdece033260e9fb": "Baixando atualização",
+  "52e1d4a487c0cf4b": "Falha ao instalar {version}. Clique para tentar novamente.",
   "09ef51903e99e876": "Atualização baixada. Clique para reiniciar e instalar.",
   "d62631cab06d2b80": "Atualização {version} baixada. Clique para reiniciar e instalar.",
-  "52e1d4a487c0cf4b": "Falha ao instalar {version}. Clique para tentar novamente.",
   "78a04e0e625c0990": "Falha na atualização",
   "c24de5eb69373a55": "Esta build {build} ignora as versões {track}. Revise o canal de atualização em Configurações para concluir a troca.",
   "b02ae45a6109c93b": "Atualizado",
@@ -3638,7 +3639,6 @@
   "4e0710d19dfc2e7e": "Enviar este relatório para a equipe do T3?",
   "87d0ae0723ba75d1": "Isto é tudo o que sai da sua máquina. Nada é enviado até você clicar em Enviar.",
   "bf19826f81484328": "Incluir a conversa",
-  "260c6b45f52d2f27": "Adiciona o texto das suas mensagens e das respostas do agente {textTurns, plural, one {no último turno} other {nos últimos {textTurns} turnos}}.",
   "ddb7e6f8ce99e657": "Somente quem pode executar agentes nesta máquina pode enviar ou recusar o relatório.",
   "03c1eb603c112f47": "Não enviar",
   "653405e4ed498d9f": "Enviar",
@@ -6159,6 +6159,24 @@
   "9a50b20569f2c9e7": "Não foi possível carregar suas configurações salvas.",
   "0d22cd9e3b9d94f0": "O T3 Code não conseguiu confirmar este workspace.",
   "573a9e6b17f4e9e3": "Recarregar",
+  "bdf6a2eef918e0ed": "Configurações e atalhos de teclado",
+  "728e520ffc65b272": "Configurações de provedores",
+  "7c012bfcabc454bd": "Sessões e histórico",
+  "649307d61e6da2fe": "Erro desconhecido.",
+  "a5e5026e2a80fb37": "Importar do T3 Code",
+  "6a29c6637efa84f1": "{count, plural, one {{count} provedor} other {{count} provedores}}",
+  "56d1a850db38d0d1": "Substitui o histórico deste app após reiniciar. {size} MB. O histórico atual fica guardado como arquivo de backup.",
+  "ca3c8995e6535035": "Aparência, atalhos e preferências. Logins e dispositivos não são trazidos.",
+  "54488fcdfe691ef0": "Não foi possível importar: {message}",
+  "c0fd6bfd0a873fdc": "Importado.",
+  "71389b925853ad27": "Importado. Reinicie para concluir a importação do seu histórico.",
+  "6470cad578a2887f": "Importado. Feche o app e abra-o de novo para concluir a importação do seu histórico.",
+  "101bed20f10365e9": "Reiniciar agora",
+  "fd8f75f97a5c0e6d": "Importando…",
+  "382dcc85d648b2df": "Importar",
+  "4e91eca2d1813df8": "Nenhum dado do T3 Code foi encontrado neste computador.",
+  "a147667b50ef6a6c": "Escolha o que trazer da sua instalação do T3 Code. Os dados do T3 Code são apenas lidos, nunca alterados.",
+  "3af3a9d66423b2b9": "Não há nada para importar.",
   "d6c31ff9bb97570e": "Limite de varredura atingido. Alguns projetos ou conversas podem estar faltando.",
   "da6f86321113fb7b": "Esta conexão não pode importar projetos nem histórico de threads.",
   "1cdf16e5edb6bd99": "este computador",
@@ -6169,7 +6187,6 @@
   "b923ddc935ea2555": "Não foi possível concluir a configuração",
   "152184c4aefef5d1": "Não foi possível salvar suas configurações. Tente novamente.",
   "23ec0110d2170502": "Boas-vindas",
-  "fd8f75f97a5c0e6d": "Importando…",
   "cd609620fafff02b": "{count, plural, one {Importar {count} projeto e começar} other {Importar {count} projetos e começar}}",
   "99decfb4ea686b61": "Importar threads e começar",
   "88ddebac4d96eb62": "Começar",
@@ -8754,9 +8771,13 @@
   "ed83b25c71c98a20": "Escolha um ou mais {scope}s do {tracker} para cada projeto. As issues deles aparecem ao lado das do repositório, e os agentes criam novas issues no primeiro, a menos que outro seja pedido.",
   "19c2d5e81ff8f89a": "{scope} do {tracker} para {project}",
   "68e061510b765772": "Não vinculado",
+  "99d51127f573296b": "Outra conta",
+  "8ec2c57414669b79": "Conecte um segundo espaço de trabalho ou usuário do {tracker}.",
+  "99963c0142e17f00": "Para a nova conta do {tracker}.",
   "a2d95d39d3398bda": "Credencial recusada",
   "9eae463720500113": "Armazenado no servidor.",
   "b6e27ab2537ef874": "Criar um",
+  "6d8e4ebc889bace9": "Adicionar conta",
   "13ef526271b0f5d4": "Limpar todas as condições",
   "d1938a629f039515": "Remover condição",
   "84a605b241ce65b7": "Remover grupo e as condições dele",
@@ -8949,6 +8970,8 @@
     },
     ". Recurso alfa que pode mudar ou quebrar. O T3 Code nunca instala o Simlock."
   ],
+  "4f0af1fe3d1afe3e": "Escolher o que importar",
+  "a54dbbd5120e776d": "Traga configurações, provedores e histórico de uma instalação do T3 Code neste computador.",
   "3836976622328d61": "O que os agentes daqui podem fazer lá",
   "b20c269e7ad96f42": "Um agente nunca recebe lá mais acesso do que o próprio modo dele aqui. Abaixo do acesso total, ele só pode alterar threads iniciadas por este vínculo, não as threads, projetos ou configurações daquela máquina.",
   "4474db19bf5700c9": "Outro endereço…",
@@ -12603,6 +12626,16 @@
   "156ff7b625287a1e": "Ocultar puladas",
   "69b985b97ab45e6b": "Mostrar puladas ({count})",
   "2400254d362de84d": "Carregando execuções de workflow…",
+  "cae5c3205c01d062": [
+    {
+      "t": "span",
+      "i": 1,
+      "c": "Um arquivo de workflow tem um problema."
+    },
+    " ",
+    "A última versão que carregou continua em execução."
+  ],
+  "ed8ce6ebc73dc12d": "Abrir o arquivo",
   "145e1f7503ba3b2c": [
     "Este ambiente não tem nenhuma execução com esse link.",
     " ",
@@ -12628,16 +12661,6 @@
       "c": "Leia o guia"
     }
   ],
-  "cae5c3205c01d062": [
-    {
-      "t": "span",
-      "i": 1,
-      "c": "Um arquivo de workflow tem um problema."
-    },
-    " ",
-    "A última versão que carregou continua em execução."
-  ],
-  "ed8ce6ebc73dc12d": "Abrir o arquivo",
   "5d8d278ff828102d": "Todos os workflows",
   "39459da07479f482": "Agente",
   "7741243632056b81": "{step} · transcrição",
@@ -12782,9 +12805,5 @@
   "27d76249d09eb69f": "Guia de revisão pronto",
   "faa3bb26abb39c93": "O guia de revisão falhou",
   "b7df38b7d8792d78": "Abrir guia",
-  "9e91e9a77b664e4e": "Não foi possível iniciar um guia de revisão",
-  "99d51127f573296b": "Outra conta",
-  "8ec2c57414669b79": "Conecte um segundo espaço de trabalho ou usuário do {tracker}.",
-  "99963c0142e17f00": "Para a nova conta do {tracker}.",
-  "6d8e4ebc889bace9": "Adicionar conta"
+  "9e91e9a77b664e4e": "Não foi possível iniciar um guia de revisão"
 }

@@ -12,6 +12,7 @@ import { hasPendingMigrations, runMigrations } from "./Migrations.ts";
 import { initializeV2Database } from "./initializeV2Database.ts";
 import * as ServerConfig from "../config.ts";
 import * as ServerOwnership from "../serverOwnership.ts";
+import { applyStagedLegacyImport, hasStagedLegacyImport } from "../legacyImport/stagedImport.ts";
 
 const WAL_SIZE_LIMIT_BYTES = 128 * 1024 * 1024;
 
@@ -139,18 +140,30 @@ export const layerMemory = Layer.provideMerge(
   NodeSqliteClient.layer({ filename: ":memory:" }),
 );
 
+// A snapshot staged by the T3 Code import replaces the database, but never under a running server.
+const applyStagedLegacyImportWhenIdle = Effect.fn("applyStagedLegacyImportWhenIdle")(function* () {
+  const { dbPath, stateDir, serverRuntimeStatePath } = yield* ServerConfig.ServerConfig;
+  if (!(yield* hasStagedLegacyImport(stateDir))) return;
+  yield* ServerOwnership.holdServerOwnershipLock(serverRuntimeStatePath).pipe(
+    Effect.andThen(applyStagedLegacyImport(stateDir, dbPath)),
+    Effect.catchTags({ ServerAlreadyRunningError: () => Effect.void }),
+  );
+}, Effect.scoped);
+
 const makeLayerConfig = <E, R>(
   fromPath: (dbPath: string) => Layer.Layer<SqlClient.SqlClient, E, R>,
+  applyStagedImport = false,
 ) =>
   Layer.unwrap(
     Effect.gen(function* () {
       const { dbPath } = yield* ServerConfig.ServerConfig;
+      if (applyStagedImport) yield* applyStagedLegacyImportWhenIdle();
       yield* initializeV2Database(dbPath);
       return fromPath(dbPath);
     }),
   );
 
-export const layerConfig = makeLayerConfig(layerFromPath);
+export const layerConfig = makeLayerConfig(layerFromPath, true);
 
 /** For CLI commands: pending migrations run only while no server owns the T3 home. */
 export const layerCliConfig = makeLayerConfig(

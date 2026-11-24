@@ -5,6 +5,7 @@ import * as EnvironmentKeys from "./cloud/environmentKeys.ts";
 import * as AssetSigner from "./assets/AssetSigner.ts";
 import * as WorkspacePreviewRevisions from "./assets/WorkspacePreviewRevisions.ts";
 import * as DatabaseStorage from "./persistence/DatabaseStorage.ts";
+import * as LegacyImport from "./legacyImport/LegacyImport.ts";
 import * as StorageCleanup from "./storageCleanup.ts";
 import * as PullRequestSyncReactor from "./orchestration-v2/PullRequestSyncReactor.ts";
 import * as PullRequestWatchReactor from "./orchestration-v2/PullRequestWatchReactor.ts";
@@ -735,6 +736,7 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
     Layer.provide(ProjectionMaintenance.layer),
     Layer.provide(layerServerRestart),
   ),
+  LegacyImport.layer.pipe(Layer.provide(layerServerRestart)),
   layerThreadPullRequestWorker,
   KeepAwake.layer,
   DelegatedTaskAnalytics.layer,
