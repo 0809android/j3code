@@ -62,6 +62,10 @@ export const PROVIDER_CHIP_ICONS: Readonly<
     source: require("../../assets/context-chip-icons/provider-opencode.png"),
     tintsIcon: true,
   },
+  "openai-compatible": {
+    source: require("../../assets/context-chip-icons/server.png"),
+    tintsIcon: true,
+  },
   pi: {
     source: require("../../assets/context-chip-icons/provider-pi.png"),
     tintsIcon: true,

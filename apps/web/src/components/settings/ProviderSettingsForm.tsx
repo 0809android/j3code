@@ -252,6 +252,32 @@ const PACKAGE_FIELD_TEXT: ReadonlyMap<string, string> = new Map([
   ["Google account", msg("Google account")],
   ["Gemini API key", msg("Gemini API key")],
   ["Local command", msg("Local command")],
+  ["API preset", msg("API preset")],
+  ["Base URL", msg("Base URL")],
+  ["Default model", msg("Default model")],
+  [
+    "Choose a built-in API endpoint preset (Mistral, OpenDesign, OpenRouter, DeepSeek, Ollama) or Custom.",
+    msg(
+      "Choose a built-in API endpoint preset (Mistral, OpenDesign, OpenRouter, DeepSeek, Ollama) or Custom.",
+    ),
+  ],
+  [
+    "Leave blank to use the selected preset's default OpenAI-compatible /v1 URL.",
+    msg("Leave blank to use the selected preset's default OpenAI-compatible /v1 URL."),
+  ],
+  [
+    "Stored separately on the host. Leave blank to read the preset's environment variable (e.g. MISTRAL_API_KEY).",
+    msg(
+      "Stored separately on the host. Leave blank to read the preset's environment variable (e.g. MISTRAL_API_KEY).",
+    ),
+  ],
+  [
+    "Optional model slug to prefer as default for this instance.",
+    msg("Optional model slug to prefer as default for this instance."),
+  ],
+  ["Optional if set in environment", msg("Optional if set in environment")],
+  ["Ollama (Local)", msg("Ollama (Local)")],
+  ["Custom OpenAI-Compatible API", msg("Custom OpenAI-Compatible API")],
 ]);
 
 function packageFieldText(text: string, resolve: MessageResolver): string {

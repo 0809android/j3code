@@ -85,6 +85,25 @@ describe("ProviderSettingsForm helpers", () => {
 
     expect(next).toEqual({ experimental: false });
   });
+
+  it("derives the OpenAI-compatible preset field as a select control with built-in presets", () => {
+    const openAiCompatible = providerClients.get(ProviderDriverKind.make("openai-compatible"));
+    expect(openAiCompatible).toBeDefined();
+
+    const fields = deriveProviderSettingsFields(openAiCompatible!);
+    const presetField = fields.find((field) => field.key === "preset");
+    expect(presetField).toBeDefined();
+    expect(presetField?.control).toBe("select");
+    expect(presetField?.options?.map((option) => option.value)).toEqual([
+      "mistral",
+      "opendesign",
+      "openrouter",
+      "deepseek",
+      "ollama",
+      "custom",
+    ]);
+    expect(fields.find((field) => field.key === "apiKey")?.secret).toBe(true);
+  });
 });
 
 describe("reconcileRowsDraft", () => {
