@@ -136,6 +136,8 @@ describe("new thread model fallback", () => {
     ["codex", ["individual"], "gpt-5.5", true, undefined, undefined],
     ["opencode", ["go_weekly"], "opencode/big-pickle", false, undefined, undefined],
     ["opencode", ["go_weekly"], "opencode-go/big-pickle", true, undefined, undefined],
+    ["opencode", ["opendesign_18000"], "open-design/glm-5", true, undefined, ["open-design"]],
+    ["opencode", ["opendesign_18000"], "opencode-go/big-pickle", false, undefined, ["open-design"]],
     ["opencode", ["budget_model"], "opencode/other", false, ["opencode/limited"], undefined],
     ["opencode", ["budget_model"], "opencode/limited", true, ["opencode/limited"], undefined],
     [

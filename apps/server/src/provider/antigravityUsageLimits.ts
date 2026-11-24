@@ -41,13 +41,20 @@ const TokenFile = Schema.Struct({
   project_id: Schema.optional(Schema.String),
 });
 // The 1.5.x CLI never writes acp_token.json: it keeps its sign-in in the OS keyring, or in
-// antigravity-oauth-token without one or when T3 bypasses the keyring. It stores no OAuth client, so T3 cannot refresh it.
+// antigravity-oauth-token without one or when T3 bypasses the keyring. It stores no OAuth client,
+// so T3 can only refresh it when legacy client credentials exist in acp_token.json.
 const CliToken = Schema.Struct({
   token: Schema.Struct({
     access_token: Schema.NonEmptyString,
     refresh_token: Schema.optional(Schema.String),
     expiry: Schema.optional(Schema.String),
   }),
+  id_token_email: Schema.optional(Schema.String),
+  project_id: Schema.optional(Schema.String),
+});
+const LegacyTokenClient = Schema.Struct({
+  client_id: Schema.optional(Schema.String),
+  client_secret: Schema.optional(Schema.String),
 });
 const TokenResponse = Schema.Struct({
   access_token: Schema.NonEmptyString,
@@ -90,6 +97,7 @@ const Models = Schema.Struct({
 
 const decodeTokenFile = Schema.decodeEffect(Schema.fromJsonString(TokenFile));
 const decodeCliToken = Schema.decodeEffect(Schema.fromJsonString(CliToken));
+const decodeLegacyTokenClient = Schema.decodeEffect(Schema.fromJsonString(LegacyTokenClient));
 const decodeTokenResponse = Schema.decodeUnknownEffect(TokenResponse);
 const decodeUserInfo = Schema.decodeUnknownEffect(UserInfo);
 const decodeSummary = Schema.decodeUnknownEffect(Summary);
@@ -347,6 +355,21 @@ export const makeAntigravityUsageProbe = Effect.fn("makeAntigravityUsageProbe")(
       Effect.flatMap((response) => response.json),
       Effect.timeout("10 seconds"),
     );
+  const refreshOAuthToken = (credentials: {
+    readonly clientId: string;
+    readonly clientSecret: string;
+    readonly refreshToken: string;
+  }) =>
+    request(
+      HttpClientRequest.post("https://oauth2.googleapis.com/token").pipe(
+        HttpClientRequest.bodyUrlParams({
+          client_id: credentials.clientId,
+          client_secret: credentials.clientSecret,
+          refresh_token: credentials.refreshToken,
+          grant_type: "refresh_token",
+        }),
+      ),
+    ).pipe(Effect.flatMap(decodeTokenResponse));
   const read = Effect.gen(function* () {
     const startedGeneration = generation;
     const checkedAt = DateTime.formatIso(yield* DateTime.now);
@@ -354,17 +377,83 @@ export const makeAntigravityUsageProbe = Effect.fn("makeAntigravityUsageProbe")(
       return makeUnavailableUsageLimits({ checkedAt, reason: "unsupported" });
     }
     const now = yield* Clock.currentTimeMillis;
+    const [hasCliToken, hasLegacyToken] = yield* Effect.all(
+      [fs.exists(cliTokenPath), fs.exists(tokenPath)],
+      { concurrency: "unbounded" },
+    );
     let accessToken: string;
     let account: string;
     let projectId: string | undefined;
-    if (!(yield* fs.exists(tokenPath))) {
+    if (hasCliToken) {
+      // The `agy` CLI stores and updates credentials in `antigravity-oauth-token`, leaving any
+      // legacy `acp_token.json` behind after re-authentication or account switches.
+      const oauth = yield* fs.readFileString(cliTokenPath).pipe(Effect.flatMap(decodeCliToken));
+      const legacyClient = hasLegacyToken
+        ? yield* fs
+            .readFileString(tokenPath)
+            .pipe(Effect.flatMap(decodeLegacyTokenClient), Effect.option)
+        : Option.none();
+      const refreshToken = oauth.token.refresh_token?.trim() || undefined;
+      const clientId = Option.isSome(legacyClient)
+        ? legacyClient.value.client_id?.trim() || undefined
+        : undefined;
+      const clientSecret = Option.isSome(legacyClient)
+        ? legacyClient.value.client_secret?.trim() || undefined
+        : undefined;
+      projectId = oauth.project_id?.trim() || undefined;
+      const fingerprint = yield* sha256(
+        refreshToken
+          ? `oauth\0${refreshToken}\0${oauth.id_token_email ?? ""}\0${projectId ?? ""}`
+          : `oauth-access\0${oauth.token.access_token}\0${oauth.id_token_email ?? ""}\0${projectId ?? ""}`,
+      );
+      if (cached?.fingerprint !== fingerprint || cached.expiresAt <= now + 60_000) {
+        cached = undefined;
+        const expiryMillis = oauth.token.expiry ? Date.parse(oauth.token.expiry) : Number.NaN;
+        let fresh: { accessToken: string; expiresAt: number } | undefined;
+        if (Number.isFinite(expiryMillis) && expiryMillis > now + 60_000) {
+          fresh = { accessToken: oauth.token.access_token, expiresAt: expiryMillis };
+        } else if (refreshToken && clientId && clientSecret) {
+          const refreshed = yield* refreshOAuthToken({ clientId, clientSecret, refreshToken });
+          fresh = {
+            accessToken: refreshed.access_token,
+            expiresAt: now + refreshed.expires_in * 1000,
+          };
+        } else if (!Number.isFinite(expiryMillis)) {
+          fresh = { accessToken: oauth.token.access_token, expiresAt: now + 5 * 60_000 };
+        }
+        if (!fresh) {
+          return makeUnavailableUsageLimits({
+            checkedAt,
+            reason: "probeFailed",
+            message:
+              "Antigravity's saved sign-in has expired. Start an Antigravity turn to renew it, then refresh limits.",
+          });
+        }
+        accessToken = fresh.accessToken;
+        account = yield* request(
+          HttpClientRequest.get("https://www.googleapis.com/oauth2/v2/userinfo").pipe(
+            HttpClientRequest.setHeaders({ Authorization: `Bearer ${accessToken}` }),
+          ),
+        ).pipe(
+          Effect.flatMap(antigravityAccountFingerprint),
+          Effect.orElseSucceed(() => fingerprint),
+        );
+        if (generation === startedGeneration) {
+          cached = {
+            fingerprint,
+            account,
+            accessToken,
+            expiresAt: fresh.expiresAt,
+          };
+        }
+      } else {
+        accessToken = cached.accessToken;
+        account = cached.account;
+      }
+    } else if (!hasLegacyToken) {
       cached = undefined;
       // Google account instances bypass the keyring, whose one entry every profile shares.
-      const stored = (yield* fs.exists(cliTokenPath))
-        ? yield* fs.readFileString(cliTokenPath)
-        : input.authMethod === "oauth-business"
-          ? yield* readKeyringSecret
-          : undefined;
+      const stored = input.authMethod === "oauth-business" ? yield* readKeyringSecret : undefined;
       if (stored === undefined) {
         return makeUnavailableUsageLimits({
           checkedAt,
@@ -398,16 +487,11 @@ export const makeAntigravityUsageProbe = Effect.fn("makeAntigravityUsageProbe")(
       );
       if (cached?.fingerprint !== fingerprint || cached.expiresAt <= now + 60_000) {
         cached = undefined;
-        const refreshed = yield* request(
-          HttpClientRequest.post("https://oauth2.googleapis.com/token").pipe(
-            HttpClientRequest.bodyUrlParams({
-              client_id: token.client_id,
-              client_secret: token.client_secret,
-              refresh_token: token.refresh_token,
-              grant_type: "refresh_token",
-            }),
-          ),
-        ).pipe(Effect.flatMap(decodeTokenResponse));
+        const refreshed = yield* refreshOAuthToken({
+          clientId: token.client_id,
+          clientSecret: token.client_secret,
+          refreshToken: token.refresh_token,
+        });
         accessToken = refreshed.access_token;
         // Use Google account IDs to merge accounts across environments; refresh tokens differ per machine.
         account = yield* request(

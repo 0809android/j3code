@@ -65,8 +65,10 @@ export function ProviderAuthenticationSection({
   const active =
     auth?.phase === "starting" || auth?.phase === "waiting" || auth?.phase === "verifying";
   const signedIn =
-    provider.auth.status === "authenticated" ||
-    (provider.auth.status === "unknown" && auth?.phase === "succeeded");
+    provider.driver === "opencode"
+      ? provider.auth.type === "opendesign" || auth?.phase === "succeeded"
+      : provider.auth.status === "authenticated" ||
+        (provider.auth.status === "unknown" && auth?.phase === "succeeded");
   const isDiscovering =
     provider.driver === "acpRegistry" &&
     !active &&

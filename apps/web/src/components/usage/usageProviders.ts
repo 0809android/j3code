@@ -32,6 +32,11 @@ export const PROVIDER_PRESENTATION = {
     color: "#5b9bbd",
     driverKind: ProviderDriverKind.make("opencode"),
   },
+  opendesign: {
+    label: "OpenDesign",
+    color: "#2ea08c",
+    driverKind: ProviderDriverKind.make("opencode"),
+  },
   antigravity: {
     label: "Antigravity",
     color: "#8c7bd1",

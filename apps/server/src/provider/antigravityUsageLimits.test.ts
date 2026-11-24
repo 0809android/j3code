@@ -70,6 +70,15 @@ const fixture = Effect.fn("AntigravityUsageTest.fixture")(function* (
     userId?: string;
     userInfoAt?: number;
     missingToken?: boolean;
+    oauthToken?: {
+      access_token: string;
+      refresh_token?: string;
+      expiry?: string;
+      id_token_email?: string;
+      project_id?: string;
+    };
+    expectedAccessToken?: string;
+    expectedProject?: string | null;
     authMethod?: "oauth-personal" | "oauth-business" | "gemini-api-key";
     keyringSecret?: string;
     /** Reads the OS keyring instead of `keyringSecret`. */
@@ -81,6 +90,7 @@ const fixture = Effect.fn("AntigravityUsageTest.fixture")(function* (
   const profileDirectory = yield* fs.makeTempDirectoryScoped();
   yield* fs.makeDirectory(path.join(profileDirectory, "antigravity-acp"));
   const tokenPath = path.join(profileDirectory, "antigravity-acp", "acp_token.json");
+  const oauthTokenPath = path.join(profileDirectory, "antigravity-acp", "antigravity-oauth-token");
   const writeToken = (refreshToken: string) =>
     fs.writeFileString(
       tokenPath,
@@ -91,15 +101,40 @@ const fixture = Effect.fn("AntigravityUsageTest.fixture")(function* (
         project_id: "project-id",
       }),
     );
+  const writeOAuthToken = (oauthToken: NonNullable<typeof options.oauthToken>) =>
+    fs.writeFileString(
+      oauthTokenPath,
+      JSON.stringify({
+        token: {
+          access_token: oauthToken.access_token,
+          ...(oauthToken.refresh_token === undefined
+            ? {}
+            : { refresh_token: oauthToken.refresh_token }),
+          ...(oauthToken.expiry === undefined ? {} : { expiry: oauthToken.expiry }),
+        },
+        ...(oauthToken.id_token_email === undefined
+          ? {}
+          : { id_token_email: oauthToken.id_token_email }),
+        ...(oauthToken.project_id === undefined ? {} : { project_id: oauthToken.project_id }),
+      }),
+    );
   if (!options.missingToken) yield* writeToken(options.refreshToken ?? "refresh-a");
-  const requests: Array<{ url: string; body: string }> = [];
+  if (options.oauthToken) yield* writeOAuthToken(options.oauthToken);
+  const requests: Array<{ url: string; body: string; authorization: string | undefined }> = [];
+  const expectedAccessToken = options.expectedAccessToken ?? "access-token";
+  const expectedProject =
+    options.expectedProject === undefined
+      ? options.missingToken
+        ? null
+        : "project-id"
+      : options.expectedProject;
   const http = HttpClient.make((request, url, _signal, fiber) =>
     Effect.sync(() => {
       const init = Context.getOrUndefined(fiber.context, FetchHttpClient.RequestInit);
       expect(init?.redirect).toBe("manual");
       const body =
         request.body._tag === "Uint8Array" ? new TextDecoder().decode(request.body.body) : "";
-      requests.push({ url: request.url, body });
+      requests.push({ url: request.url, body, authorization: request.headers.authorization });
       if (request.url.endsWith("/token")) {
         expect(new URLSearchParams(body).get("grant_type")).toBe("refresh_token");
         return HttpClientResponse.fromWeb(
@@ -110,7 +145,7 @@ const fixture = Effect.fn("AntigravityUsageTest.fixture")(function* (
           ),
         );
       }
-      expect(request.headers.authorization).toBe("Bearer access-token");
+      expect(request.headers.authorization).toBe(`Bearer ${expectedAccessToken}`);
       if (request.url.endsWith("/userinfo")) {
         return HttpClientResponse.fromWeb(
           request,
@@ -119,7 +154,9 @@ const fixture = Effect.fn("AntigravityUsageTest.fixture")(function* (
             : Response.json({}, { status: 403 }),
         );
       }
-      expect(JSON.parse(body)).toEqual(options.missingToken ? {} : { project: "project-id" });
+      expect(JSON.parse(body)).toEqual(
+        expectedProject === null ? {} : { project: expectedProject },
+      );
       expect(request.headers["user-agent"]).toMatch(/^antigravity\/hub\/2\.24\.0 /);
       return HttpClientResponse.fromWeb(
         request,
@@ -142,7 +179,7 @@ const fixture = Effect.fn("AntigravityUsageTest.fixture")(function* (
     authMethod: options.authMethod ?? "oauth-personal",
     ...(options.nativeKeyring ? {} : { readKeyringSecret: Effect.succeed(options.keyringSecret) }),
   }).pipe(Effect.provideService(HttpClient.HttpClient, http));
-  return { ...usage, requests, writeToken, tokenPath };
+  return { ...usage, requests, writeToken, writeOAuthToken, tokenPath, oauthTokenPath };
 });
 
 describe("Antigravity subscription limits", () => {
@@ -782,5 +819,106 @@ describe("Antigravity subscription limits", () => {
         expect(requests).toEqual([]);
       }
     }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
+  );
+
+  it.effect("prefers antigravity-oauth-token over stale acp_token.json", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(DateTime.toEpochMillis(DateTime.makeUnsafe("2026-11-23T12:00:00Z")));
+      const { probe, requests, writeOAuthToken } = yield* fixture({
+        refreshToken: "legacy-refresh-other-account",
+        oauthToken: {
+          access_token: "oauth-access-token",
+          refresh_token: "oauth-refresh-current",
+          expiry: "2026-11-23T12:59:00Z",
+          id_token_email: "current@example.com",
+        },
+        expectedAccessToken: "oauth-access-token",
+        expectedProject: null,
+      });
+      const first = yield* probe;
+      expect(first.unavailable).toBeUndefined();
+      expect(first.windows).toHaveLength(4);
+      expect(requests.filter((request) => request.url.endsWith("/token"))).toHaveLength(0);
+      expect(requests.filter((request) => request.url.endsWith("/userinfo"))).toHaveLength(1);
+
+      yield* writeOAuthToken({
+        access_token: "oauth-access-token",
+        refresh_token: "oauth-refresh-switched",
+        expiry: "2026-11-23T12:59:00Z",
+        id_token_email: "switched@example.com",
+      });
+      const second = yield* probe;
+      expect(second.credentialFingerprint).not.toBe(first.credentialFingerprint);
+      expect(requests.filter((request) => request.url.endsWith("/userinfo"))).toHaveLength(2);
+    }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
+  );
+
+  it.effect("reads antigravity-oauth-token without legacy acp_token.json", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(DateTime.toEpochMillis(DateTime.makeUnsafe("2026-11-23T12:00:00Z")));
+      const { probe, requests } = yield* fixture({
+        missingToken: true,
+        oauthToken: {
+          access_token: "oauth-only-access",
+          refresh_token: "oauth-only-refresh",
+          expiry: "2026-11-23T12:30:00Z",
+        },
+        expectedAccessToken: "oauth-only-access",
+        expectedProject: null,
+      });
+      const limits = yield* probe;
+      expect(limits.unavailable).toBeUndefined();
+      expect(limits.windows).toHaveLength(4);
+      expect(requests.filter((request) => request.url.endsWith("/token"))).toHaveLength(0);
+    }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
+  );
+
+  it.effect(
+    "refreshes expired antigravity-oauth-token using oauth refresh_token when legacy client credentials exist",
+    () =>
+      Effect.gen(function* () {
+        yield* TestClock.setTime(
+          DateTime.toEpochMillis(DateTime.makeUnsafe("2026-11-23T12:00:00Z")),
+        );
+        const { probe, requests } = yield* fixture({
+          refreshToken: "legacy-refresh-stale",
+          oauthToken: {
+            access_token: "expired-oauth-access",
+            refresh_token: "oauth-refresh-new",
+            expiry: "2026-11-23T11:59:00Z",
+          },
+          expectedAccessToken: "access-token",
+          expectedProject: null,
+        });
+        const limits = yield* probe;
+        expect(limits.unavailable).toBeUndefined();
+        const tokenRequests = requests.filter((request) => request.url.endsWith("/token"));
+        expect(tokenRequests).toHaveLength(1);
+        expect(new URLSearchParams(tokenRequests[0]!.body).get("refresh_token")).toBe(
+          "oauth-refresh-new",
+        );
+      }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
+  );
+
+  it.effect(
+    "fails safely without network calls when antigravity-oauth-token is expired and no client credentials exist",
+    () =>
+      Effect.gen(function* () {
+        yield* TestClock.setTime(
+          DateTime.toEpochMillis(DateTime.makeUnsafe("2026-11-23T12:00:00Z")),
+        );
+        const { probe, requests } = yield* fixture({
+          missingToken: true,
+          oauthToken: {
+            access_token: "expired-oauth-access",
+            refresh_token: "oauth-refresh-only",
+            expiry: "2026-11-23T11:59:00Z",
+          },
+          expectedProject: null,
+        });
+        const limits = yield* probe;
+        expect(limits.unavailable?.reason).toBe("probeFailed");
+        expect(requests).toEqual([]);
+      }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
   );
 });

@@ -69,9 +69,10 @@ function parseOpenCodeMessage(
   const id = fallback.id || text(message.id);
   const cost = message.cost;
   const prefix = LITELLM_PREFIXES.get(providerId);
+  const provider = providerId === "open-design" ? "opendesign" : "opencode";
   const free = OPENCODE_GATEWAYS.has(providerId) && model.endsWith("-free");
   return {
-    provider: "opencode",
+    provider,
     timestampMs,
     model,
     ...(prefix !== undefined && !model.includes("/") ? { rateModel: `${prefix}/${model}` } : {}),

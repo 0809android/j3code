@@ -34,6 +34,11 @@ import type { ProviderTextGeneration } from "@t3tools/provider-core/server/textG
 import { ProviderDriverError } from "@t3tools/provider-core/server/errors";
 import { openCodeUsageReader, type OpenCodeUsageReaderEnv } from "./usage.ts";
 import { readOpenCodeGoUsageLimits } from "./usageLimits.ts";
+import {
+  makeOpenDesignAuth,
+  makeOpenDesignCredentialStore,
+  readOpenDesignUsageLimits,
+} from "./openDesign.ts";
 import { loadOpenCode2Catalog, loadOpenCode2DirectoryCatalog } from "./openCode2Catalog.ts";
 import {
   checkOpenCodeProviderStatus,
@@ -49,6 +54,7 @@ import {
   readSettledOpenCode2Catalog,
 } from "./status.ts";
 import { makeManagedServerProvider } from "@t3tools/provider-core/server/managedProvider";
+import type { ManagedServerProvider } from "@t3tools/provider-core/server/snapshot";
 import * as OpenCodeRuntime from "./OpenCodeRuntime.ts";
 import {
   makeOpenCodeRuntimeProbe,
@@ -466,6 +472,19 @@ export const OpenCodeDriver: ProviderDriver<
       ),
     );
 
+    let snapshot: ManagedServerProvider | undefined;
+    const openDesignStore = yield* makeOpenDesignCredentialStore(instanceId);
+    const openDesignAuth = yield* makeOpenDesignAuth({
+      instanceId,
+      enabled: effectiveConfig.enabled,
+      environment: processEnv,
+      store: openDesignStore,
+      onChanged: () => (snapshot ? snapshot.refresh.pipe(Effect.asVoid) : Effect.void),
+    });
+    const baseSetup = {
+      canAuthenticate: !openDesignAuth.usesControlKeyEnv,
+      canInstall: false,
+    } as const;
     const legacyUsageLimits = readOpenCodeGoUsageLimits({
       enabled: effectiveConfig.enabled,
       serverUrl: effectiveConfig.serverUrl,
@@ -477,7 +496,7 @@ export const OpenCodeDriver: ProviderDriver<
       Effect.provideService(Digest.Digest, digest),
     );
     let unsupportedUsageVersion: string | undefined;
-    const checkUsageLimits = Effect.gen(function* () {
+    const checkOpenCodeBaseUsageLimits = Effect.gen(function* () {
       if (!effectiveConfig.enabled) return yield* legacyUsageLimits;
       const runtime = yield* runtimeProbe.get;
       if (runtime.generation === "v1" || runtime.version === unsupportedUsageVersion)
@@ -503,42 +522,92 @@ export const OpenCodeDriver: ProviderDriver<
         })),
       ),
     );
-    const checkProvider = Effect.all(
-      {
-        // A configured loopback server reports its running version. Probe the local
-        // CLI separately so a completed npm update is not mistaken for a failure
-        // while that independently managed server still runs the previous binary.
-        installedVersion:
-          effectiveConfig.enabled && isLocalOpenCodeServerUrl(effectiveConfig.serverUrl)
-            ? probeOpenCodeBinary(
-                effectiveConfig.binaryPath,
-                providerProbeEnvironment(processEnv),
-              ).pipe(
-                Effect.map((probed) => probed.version),
-                Effect.orElseSucceed(() => undefined),
-              )
-            : Effect.void,
-        provider: checkOpenCodeProviderStatus(
-          effectiveConfig,
-          host.paths.cwd,
-          runtimeProbe.refresh,
-          loadOpenCode2Models,
-          processEnv,
-          host.compatibility,
-        ).pipe(
-          Effect.annotateLogs({ providerInstanceId: instanceId }),
-          Effect.annotateSpans({ providerInstanceId: instanceId }),
-        ),
-        usageLimits: checkUsageLimits,
-      },
-      { concurrency: "unbounded" },
-    ).pipe(
-      Effect.map(({ provider, usageLimits, installedVersion }) => ({
+    const readConfiguredOpenDesignUsage = (controlKey: string) =>
+      readOpenDesignUsageLimits({
+        controlKey,
+        environment: processEnv,
+      }).pipe(
+        Effect.provideService(HttpClient.HttpClient, httpClient),
+        Effect.provideService(Digest.Digest, digest),
+      );
+    const checkUsageLimits = Effect.gen(function* () {
+      if (!effectiveConfig.enabled) return yield* legacyUsageLimits;
+      const openDesign = yield* openDesignAuth.resolveControlKey;
+      if (openDesign.controlKey) {
+        return (yield* readConfiguredOpenDesignUsage(openDesign.controlKey)).limits;
+      }
+      return yield* checkOpenCodeBaseUsageLimits;
+    });
+    const checkProvider = Effect.gen(function* () {
+      const openDesign = yield* openDesignAuth.resolveControlKey;
+      const { installedVersion, provider, limitsResult } = yield* Effect.all(
+        {
+          // A configured loopback server reports its running version. Probe the local
+          // CLI separately so a completed npm update is not mistaken for a failure
+          // while that independently managed server still runs the previous binary.
+          installedVersion:
+            effectiveConfig.enabled && isLocalOpenCodeServerUrl(effectiveConfig.serverUrl)
+              ? probeOpenCodeBinary(
+                  effectiveConfig.binaryPath,
+                  providerProbeEnvironment(processEnv),
+                ).pipe(
+                  Effect.map((probed) => probed.version),
+                  Effect.orElseSucceed(() => undefined),
+                )
+              : Effect.void,
+          provider: checkOpenCodeProviderStatus(
+            effectiveConfig,
+            host.paths.cwd,
+            runtimeProbe.refresh,
+            loadOpenCode2Models,
+            processEnv,
+            host.compatibility,
+          ).pipe(
+            Effect.annotateLogs({ providerInstanceId: instanceId }),
+            Effect.annotateSpans({ providerInstanceId: instanceId }),
+          ),
+          limitsResult:
+            effectiveConfig.enabled && openDesign.controlKey
+              ? readConfiguredOpenDesignUsage(openDesign.controlKey).pipe(
+                  Effect.map((result) => ({ kind: "opendesign" as const, result })),
+                )
+              : checkOpenCodeBaseUsageLimits.pipe(
+                  Effect.map((limits) => ({ kind: "opencode" as const, limits })),
+                ),
+        },
+        { concurrency: "unbounded" },
+      );
+
+      if (limitsResult.kind === "opendesign") {
+        return stampIdentity({
+          ...provider,
+          setup: baseSetup,
+          auth: {
+            ...provider.auth,
+            type: "opendesign",
+            label: limitsResult.result.planLabel,
+            ...(openDesign.email ? { email: openDesign.email } : {}),
+            ...(limitsResult.result.workspaceId
+              ? { workspaceId: limitsResult.result.workspaceId }
+              : {}),
+            canLogout: !openDesignAuth.usesControlKeyEnv,
+          },
+          usageLimits: limitsResult.result.limits,
+          ...(installedVersion === undefined ? {} : { installedVersion }),
+        });
+      }
+
+      return stampIdentity({
         ...provider,
-        usageLimits,
+        setup: baseSetup,
+        auth: {
+          ...provider.auth,
+          canLogout: false,
+        },
+        usageLimits: limitsResult.limits,
         ...(installedVersion === undefined ? {} : { installedVersion }),
-      })),
-      Effect.map(stampIdentity),
+      });
+    }).pipe(
       Effect.provideService(OpenCodeServerOwner.OpenCodeServerOwner, serverOwner),
       Effect.provideService(OpenCodeRuntime.OpenCodeRuntime, openCodeRuntime),
     );
@@ -644,7 +713,7 @@ export const OpenCodeDriver: ProviderDriver<
         : Effect.void;
 
     const snapshotSettings = yield* makeProviderSnapshotSettingsSource(effectiveConfig);
-    const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<OpenCodeSettings>>({
+    snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<OpenCodeSettings>>({
       resolveMaintenance,
       getSettings: snapshotSettings.getSettings,
       streamSettings: snapshotSettings.streamSettings,
@@ -658,7 +727,14 @@ export const OpenCodeDriver: ProviderDriver<
         snapshot.status !== "ready" &&
         snapshot.auth.status === "unknown",
       initialSnapshot: (settings) =>
-        makePendingOpenCodeProvider(settings.provider).pipe(Effect.map(stampIdentity)),
+        makePendingOpenCodeProvider(settings.provider).pipe(
+          Effect.map((draft) =>
+            stampIdentity({
+              ...draft,
+              setup: baseSetup,
+            }),
+          ),
+        ),
       checkProvider,
       checkUsageLimits,
       enrichSnapshot: ({ settings, snapshot, publishSnapshot }) =>
@@ -786,6 +862,7 @@ export const OpenCodeDriver: ProviderDriver<
             ),
       invalidateCaches: openCode2Server.forget,
       afterUpdate,
+      auth: openDesignAuth.controller,
       orchestrationAdapter,
       textGeneration,
     } satisfies ProviderInstance;

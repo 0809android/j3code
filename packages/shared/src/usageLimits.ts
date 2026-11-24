@@ -69,7 +69,9 @@ export function exhaustedUsageWindow(
     }
     case "opencode":
       return exhausted.find(
-        (window) => !window.id.startsWith("go_") || model.startsWith("opencode-go/"),
+        (window) =>
+          (!window.id.startsWith("go_") || model.startsWith("opencode-go/")) &&
+          (!window.id.startsWith("opendesign_") || model.startsWith("open-design/")),
       );
     default:
       return exhausted[0];

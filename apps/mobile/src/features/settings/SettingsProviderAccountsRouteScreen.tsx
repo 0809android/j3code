@@ -179,8 +179,10 @@ function ProviderAccount({
   const active =
     state?.phase === "starting" || state?.phase === "waiting" || state?.phase === "verifying";
   const signedIn =
-    provider.auth.status === "authenticated" ||
-    (provider.auth.status === "unknown" && state?.phase === "succeeded");
+    provider.driver === "opencode"
+      ? provider.auth.type === "opendesign" || state?.phase === "succeeded"
+      : provider.auth.status === "authenticated" ||
+        (provider.auth.status === "unknown" && state?.phase === "succeeded");
   const isDiscovering =
     provider.driver === "acpRegistry" &&
     !active &&

@@ -644,20 +644,46 @@ describe("readOpenCodeUsage", () => {
         path.join(legacy, "msg-free.json"),
         JSON.stringify({ ...base, providerID: "opencode", modelID: "deepseek-v4.1-flash-free" }),
       );
+      yield* fileSystem.writeFileString(
+        path.join(legacy, "msg-opendesign.json"),
+        JSON.stringify({ ...base, providerID: "open-design", modelID: "glm-5" }),
+      );
       const result = yield* readOpenCodeUsage(dir, 0);
       assert.deepStrictEqual(
         result.files
           .flatMap((file) => file.records)
-          .map(({ model, rateModel, reportedCostUsd }) => ({ model, rateModel, reportedCostUsd }))
-          .sort((a, b) => a.model.localeCompare(b.model)),
+          .map(({ provider, model, rateModel, reportedCostUsd }) => ({
+            provider,
+            model,
+            rateModel,
+            reportedCostUsd,
+          }))
+          .sort((a, b) => `${a.provider}:${a.model}`.localeCompare(`${b.provider}:${b.model}`)),
         [
           {
+            provider: "opencode",
             model: "deepseek-v4.1-flash",
             rateModel: "opencode_go/deepseek-v4.1-flash",
             reportedCostUsd: null,
           },
-          { model: "deepseek-v4.1-flash-free", rateModel: undefined, reportedCostUsd: 0 },
-          { model: "glm-5.3", rateModel: "opencode_go/glm-5.3", reportedCostUsd: null },
+          {
+            provider: "opencode",
+            model: "deepseek-v4.1-flash-free",
+            rateModel: undefined,
+            reportedCostUsd: 0,
+          },
+          {
+            provider: "opencode",
+            model: "glm-5.3",
+            rateModel: "opencode_go/glm-5.3",
+            reportedCostUsd: null,
+          },
+          {
+            provider: "opendesign",
+            model: "glm-5",
+            rateModel: undefined,
+            reportedCostUsd: null,
+          },
         ],
       );
     }).pipe(Effect.provide(NodeServices.layer)),

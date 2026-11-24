@@ -33,6 +33,7 @@ export function providerAuthLabel(
   resolve: MessageResolver = m,
 ): string | undefined {
   if (auth.type === "customEndpoint") return resolve(msg("Custom API endpoint"));
+  if (auth.type === "opendesign") return auth.label ?? "OpenDesign";
   return auth.label ?? auth.type;
 }
 

@@ -32,6 +32,7 @@ import * as UrlParams from "effect/http/UrlParams";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
 import * as ProviderLatestVersions from "@t3tools/provider-core/server/ProviderLatestVersions";
+import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
@@ -1226,6 +1227,124 @@ it.layer(layer)("OpenCodeDriver runtime selection", (it) => {
       );
       assert.strictEqual(goUsageReads, 1);
     }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
+  );
+
+  it.effect(
+    "reads OpenDesign limits and sets OpenDesign auth metadata without calling Go or Console usage",
+    () =>
+      Effect.gen(function* () {
+        let goOrConsoleUsageReads = 0;
+        const preflightStarted = yield* Deferred.make<void>();
+        const instanceId = ProviderInstanceId.make("opencode-open-design-instance");
+        const host = yield* ProviderHost.ProviderHost;
+        const credentials = yield* host.credentials("opencode-opendesign", instanceId);
+        yield* credentials.set(
+          new TextEncoder().encode(
+            JSON.stringify({
+              version: 1,
+              controlKey: "vela_ctrl_stored",
+              runtimeKey: "sk-amr-stored",
+              email: "opendesign@example.com",
+            }),
+          ),
+        );
+        const server = HttpClient.make((request) => {
+          if (request.url === "https://amr-api.open-design.ai/api/v1/workspaces/current") {
+            return Effect.succeed(
+              HttpClientResponse.fromWeb(request, Response.json({ workspaceId: "ws_od_1" })),
+            );
+          }
+          if (
+            request.url ===
+            "https://amr-api.open-design.ai/api/v1/workspaces/ws_od_1/billing/preflight"
+          ) {
+            const response = HttpClientResponse.fromWeb(
+              request,
+              Response.json({
+                workspaceId: "ws_od_1",
+                balanceUsd: "15.00",
+                codingPlan: {
+                  eligible: true,
+                  tier: "pro",
+                  windows: [
+                    {
+                      durationSeconds: 18_000,
+                      usedCredits: "40",
+                      limitCredits: "100",
+                      resetsAt: "2026-11-23T15:00:00Z",
+                    },
+                  ],
+                },
+              }),
+            );
+            return Deferred.succeed(preflightStarted, undefined).pipe(Effect.as(response));
+          }
+          if (request.url === "https://opencode.ai/zen/go/v1/usage") {
+            goOrConsoleUsageReads += 1;
+          }
+          const path = new URL(request.url).pathname;
+          if (path === "/api/experimental/usage/limits") {
+            goOrConsoleUsageReads += 1;
+          }
+          const body =
+            path === "/api/info"
+              ? JSON.parse(OPENCODE_2_RESPONSES["/api/info"].body)
+              : { location: { directory: "/work" }, data: [] };
+          return Effect.succeed(HttpClientResponse.fromWeb(request, Response.json(body)));
+        });
+        const runtime = {
+          ...openCode2Runtime,
+          startOpenCodeServerProcess: ({
+            verify,
+          }: Parameters<
+            OpenCodeRuntime.OpenCodeRuntime["Service"]["startOpenCodeServerProcess"]
+          >[0]) =>
+            Effect.gen(function* () {
+              const url = "http://127.0.0.1:4096";
+              const version = verify ? yield* verify(url) : "2.0.18";
+              return { url, version, isRunning: Effect.succeed(true), exitCode: Effect.never };
+            }),
+        };
+        const instance = yield* OpenCodeDriver.create({
+          instanceId,
+          displayName: "Open Design",
+          environment: [
+            {
+              name: "OPENCODE_AUTH_CONTENT",
+              sensitive: true,
+              value: JSON.stringify({ "opencode-go": { type: "api", key: "ignored-go-key" } }),
+            },
+          ],
+          enabled: true,
+          config: OpenCodeDriver.defaultConfig(),
+        }).pipe(
+          Effect.provideService(HttpClient.HttpClient, server),
+          Effect.provideService(OpenCodeRuntime.OpenCodeRuntime, runtime),
+        );
+        const initial = yield* instance.snapshot.streamChanges.pipe(
+          Stream.filter((entry) => entry.usageLimits !== undefined),
+          Stream.take(1),
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+        yield* Deferred.await(preflightStarted);
+        yield* TestClock.adjust("5 seconds");
+        const [snapshot] = Array.from(yield* Fiber.join(initial));
+        assert.strictEqual(snapshot?.setup?.canAuthenticate, true);
+        assert.strictEqual(snapshot?.auth.type, "opendesign");
+        assert.strictEqual(snapshot?.auth.email, "opendesign@example.com");
+        assert.strictEqual(snapshot?.auth.workspaceId, "ws_od_1");
+        assert.strictEqual(snapshot?.auth.label, "OpenDesign · Pro · $15.00");
+        assert.strictEqual(snapshot?.auth.canLogout, true);
+        assert.deepStrictEqual(
+          snapshot?.usageLimits?.windows.map((window) => window.id),
+          ["opendesign_18000"],
+        );
+        assert.strictEqual(goOrConsoleUsageReads, 0);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(Layer.mergeAll(TestProviderHost.layer(), TestClock.layer())),
+      ),
   );
 });
 

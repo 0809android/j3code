@@ -400,14 +400,38 @@ export function UsageLimitsSection({
 }) {
   const presentations = useAtomValue(environmentPresentations.presentationsWithProvidersAtom);
   const hiddenDrivers = new Set<ServerProvider["driver"]>(
-    [...hiddenProviders].map((provider) => PROVIDER_PRESENTATION[provider].driverKind),
+    [...hiddenProviders]
+      .filter((provider) => provider !== "opencode" && provider !== "opendesign")
+      .map((provider) => PROVIDER_PRESENTATION[provider].driverKind),
   );
-  const isVisible = (driver: ServerProvider["driver"]) => !hiddenDrivers.has(driver);
+  const isProviderVisible = (provider: Pick<ServerProvider, "driver" | "auth">) => {
+    if (provider.driver === "opencode") {
+      const kind: UsageProviderKind =
+        provider.auth.type === "opendesign" ? "opendesign" : "opencode";
+      return !hiddenProviders.has(kind);
+    }
+    return !hiddenDrivers.has(provider.driver);
+  };
+  const isAccountVisible = (account: {
+    readonly driver: ServerProvider["driver"];
+    readonly usageLimits: ServerProvider["usageLimits"];
+  }) => {
+    if (account.driver === "opencode") {
+      const isOpenDesign =
+        account.usageLimits?.externalUsage?.url === "https://open-design.ai/cloud" ||
+        account.usageLimits?.windows.some(
+          (window) =>
+            window.id.startsWith("opendesign_") || window.providerIds?.includes("open-design"),
+        ) === true;
+      return !hiddenProviders.has(isOpenDesign ? "opendesign" : "opencode");
+    }
+    return !hiddenDrivers.has(account.driver);
+  };
   const selected = new Map(
     [...presentations].flatMap(([id, presentation]) => {
       if (selectedEnvironmentIds !== null && !selectedEnvironmentIds.has(id)) return [];
       const config = presentation.serverConfig;
-      if (hiddenDrivers.size === 0 || config === null) return [[id, presentation] as const];
+      if (hiddenProviders.size === 0 || config === null) return [[id, presentation] as const];
       return [
         [
           id,
@@ -415,9 +439,9 @@ export function UsageLimitsSection({
             ...presentation,
             serverConfig: {
               ...config,
-              providers: config.providers.filter((provider) => isVisible(provider.driver)),
+              providers: config.providers.filter((provider) => isProviderVisible(provider)),
               usageLimitSources: config.usageLimitSources?.flatMap((source) => {
-                const accounts = source.accounts.filter((account) => isVisible(account.driver));
+                const accounts = source.accounts.filter((account) => isAccountVisible(account));
                 return accounts.length === 0 && source.accounts.length > 0
                   ? []
                   : [{ ...source, accounts }];
