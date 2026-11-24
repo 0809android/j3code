@@ -140,6 +140,9 @@ function getAppStateFromPath(path: string, options: Parameters<typeof getStateFr
 const appLinking = {
   prefixes: [
     Linking.createURL("/"),
+    "j3code://",
+    "j3code-dev://",
+    "j3code-preview://",
     "t3code://",
     "t3code-dev://",
     "t3code-preview://",

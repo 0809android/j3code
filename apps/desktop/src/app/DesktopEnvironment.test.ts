@@ -68,8 +68,23 @@ describe("DesktopEnvironment", () => {
       );
       const production = yield* makeEnvironment();
 
-      assert.equal(development.stateDir, "/Users/alice/.t3/dev");
-      assert.equal(production.stateDir, "/Users/alice/.t3/userdata");
+      assert.equal(development.stateDir, "/Users/alice/.j3/dev");
+      assert.equal(production.stateDir, "/Users/alice/.j3/userdata");
+      assert.equal(production.branding.baseName, "J3 Code");
+      assert.equal(production.appUserModelId, "com.j3tools.j3code");
+      assert.equal(development.appUserModelId, "com.j3tools.j3code.dev");
+    }),
+  );
+
+  it.effect("prefers J3CODE_HOME over T3CODE_HOME when resolving state directories", () =>
+    Effect.gen(function* () {
+      const environment = yield* makeEnvironment(
+        {},
+        { J3CODE_HOME: "/custom/j3-home", T3CODE_HOME: "/custom/t3-home" },
+      );
+
+      assert.equal(environment.baseDir, "/custom/j3-home");
+      assert.equal(environment.stateDir, "/custom/j3-home/userdata");
     }),
   );
 });

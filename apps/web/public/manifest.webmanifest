@@ -1,10 +1,13 @@
 {
   "id": "/",
-  "name": "T3 Code",
-  "short_name": "T3 Code",
+  "name": "J3 Code",
+  "short_name": "J3 Code",
+  "description": "Multilingual AI coding agent workspace with automatic provider fallback",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
+  "orientation": "any",
+  "categories": ["developer", "productivity"],
   "background_color": "#161616",
   "theme_color": "#161616",
   "icons": [
