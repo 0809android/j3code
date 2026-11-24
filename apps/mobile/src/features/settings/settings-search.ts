@@ -112,6 +112,8 @@ const SETTINGS_SEARCH_TERMS = {
     msg("snooze", { $context: "settings search keyword" }),
     msg("usage limits", { $context: "settings search keyword" }),
     msg("auto-resume", { $context: "settings search keyword" }),
+    msg("provider fallback", { $context: "settings search keyword" }),
+    msg("secondary provider", { $context: "settings search keyword" }),
     msg("thread behavior", { $context: "settings search keyword" }),
   ],
   SettingsFollowUp: [
@@ -132,6 +134,8 @@ const SETTINGS_SEARCH_TERMS = {
     "claude",
     "cursor",
     "opencode",
+    "mistral",
+    "opendesign",
     msg("sign in", { $context: "settings search keyword" }),
     msg("login", { $context: "settings search keyword" }),
     msg("auth", { $context: "settings search keyword" }),

@@ -495,6 +495,30 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: [msg("usage quota rate limit reset recover continue")],
   },
   {
+    id: "provider-fallback-on-error",
+    title: msg("Auto-fallback on provider error"),
+    to: "/settings/threads",
+    searchTerms: [msg("fallback secondary provider error retry failover switch")],
+  },
+  {
+    id: "provider-fallback-chain",
+    title: msg("Secondary provider chain"),
+    to: "/settings/threads",
+    searchTerms: [msg("fallback secondary backup model provider priority order")],
+  },
+  {
+    id: "provider-fallback-error-classes",
+    title: msg("Fallback error triggers"),
+    to: "/settings/threads",
+    searchTerms: [msg("fallback usage limit provider transport error class")],
+  },
+  {
+    id: "provider-fallback-max-attempts",
+    title: msg("Max consecutive fallbacks"),
+    to: "/settings/threads",
+    searchTerms: [msg("fallback limit attempts retries loop guard")],
+  },
+  {
     id: "working-shelf",
     title: msg("Working section"),
     to: "/settings/general",

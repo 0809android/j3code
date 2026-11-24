@@ -100,6 +100,33 @@ const DEFAULT_SIDEBAR_AUTO_SETTLE_AFTER_DAYS: SidebarAutoSettleAfterDays = 7;
 
 export const MAX_SNOOZE_PRESET_MINUTES = 30 * 24 * 60;
 export const MAX_SNOOZE_PRESETS = 8;
+
+export const ProviderFallbackErrorClass = Schema.Literals([
+  "usage_limit",
+  "provider_error",
+  "transport_error",
+  "unknown",
+]);
+export type ProviderFallbackErrorClass = typeof ProviderFallbackErrorClass.Type;
+export const DEFAULT_PROVIDER_FALLBACK_ERROR_CLASSES: ReadonlyArray<ProviderFallbackErrorClass> = [
+  "usage_limit",
+  "provider_error",
+  "transport_error",
+  "unknown",
+];
+export const MAX_PROVIDER_FALLBACK_CHAIN = 5;
+export const MIN_PROVIDER_FALLBACK_ATTEMPTS = 1;
+export const MAX_PROVIDER_FALLBACK_ATTEMPTS = 5;
+export const DEFAULT_PROVIDER_FALLBACK_ATTEMPTS = 2;
+export const ProviderFallbackChain = Schema.Array(ModelSelection).check(
+  Schema.isMaxLength(MAX_PROVIDER_FALLBACK_CHAIN),
+);
+export const ProviderFallbackMaxAttempts = Schema.Int.check(
+  Schema.isBetween({
+    minimum: MIN_PROVIDER_FALLBACK_ATTEMPTS,
+    maximum: MAX_PROVIDER_FALLBACK_ATTEMPTS,
+  }),
+);
 export const SnoozePresetDay = Schema.Literals([
   "today",
   "tomorrow",
@@ -1479,6 +1506,14 @@ export const ServerSettings = Schema.Struct({
   idleCompaction: Schema.optionalKey(IdleCompactionMode),
   snoozeLimitedThreads: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   autoResumeLimitedThreads: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  providerFallbackOnError: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  providerFallbackChain: ProviderFallbackChain.pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  providerFallbackErrorClasses: Schema.Array(ProviderFallbackErrorClass).pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_FALLBACK_ERROR_CLASSES)),
+  ),
+  providerFallbackMaxAttempts: ProviderFallbackMaxAttempts.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_FALLBACK_ATTEMPTS)),
+  ),
   snoozePresets: SnoozePresetSettings.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SNOOZE_PRESETS)),
   ),
@@ -1639,9 +1674,17 @@ export const providerInstanceConfigEnabledFlag = (config: unknown): boolean | un
 
 // Must match each driver's enabled decoding default.
 const DEFAULT_DISABLED_PROVIDER_DRIVERS: ReadonlySet<ProviderDriverKind> = new Set(
-  ["cursor", "grok", "fx", "kiro", "muse", "pi", "opencode", "antigravity"].map((driver) =>
-    ProviderDriverKind.make(driver),
-  ),
+  [
+    "cursor",
+    "grok",
+    "fx",
+    "kiro",
+    "muse",
+    "pi",
+    "opencode",
+    "antigravity",
+    "openai-compatible",
+  ].map((driver) => ProviderDriverKind.make(driver)),
 );
 
 const DEFAULT_ENABLED_DEFAULT_INSTANCES: ReadonlySet<ProviderInstanceId> = new Set(
@@ -1935,6 +1978,10 @@ export const ServerSettingsPatch = Schema.Struct({
   sidebarAutoSettleOnMerge: Schema.optionalKey(Schema.Boolean),
   autoResumeLimitedThreads: Schema.optionalKey(Schema.Boolean),
   snoozeLimitedThreads: Schema.optionalKey(Schema.Boolean),
+  providerFallbackOnError: Schema.optionalKey(Schema.Boolean),
+  providerFallbackChain: Schema.optionalKey(ProviderFallbackChain),
+  providerFallbackErrorClasses: Schema.optionalKey(Schema.Array(ProviderFallbackErrorClass)),
+  providerFallbackMaxAttempts: Schema.optionalKey(ProviderFallbackMaxAttempts),
   snoozePresets: Schema.optionalKey(SnoozePresetSettings),
   hiddenThreadTags: Schema.optionalKey(Schema.Array(Schema.String)),
   hideTaggedThreads: Schema.optionalKey(Schema.Boolean),

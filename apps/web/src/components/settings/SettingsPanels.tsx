@@ -40,6 +40,7 @@ import { APP_VERSION, HOSTED_APP_CHANNEL, HOSTED_APP_CHANNEL_LABEL } from "../..
 import { AboutVersionTitle } from "./AboutVersionTitle";
 import { CliCommandSettingsRow } from "./CliCommandSettingsRow";
 import { MobileAppSettingsRow } from "./MobileAppSettingsRow";
+import { ProviderFallbackSettings } from "./ProviderFallbackSettings";
 import {
   canCheckForUpdate,
   getDesktopUpdateActionError,
@@ -560,6 +561,25 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(settings.snoozeLimitedThreads !== DEFAULT_UNIFIED_SETTINGS.snoozeLimitedThreads
       ? [gt("Snooze until limits reset")]
       : []),
+    ...(settings.providerFallbackOnError !== DEFAULT_UNIFIED_SETTINGS.providerFallbackOnError
+      ? [gt("Auto-fallback on provider error")]
+      : []),
+    ...(!Equal.equals(
+      settings.providerFallbackChain,
+      DEFAULT_UNIFIED_SETTINGS.providerFallbackChain,
+    )
+      ? [gt("Secondary provider chain")]
+      : []),
+    ...(!Equal.equals(
+      settings.providerFallbackErrorClasses,
+      DEFAULT_UNIFIED_SETTINGS.providerFallbackErrorClasses,
+    )
+      ? [gt("Fallback error triggers")]
+      : []),
+    ...(settings.providerFallbackMaxAttempts !==
+    DEFAULT_UNIFIED_SETTINGS.providerFallbackMaxAttempts
+      ? [gt("Max consecutive fallbacks")]
+      : []),
     ...(!Equal.equals(settings.snoozePresets, DEFAULT_UNIFIED_SETTINGS.snoozePresets)
       ? [gt("Snooze options")]
       : []),
@@ -740,6 +760,10 @@ export function useSettingsRestore(onRestored?: () => void) {
       sidebarAutoSettleOnMerge: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge,
       autoResumeLimitedThreads: DEFAULT_UNIFIED_SETTINGS.autoResumeLimitedThreads,
       snoozeLimitedThreads: DEFAULT_UNIFIED_SETTINGS.snoozeLimitedThreads,
+      providerFallbackOnError: DEFAULT_UNIFIED_SETTINGS.providerFallbackOnError,
+      providerFallbackChain: DEFAULT_UNIFIED_SETTINGS.providerFallbackChain,
+      providerFallbackErrorClasses: DEFAULT_UNIFIED_SETTINGS.providerFallbackErrorClasses,
+      providerFallbackMaxAttempts: DEFAULT_UNIFIED_SETTINGS.providerFallbackMaxAttempts,
       snoozePresets: DEFAULT_UNIFIED_SETTINGS.snoozePresets,
       responseStreamingMode: DEFAULT_UNIFIED_SETTINGS.responseStreamingMode,
       enableProviderUpdateChecks: DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks,
@@ -2097,6 +2121,8 @@ export function ThreadsSettingsPanel() {
           }
         />
       </SettingsSection>
+
+      <ProviderFallbackSettings />
 
       {hasServerTargets ? (
         <SettingsSection id="auto-settle" title={gt("Auto-settle")}>

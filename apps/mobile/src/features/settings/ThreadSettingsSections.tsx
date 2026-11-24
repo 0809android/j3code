@@ -26,6 +26,7 @@ import { ListChoiceRow as SettingsChoiceRow } from "../../components/ui/ListChoi
 import { SettingsSection } from "./components/SettingsSection";
 import { SettingsSwitchRow } from "./components/SettingsSwitchRow";
 import { SettingsScreen } from "./components/SettingsScreen";
+import { MobileProviderFallbackSection } from "./MobileProviderFallbackSection";
 import { planAutoSettleSettingsSync, type AutoSettleSettings } from "./autoSettleSettingsSync";
 import { useSettingsEnvironmentFilter } from "./settings-environment-filter";
 import {
@@ -158,6 +159,14 @@ export function AutoSettleSettingsRows(props: {
             onValueChange={(value) => writeToAll({ snoozeLimitedThreads: value })}
           />
         </SettingsSection>
+      ) : null}
+      {!projectSelected ? (
+        <MobileProviderFallbackSection
+          displayTargets={displayTargets}
+          reference={reference}
+          disabled={disabled}
+          write={props.write}
+        />
       ) : null}
       <SettingsSection title={gt("Auto-settle")}>
         <SettingsSwitchRow

@@ -1,5 +1,10 @@
 import type { ProjectThreadAwarenessV2Input } from "@t3tools/shared/agentAwareness";
-import { applyOrchestrationV2ThreadVisit, pendingGuestMessageCount } from "@t3tools/contracts";
+import {
+  applyOrchestrationV2ThreadVisit,
+  ModelSelection,
+  pendingGuestMessageCount,
+} from "@t3tools/contracts";
+import * as Option from "effect/Option";
 import { applyThreadPullRequestLinkUpdate } from "../sourceControl/threadPullRequests.ts";
 import { projectTurnItemForWire } from "./WireProjection.ts";
 import * as Stream from "effect/Stream";
@@ -209,6 +214,23 @@ export type ProjectionLimitRecoveryCandidate = Pick<
   | "limitRecovery"
   | "snoozedUntil"
 >;
+
+export interface ProjectionProviderFallbackCandidate {
+  readonly id: ThreadId;
+  readonly projectId: ProjectId;
+  readonly status: "failed";
+  readonly modelSelection: ModelSelection;
+  readonly lastErrorClass: OrchestrationV2ThreadShell["lastErrorClass"];
+  readonly lastError: string | null;
+  readonly latestRunId: RunId;
+  readonly latestRunCompletedAt: DateTime.Utc | null;
+  readonly updatedAt: DateTime.Utc;
+  readonly archivedAt: DateTime.Utc | null;
+  readonly settledOverride: OrchestrationV2ThreadShell["settledOverride"];
+  readonly pendingRuntimeRequest: null;
+  readonly recentFailedSelections: ReadonlyArray<ModelSelection>;
+  readonly consecutiveFallbackAttempts: number;
+}
 
 export type ProjectionThreadPullRequests = Pick<
   OrchestrationV2AppThread,
@@ -680,6 +702,10 @@ export interface ProjectionStoreV2Shape {
   readonly getLimitRecoveryWakeAt: (
     now: DateTime.Utc,
   ) => Effect.Effect<number | null, ProjectionStoreV2Error>;
+  readonly getProviderFallbackCandidates: (options: {
+    readonly since: DateTime.Utc;
+    readonly errorClasses: ReadonlyArray<string>;
+  }) => Effect.Effect<ReadonlyArray<ProjectionProviderFallbackCandidate>, ProjectionStoreV2Error>;
   readonly getSettlementCandidates: (
     threadId?: ThreadId,
   ) => Effect.Effect<ReadonlyArray<ProjectionSettlementCandidate>, ProjectionStoreV2Error>;
@@ -5128,6 +5154,151 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           (value): value is number => value != null,
         );
         return wakes.length === 0 ? null : Math.round(Math.min(...wakes));
+      },
+      Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })),
+    );
+
+    const getProviderFallbackCandidates = Effect.fn(
+      "ProjectionStore.getProviderFallbackCandidates",
+    )(
+      function* (options: {
+        readonly since: DateTime.Utc;
+        readonly errorClasses: ReadonlyArray<string>;
+      }) {
+        if (options.errorClasses.length === 0) {
+          return [] as ReadonlyArray<ProjectionProviderFallbackCandidate>;
+        }
+        const allowedClasses = new Set(options.errorClasses);
+        const sinceIso = DateTime.formatIso(options.since);
+        const rows = yield* sql<{
+          readonly payload_json: string;
+          readonly run_id: string;
+          readonly completed_at: string | null;
+          readonly failure_payload_json: string | null;
+          readonly last_error: string | null;
+        }>`
+          SELECT t.payload_json, r.run_id, r.completed_at,
+            item.payload_json AS failure_payload_json,
+            (
+              SELECT json_extract(session.payload_json, '$.lastError')
+              FROM orchestration_v2_projection_provider_session_bindings binding
+              CROSS JOIN orchestration_v2_projection_provider_sessions session
+                ON session.provider_session_id = binding.provider_session_id
+              WHERE binding.thread_id = t.thread_id
+                AND session.provider_instance_id = t.provider_instance_id
+              ORDER BY session.updated_at DESC, session.provider_session_id DESC
+              LIMIT 1
+            ) AS last_error
+          FROM orchestration_v2_projection_threads t
+          INNER JOIN orchestration_v2_projection_runs r ON r.run_id = (
+            SELECT latest.run_id FROM orchestration_v2_projection_runs latest
+            WHERE latest.thread_id = t.thread_id
+              AND latest.status <> 'queued'
+              AND NOT (
+                latest.status = 'cancelled'
+                AND json_extract(latest.payload_json, '$.startedAt') IS NULL
+              )
+            ORDER BY latest.completed_at IS NULL DESC, latest.completed_at DESC,
+              latest.ordinal DESC, latest.run_id DESC
+            LIMIT 1
+          ) AND r.status = 'failed'
+          LEFT JOIN orchestration_v2_projection_turn_items item ON item.turn_item_id = (
+            SELECT error.turn_item_id FROM orchestration_v2_projection_turn_items error
+            WHERE error.thread_id = t.thread_id AND error.run_id = r.run_id
+              AND error.type = 'error' AND error.status = 'failed'
+              AND error.node_id IS json_extract(r.payload_json, '$.rootNodeId')
+            ORDER BY error.updated_at DESC, error.ordinal DESC, error.turn_item_id DESC
+            LIMIT 1
+          )
+          WHERE t.deleted_at IS NULL
+            AND t.archived_at IS NULL
+            AND json_extract(t.payload_json, '$.settledOverride') IS NOT 'settled'
+            AND julianday(COALESCE(r.completed_at, json_extract(t.payload_json, '$.updatedAt'))) >= julianday(${sinceIso})
+            AND NOT EXISTS (
+              SELECT 1 FROM orchestration_v2_projection_runs queued
+              WHERE queued.thread_id = t.thread_id AND queued.status = 'queued'
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM orchestration_v2_projection_runtime_requests request
+              WHERE request.thread_id = t.thread_id AND request.status = 'pending'
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM orchestration_v2_projection_threads parent
+              WHERE json_extract(t.payload_json, '$.lineage.relationshipToParent') = 'subagent'
+                AND parent.thread_id = json_extract(t.payload_json, '$.lineage.parentThreadId')
+                AND (
+                  json_extract(parent.payload_json, '$.settledOverride') = 'settled'
+                  OR json_extract(parent.payload_json, '$.archivedAt') IS NOT NULL
+                  OR parent.deleted_at IS NOT NULL
+                )
+            )
+          ORDER BY t.thread_id
+        `;
+        const decodeRunSummary = Schema.decodeUnknownOption(
+          Schema.fromJsonString(
+            Schema.Struct({
+              status: Schema.String,
+              modelSelection: Schema.optional(ModelSelection),
+              userMessageId: Schema.optional(Schema.NullOr(Schema.String)),
+            }),
+          ),
+        );
+        const candidates: Array<ProjectionProviderFallbackCandidate> = [];
+        for (const row of rows) {
+          const thread = yield* decodeThreadPayload(row.payload_json);
+          const item =
+            row.failure_payload_json === null
+              ? null
+              : yield* decodeTurnItemPayload(row.failure_payload_json);
+          const summary = threadErrorSummary(
+            item?.type === "error" ? item.failure : null,
+            row.last_error,
+          );
+          const errorClass = summary.lastErrorClass ?? "unknown";
+          if (!allowedClasses.has(errorClass)) continue;
+          const recentRuns = yield* sql<{ readonly payload_json: string }>`
+            SELECT payload_json FROM orchestration_v2_projection_runs
+            WHERE thread_id = ${thread.id}
+              AND status <> 'queued'
+              AND NOT (
+                status = 'cancelled'
+                AND json_extract(payload_json, '$.startedAt') IS NULL
+              )
+            ORDER BY ordinal DESC, run_id DESC
+            LIMIT 20
+          `;
+          const recentFailedSelections: Array<ModelSelection> = [];
+          let consecutiveFallbackAttempts = 0;
+          for (const runRow of recentRuns) {
+            const parsed = decodeRunSummary(runRow.payload_json);
+            if (Option.isNone(parsed)) break;
+            if (parsed.value.status !== "failed") break;
+            if (parsed.value.modelSelection) {
+              recentFailedSelections.push(parsed.value.modelSelection);
+            }
+            if (parsed.value.userMessageId?.startsWith("provider-fallback:")) {
+              consecutiveFallbackAttempts += 1;
+            }
+          }
+          candidates.push({
+            id: thread.id,
+            projectId: thread.projectId,
+            status: "failed",
+            modelSelection: thread.modelSelection,
+            lastErrorClass: errorClass,
+            lastError: summary.lastError,
+            latestRunId: RunId.make(row.run_id),
+            latestRunCompletedAt:
+              row.completed_at === null ? null : DateTime.makeUnsafe(row.completed_at),
+            updatedAt: thread.updatedAt,
+            archivedAt: thread.archivedAt,
+            settledOverride: thread.settledOverride,
+            pendingRuntimeRequest: null,
+            recentFailedSelections,
+            consecutiveFallbackAttempts,
+          });
+        }
+        return candidates;
       },
       Effect.mapError((cause) => new ProjectionStoreSetupError({ cause })),
     );
@@ -9939,6 +10110,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       getProviderControlContext: readOnReader(getProviderControlContext),
       getLimitRecoveryCandidates: readOnReader(getLimitRecoveryCandidates),
       getLimitRecoveryWakeAt: readOnReader(getLimitRecoveryWakeAt),
+      getProviderFallbackCandidates: readOnReader(getProviderFallbackCandidates),
       getRecoveryThreadIds: readOnReader(getRecoveryThreadIds),
       getUnreadableThreadIds: readOnReader(getUnreadableThreadIds),
       getThreadSnapshot: readOnReader(getThreadSnapshot),
