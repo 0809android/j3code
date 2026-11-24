@@ -1,6 +1,7 @@
 {
   "apps/web": {
     "de": {
+      "1874437998f6ddd6": "Willkommen bei J3 Code",
       "d6c417c95e52cb0f": "Nutzungs- / Ratenlimits",
       "079d0bd4815b5348": "Anbieterfehler",
       "9e6e52aad6b64142": "Verbindungsfehler",
@@ -34,9 +35,11 @@
       "7e91eb73f27d68c6": "fallback sekundär anbieter fehler wiederholen failover wechseln",
       "2a35e7a6f0f62e5d": "fallback sekundär backup modell anbieter priorität reihenfolge",
       "ca4ae7a79af34de7": "fallback nutzungslimit anbieter transport fehlerklasse",
-      "3cebc528390145fe": "fallback limit versuche wiederholungen schleifenschutz"
+      "3cebc528390145fe": "fallback limit versuche wiederholungen schleifenschutz",
+      "ace6d71583020afd": "J3 Code Startseite"
     },
     "es": {
+      "1874437998f6ddd6": "Te damos la bienvenida a J3 Code",
       "d6c417c95e52cb0f": "Límites de uso / tasa",
       "079d0bd4815b5348": "Errores del proveedor",
       "9e6e52aad6b64142": "Errores de conexión",
@@ -70,9 +73,11 @@
       "7e91eb73f27d68c6": "respaldo fallback secundario proveedor error reintento conmutación",
       "2a35e7a6f0f62e5d": "respaldo fallback secundario modelo proveedor prioridad orden",
       "ca4ae7a79af34de7": "respaldo fallback límite uso proveedor transporte clase error",
-      "3cebc528390145fe": "respaldo fallback límite intentos reintentos bucle"
+      "3cebc528390145fe": "respaldo fallback límite intentos reintentos bucle",
+      "ace6d71583020afd": "Inicio de J3 Code"
     },
     "fr": {
+      "1874437998f6ddd6": "Bienvenue dans J3 Code",
       "d6c417c95e52cb0f": "Limites d'utilisation / débit",
       "079d0bd4815b5348": "Erreurs fournisseur",
       "9e6e52aad6b64142": "Erreurs de connexion",
@@ -106,9 +111,11 @@
       "7e91eb73f27d68c6": "basculement secours secondaire fournisseur erreur réessayer failover",
       "2a35e7a6f0f62e5d": "basculement secours secondaire modèle fournisseur priorité ordre",
       "ca4ae7a79af34de7": "basculement limite utilisation fournisseur transport classe erreur",
-      "3cebc528390145fe": "basculement limite tentatives boucle"
+      "3cebc528390145fe": "basculement limite tentatives boucle",
+      "ace6d71583020afd": "Accueil J3 Code"
     },
     "ja": {
+      "1874437998f6ddd6": "J3 Code へようこそ",
       "d6c417c95e52cb0f": "使用量・レート制限",
       "079d0bd4815b5348": "プロバイダエラー",
       "9e6e52aad6b64142": "接続エラー",
@@ -142,9 +149,11 @@
       "7e91eb73f27d68c6": "フォールバック セカンダリ プロバイダ エラー 自動切替 フェイルオーバー リトライ",
       "2a35e7a6f0f62e5d": "フォールバック セカンダリ 予備 モデル プロバイダ 優先順位 チェーン",
       "ca4ae7a79af34de7": "フォールバック 使用量制限 レート制限 プロバイダ 接続 エラー種別",
-      "3cebc528390145fe": "フォールバック 上限 回数 リトライ ループ防止"
+      "3cebc528390145fe": "フォールバック 上限 回数 リトライ ループ防止",
+      "ace6d71583020afd": "J3 Code ホーム"
     },
     "ko": {
+      "1874437998f6ddd6": "J3 Code에 오신 것을 환영합니다",
       "d6c417c95e52cb0f": "사용량 / 속도 제한",
       "079d0bd4815b5348": "공급자 오류",
       "9e6e52aad6b64142": "연결 오류",
@@ -178,9 +187,11 @@
       "7e91eb73f27d68c6": "폴백 보조 공급자 오류 재시도 페일오버 전환",
       "2a35e7a6f0f62e5d": "폴백 보조 백업 모델 공급자 우선순위 순서",
       "ca4ae7a79af34de7": "폴백 사용량 제한 공급자 전송 오류 유형",
-      "3cebc528390145fe": "폴백 제한 시도 재시도 루프 방지"
+      "3cebc528390145fe": "폴백 제한 시도 재시도 루프 방지",
+      "ace6d71583020afd": "J3 Code 홈"
     },
     "pt-BR": {
+      "1874437998f6ddd6": "Bem-vindo ao J3 Code",
       "d6c417c95e52cb0f": "Limites de uso / taxa",
       "079d0bd4815b5348": "Erros do provedor",
       "9e6e52aad6b64142": "Erros de conexão",
@@ -214,9 +225,11 @@
       "7e91eb73f27d68c6": "fallback secundário provedor erro tentar novamente failover troca",
       "2a35e7a6f0f62e5d": "fallback secundário backup modelo provedor prioridade ordem",
       "ca4ae7a79af34de7": "fallback limite uso provedor transporte classe erro",
-      "3cebc528390145fe": "fallback limite tentativas repetições loop"
+      "3cebc528390145fe": "fallback limite tentativas repetições loop",
+      "ace6d71583020afd": "Início do J3 Code"
     },
     "ru": {
+      "1874437998f6ddd6": "Добро пожаловать в J3 Code",
       "d6c417c95e52cb0f": "Лимиты использования / частоты",
       "079d0bd4815b5348": "Ошибки провайдера",
       "9e6e52aad6b64142": "Ошибки подключения",
@@ -250,9 +263,11 @@
       "7e91eb73f27d68c6": "резерв fallback провайдер ошибка повтор переключение",
       "2a35e7a6f0f62e5d": "резерв fallback модель провайдер приоритет порядок",
       "ca4ae7a79af34de7": "резерв fallback лимит провайдер сеть тип ошибки",
-      "3cebc528390145fe": "резерв fallback лимит попыток защита от цикла"
+      "3cebc528390145fe": "резерв fallback лимит попыток защита от цикла",
+      "ace6d71583020afd": "Главная J3 Code"
     },
     "sv": {
+      "1874437998f6ddd6": "Välkommen till J3 Code",
       "d6c417c95e52cb0f": "Användnings- / hastighetsgränser",
       "079d0bd4815b5348": "Leverantörsfel",
       "9e6e52aad6b64142": "Anslutningsfel",
@@ -286,9 +301,11 @@
       "7e91eb73f27d68c6": "reserv fallback sekundär leverantör fel försök igen byte",
       "2a35e7a6f0f62e5d": "reserv fallback sekundär modell leverantör prioritet ordning",
       "ca4ae7a79af34de7": "reserv fallback gräns leverantör transport feltyp",
-      "3cebc528390145fe": "reserv fallback gräns försök loopskydd"
+      "3cebc528390145fe": "reserv fallback gräns försök loopskydd",
+      "ace6d71583020afd": "J3 Code startsida"
     },
     "zh": {
+      "1874437998f6ddd6": "欢迎使用 J3 Code",
       "d6c417c95e52cb0f": "用量 / 速率限制",
       "079d0bd4815b5348": "提供商错误",
       "9e6e52aad6b64142": "连接错误",
@@ -322,7 +339,8 @@
       "7e91eb73f27d68c6": "回退 备用 提供商 错误 重试 故障转移 切换",
       "2a35e7a6f0f62e5d": "回退 备用 模型 提供商 优先级 顺序",
       "ca4ae7a79af34de7": "回退 用量限制 速率限制 提供商 传输 错误类型",
-      "3cebc528390145fe": "回退 上限 次数 重试 防止循环"
+      "3cebc528390145fe": "回退 上限 次数 重试 防止循环",
+      "ace6d71583020afd": "J3 Code 首页"
     }
   },
   "apps/mobile": {

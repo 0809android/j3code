@@ -1003,6 +1003,8 @@ export const DESKTOP_FILE_EXCLUSIONS = [
   "!apps/desktop/prod-resources/windows-server/**/*",
   "!apps/desktop/prod-resources/wsl-runtime.tar.gz",
   "!apps/desktop/prod-resources/wsl-runtime.tar.gz.sha256",
+  "!apps/desktop/prod-resources/j3-native",
+  "!apps/desktop/prod-resources/j3-native/**/*",
   "!apps/desktop/gnome-extension",
   "!apps/desktop/gnome-extension/**/*",
 ] as const;
@@ -3913,6 +3915,12 @@ const buildDesktopArtifactUnlocked = Effect.fn("buildDesktopArtifactUnlocked")(f
   // electron-builder is filtering out stageResourcesDir directory in the AppImage for production
   const stageProdResourcesDir = path.join(stageAppDir, "apps/desktop/prod-resources");
   yield* fs.copy(stageResourcesDir, stageProdResourcesDir);
+
+  // Stage prebuilt J3 Code Rust native accelerators when present so extraResources bundles them.
+  const repoJ3NativeDir = path.join(repoRoot, "apps/desktop/prod-resources/j3-native");
+  if (yield* fs.exists(repoJ3NativeDir)) {
+    yield* fs.copy(repoJ3NativeDir, path.join(stageProdResourcesDir, "j3-native"));
+  }
 
   const configuredMacPasskeySigning =
     options.platform === "mac" && options.signed
