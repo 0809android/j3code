@@ -13,10 +13,10 @@ const repoRoot = NodePath.resolve(desktopDir, "..", "..");
 const devBundleIdSuffix = NodePath.basename(repoRoot)
   .toLowerCase()
   .replaceAll(/[^a-z0-9]+/g, "");
-const APP_DISPLAY_NAME = isDevelopment ? "J3 Code (Dev)" : "J3 Code (Beta)";
+const APP_DISPLAY_NAME = isDevelopment ? "K3 Code (Dev)" : "K3 Code (Beta)";
 const APP_BUNDLE_ID = isDevelopment
-  ? `com.j3code.app.dev.${devBundleIdSuffix || "local"}`
-  : "com.j3code.app";
+  ? `jp.kinocode.k3code.dev.${devBundleIdSuffix || "local"}`
+  : "jp.kinocode.k3code";
 const APP_PROTOCOL_SCHEMES = isDevelopment ? ["t3code-dev"] : ["t3code"];
 const LAUNCHER_VERSION = 20;
 const developmentMacIconPngPath = NodePath.join(

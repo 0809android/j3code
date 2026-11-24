@@ -16,7 +16,7 @@ it.layer(NodeServices.layer)("stagedImport", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const stateDir = yield* fs.makeTempDirectoryScoped({ prefix: "j3-staged-" });
+      const stateDir = yield* fs.makeTempDirectoryScoped({ prefix: "k3-staged-" });
       const dbPath = path.join(stateDir, DATABASE_FILENAME);
       yield* fs.writeFileString(dbPath, "current");
       yield* fs.writeFileString(`${dbPath}-wal`, "current-wal");
@@ -48,7 +48,7 @@ it.layer(NodeServices.layer)("stagedImport", (it) => {
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const stateDir = yield* fs.makeTempDirectoryScoped({ prefix: "j3-staged-" });
+      const stateDir = yield* fs.makeTempDirectoryScoped({ prefix: "k3-staged-" });
       const dbPath = path.join(stateDir, DATABASE_FILENAME);
       yield* fs.writeFileString(dbPath, "current");
 

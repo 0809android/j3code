@@ -8,7 +8,7 @@ Default trace paths (`server.trace.ndjson`):
 
 - Production / explicit `--home-dir` / `T3CODE_HOME`: `<home>/userdata/logs/server.trace.ndjson`
 - Linked worktree dev run: `<worktree>/.t3/userdata/logs/server.trace.ndjson`
-- Non-worktree dev run: `~/.j3code/dev/logs/server.trace.ndjson`
+- Non-worktree dev run: `~/.k3code/dev/logs/server.trace.ndjson`
 
 Summarize counts, rates, and latency percentiles offline (even while a server is stalled or stopped):
 

@@ -216,7 +216,7 @@ export function LegacyImportDialog({
 export function LegacyImportPrompt({ environmentId }: { readonly environmentId: EnvironmentId }) {
   const scan = AsyncResult.getOrElse(useAtomValue(scanAtom(environmentId)), () => null);
   const [prompted, setPrompted] = useLocalStorage(
-    "j3code:legacy-import-prompted",
+    "k3code:legacy-import-prompted",
     false,
     Schema.Boolean,
   );

@@ -1,3 +1,5 @@
+> **K3 Code** is a fork of [T3 Code](https://github.com/pingdotgg/t3code) maintained by [Kinocode](https://kinocode.jp). It is not affiliated with or endorsed by T3 Tools Inc. T3 Code is MIT licensed; the original copyright notice is kept in [LICENSE](./LICENSE). To bring your T3 Code settings, providers and history over, see [Importing from T3 Code](./docs/user/import-from-t3-code.md).
+
 <p align="center">
   <a href="https://t3.codes">
     <img src="./assets/prod/t3-black-web-icon-192x192.png" width="80" height="80" alt="T3 Code logo" />

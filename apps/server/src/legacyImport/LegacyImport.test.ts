@@ -36,13 +36,13 @@ const readNote = (file: string) => {
 
 const layer = LegacyImport.layer.pipe(
   Layer.provideMerge(ServerSettings.ServerSettingsService.layerTest()),
-  Layer.provideMerge(ServerConfig.ServerConfig.layerTest("/unused", { prefix: "j3-import-" })),
+  Layer.provideMerge(ServerConfig.ServerConfig.layerTest("/unused", { prefix: "k3-import-" })),
   Layer.provideMerge(
     Layer.effect(
       HostProcess.HomeDirectory,
       Effect.gen(function* () {
         return yield* (yield* FileSystem.FileSystem).makeTempDirectoryScoped({
-          prefix: "j3-home-",
+          prefix: "k3-home-",
         });
       }),
     ),
@@ -85,7 +85,7 @@ it.layer(layer)("LegacyImport", (it) => {
         }),
       );
       createDatabase(path.join(legacy, "statev2.sqlite"), 5, "from t3 code");
-      createDatabase(config.dbPath, 5, "from j3 code");
+      createDatabase(config.dbPath, 5, "from k3 code");
 
       const importer = yield* LegacyImport.LegacyImport;
       const scan = yield* importer.scan;
@@ -115,7 +115,7 @@ it.layer(layer)("LegacyImport", (it) => {
       assert.equal(settings.defaultRuntimeMode, "approval-required");
 
       // The running database is untouched until the next start swaps the snapshot in.
-      assert.equal(readNote(config.dbPath), "from j3 code");
+      assert.equal(readNote(config.dbPath), "from k3 code");
       assert.isTrue((yield* importer.scan).sessionsStaged);
       yield* applyStagedLegacyImport(config.stateDir, config.dbPath);
       assert.equal(readNote(config.dbPath), "from t3 code");
