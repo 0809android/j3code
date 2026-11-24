@@ -17,7 +17,7 @@ const APP_DISPLAY_NAME = isDevelopment ? "K3 Code (Dev)" : "K3 Code (Beta)";
 const APP_BUNDLE_ID = isDevelopment
   ? `jp.kinocode.k3code.dev.${devBundleIdSuffix || "local"}`
   : "jp.kinocode.k3code";
-const APP_PROTOCOL_SCHEMES = isDevelopment ? ["t3code-dev"] : ["t3code"];
+const APP_PROTOCOL_SCHEMES = isDevelopment ? ["k3code-dev"] : ["k3code"];
 const LAUNCHER_VERSION = 20;
 const developmentMacIconPngPath = NodePath.join(
   repoRoot,
