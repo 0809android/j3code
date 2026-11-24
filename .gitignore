@@ -51,3 +51,4 @@ node_modules/
 .pnpm-store/
 
 /packages/ssh/.ssh-launcher-test-*/
+apps/desktop/prod-resources/j3-native/

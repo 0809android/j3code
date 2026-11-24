@@ -1124,6 +1124,9 @@ export const LINUX_BROWSER_SECRET_EXTRA_RESOURCES = [
 export const MAC_APPLE_SPEECH_EXTRA_RESOURCES = [
   { from: "apps/desktop/prod-resources/apple-speech", to: "apple-speech" },
 ] as const;
+const J3_NATIVE_EXTRA_RESOURCES = [
+  { from: "apps/desktop/prod-resources/j3-native", to: "j3-native" },
+] as const;
 
 export interface MacPasskeySigningConfiguration {
   readonly appId: string;
@@ -2819,8 +2822,14 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   wslRuntimeBundled = false,
   arch?: typeof BuildArch.Type,
 ) {
+  const fs = yield* FileSystem.FileSystem;
+  const pathService = yield* Path.Path;
+  const repoRoot = yield* RepoRoot;
+  const hasJ3NativeResources = yield* fs
+    .exists(pathService.join(repoRoot, "apps/desktop/prod-resources/j3-native"))
+    .pipe(Effect.orElseSucceed(() => false));
   const buildConfig: Record<string, unknown> = {
-    afterPack: (yield* Path.Path).join(yield* RepoRoot, "scripts/prepare-server-compile-cache.cjs"),
+    afterPack: pathService.join(repoRoot, "scripts/prepare-server-compile-cache.cjs"),
     appId: DESKTOP_APP_ID,
     productName: resolveDesktopProductName(version),
     artifactName: "T3-Code-${version}-${arch}.${ext}",
@@ -2842,6 +2851,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       : { asarUnpack: ["**/node_modules/@transcribe-cpp/**/*.{dylib,so,so.*}"] }),
     extraResources: [
       ...DESKTOP_EXTRA_RESOURCES,
+      ...(hasJ3NativeResources ? J3_NATIVE_EXTRA_RESOURCES : []),
       ...(platform === "linux" ? LINUX_CAPTURE_EXTRA_RESOURCES : []),
       ...(platform === "linux" ? LINUX_BROWSER_SECRET_EXTRA_RESOURCES : []),
       ...(platform === "mac" ? MAC_APPLE_SPEECH_EXTRA_RESOURCES : []),

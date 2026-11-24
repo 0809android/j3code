@@ -17,6 +17,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import { createTranscriptJsonReader } from "../project/AgentSessionJson.ts";
+import { filterTranscriptLinesNative, listTranscriptFilesNative } from "./NativeUsageScanner.ts";
 
 export interface TranscriptFile {
   readonly path: string;
@@ -44,6 +45,7 @@ export interface TranscriptParseResult {
 
 export const GUARD_LENGTH = 64;
 const STREAMING_THRESHOLD_BYTES = 8 * 1024 * 1024;
+const NATIVE_FILTER_MIN_BYTES = 256 * 1024;
 const READ_CHUNK_BYTES = 256 * 1024;
 const NEWLINE = 0x0a;
 const STAT_CONCURRENCY = 32;
@@ -83,6 +85,10 @@ export async function listTranscriptFiles(
   readonly walked: readonly string[];
   readonly failedPaths: number;
 }> {
+  const nativeResult = await listTranscriptFilesNative(root, sinceMs, options);
+  if (nativeResult !== null) {
+    return nativeResult;
+  }
   const fileName = options?.fileName;
   let failedPaths = 0;
   let reading = 0;
@@ -339,6 +345,76 @@ export async function readTranscriptRecords<State>(
 ): Promise<TranscriptParseResult | null> {
   const streamingThresholdBytes = options?.streamingThresholdBytes ?? STREAMING_THRESHOLD_BYTES;
   const compressed = filePath.endsWith(".jsonl.zst");
+
+  const codec = format.state;
+  const decodeState = codec === undefined ? undefined : Schema.decodeUnknownOption(codec.schema);
+  const encodeState = codec === undefined ? undefined : Schema.encodeSync(codec.schema);
+  const savedState =
+    resumeFrom === undefined || decodeState === undefined || resumeFrom.state === null
+      ? Option.none()
+      : decodeState(resumeFrom.state);
+
+  // Fast path: let the persistent Rust scanner perform SIMD marker filtering + FNV-1a guard verification
+  // for large or zstd-compressed files; tiny files skip IPC and parse inline in Node.
+  const fileSize = await statFile(filePath).then(
+    (stats) => stats.size,
+    () => -1,
+  );
+  if (fileSize === -1) {
+    return null;
+  }
+  const useNativeFilter = compressed || fileSize >= NATIVE_FILTER_MIN_BYTES;
+  if (
+    useNativeFilter &&
+    (codec === undefined || resumeFrom === undefined || Option.isSome(savedState))
+  ) {
+    const nativeScan = await filterTranscriptLinesNative({
+      path: filePath,
+      markers: format.usageMarkers,
+      ...(resumeFrom && !compressed
+        ? {
+            resumeOffset: resumeFrom.resumeOffset,
+            guardLength: resumeFrom.guardLength,
+            guardHash: resumeFrom.guardHash,
+          }
+        : {}),
+      maxLineBytes: streamingThresholdBytes,
+    });
+    if (nativeScan?.ok && nativeScan.oversizedSkipped === 0) {
+      let state =
+        nativeScan.resumed && Option.isSome(savedState)
+          ? savedState.value
+          : codec === undefined
+            ? (undefined as State)
+            : codec.initial();
+      const records: UsageRecord[] = [];
+      for (const line of nativeScan.matchedLines) {
+        for (const record of format.parseLine(line, state)) records.push(record);
+      }
+      const encodedState = encodeState === undefined ? null : encodeState(state);
+      const tailRecords: UsageRecord[] = [];
+      const tailState =
+        decodeState === undefined ? state : Option.getOrThrow(decodeState(encodedState));
+      if (nativeScan.tailLine !== undefined) {
+        for (const record of format.parseLine(nativeScan.tailLine, tailState)) {
+          tailRecords.push(record);
+        }
+      }
+      return {
+        records,
+        tailRecords,
+        malformedRecords: format.readMalformedRecords?.(tailState) ?? [],
+        position: {
+          resumeOffset: compressed ? 0 : nativeScan.resumeOffset,
+          guardLength: compressed ? 0 : nativeScan.guardLength,
+          guardHash: compressed ? 0 : nativeScan.guardHash,
+          state: encodedState,
+        },
+        resumed: nativeScan.resumed,
+      };
+    }
+  }
+
   let handle: NodeFSP.FileHandle;
   try {
     handle = await NodeFSP.open(filePath, "r");
@@ -347,16 +423,9 @@ export async function readTranscriptRecords<State>(
   }
 
   try {
-    const codec = format.state;
-    const decodeState = codec === undefined ? undefined : Schema.decodeUnknownOption(codec.schema);
-    const encodeState = codec === undefined ? undefined : Schema.encodeSync(codec.schema);
     let state = codec === undefined ? (undefined as State) : codec.initial();
     let resumed = false;
     let start = 0;
-    const savedState =
-      resumeFrom === undefined || decodeState === undefined || resumeFrom.state === null
-        ? Option.none()
-        : decodeState(resumeFrom.state);
     if (
       !compressed &&
       resumeFrom !== undefined &&

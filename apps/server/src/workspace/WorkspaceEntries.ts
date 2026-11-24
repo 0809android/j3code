@@ -29,7 +29,13 @@ import { isExplicitRelativePath, isWindowsAbsolutePath } from "@t3tools/shared/p
 import { normalizeSearchQuery } from "@t3tools/shared/searchRanking";
 
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
+import { isProjectFaviconPath } from "@t3tools/shared/projectFavicon";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
+import {
+  checkIgnoredPathsNative,
+  grepWorkspaceContentsNative,
+  searchWorkspaceFilesNative,
+} from "./NativeWorkspaceSearch.ts";
 import * as WorkspacePaths from "./WorkspacePaths.ts";
 import * as WorkspaceSearchIndex from "./WorkspaceSearchIndex.ts";
 
@@ -322,7 +328,34 @@ export const make = Effect.gen(function* () {
       const result = yield* Effect.gen(function* () {
         const searchIndex = yield* WorkspaceSearchIndex.WorkspaceSearchIndex;
         return yield* searchIndex.search(normalizedQuery, input.limit, input.kind, input.imageOnly);
-      }).pipe(Effect.provide(workspaceSearchIndexes.get(indexKey)));
+      }).pipe(
+        Effect.provide(workspaceSearchIndexes.get(indexKey)),
+        Effect.catch((error) =>
+          Effect.promise(() =>
+            searchWorkspaceFilesNative({
+              cwd: normalizedCwd,
+              query: normalizedQuery,
+              limit: input.limit * 2,
+            }),
+          ).pipe(
+            Effect.flatMap((nativeResult) => {
+              if (!nativeResult) return Effect.fail(error);
+              const filtered = nativeResult.entries.filter((entry) => {
+                if (input.kind && entry.kind !== input.kind) return false;
+                if (input.imageOnly && !isProjectFaviconPath(entry.path)) return false;
+                return true;
+              });
+              return Effect.succeed({
+                entries: filtered.slice(0, input.limit).map((entry): ProjectEntry => ({
+                  path: entry.path,
+                  kind: entry.kind,
+                })),
+                truncated: nativeResult.truncated || filtered.length > input.limit,
+              });
+            }),
+          ),
+        ),
+      );
       if (input.kind === "directory" || input.imageOnly) return result;
       const worktreeFiles = yield* findNestedWorktreeFiles(
         normalizedCwd,
@@ -416,7 +449,40 @@ export const make = Effect.gen(function* () {
     return yield* Effect.gen(function* () {
       const searchIndex = yield* WorkspaceSearchIndex.WorkspaceSearchIndex;
       return yield* searchIndex.searchContents(input);
-    }).pipe(Effect.provide(workspaceSearchIndexes.get(indexKey)));
+    }).pipe(
+      Effect.provide(workspaceSearchIndexes.get(indexKey)),
+      Effect.catchIf(
+        (error) => error._tag !== "WorkspaceSearchIndexScanTimedOut",
+        (error) =>
+          Effect.promise(() =>
+            grepWorkspaceContentsNative({
+              cwd: normalizedCwd,
+              query: input.query,
+              caseSensitive: input.caseSensitive,
+              useRegex: input.useRegex,
+              wholeWord: input.wholeWord,
+              limit: input.limit,
+            }),
+          ).pipe(
+            Effect.flatMap((nativeResult) => {
+              if (!nativeResult || nativeResult.error) return Effect.fail(error);
+              return Effect.succeed({
+                matches: nativeResult.matches.map((item) => {
+                  const start = Math.max(0, item.column - 1);
+                  const matchLength = Math.max(1, item.matchLen ?? input.query.length);
+                  return {
+                    path: item.path,
+                    lineNumber: item.line,
+                    lineContent: item.text,
+                    matchRanges: [{ start, end: Math.min(item.text.length, start + matchLength) }],
+                  };
+                }),
+                truncated: nativeResult.truncated,
+              });
+            }),
+          ),
+      ),
+    );
   });
 
   const list: WorkspaceEntries["Service"]["list"] = Effect.fn("WorkspaceEntries.list")(
@@ -539,6 +605,35 @@ export const make = Effect.gen(function* () {
           },
           catch: toError,
         });
+        // Fast path: evaluate .gitignore rules in the persistent Rust worker to avoid spawning
+        // `git check-ignore` on every folder expansion (especially costly on Windows).
+        // Skip paths containing Git pathspec magic characters so Git handles them verbatim.
+        if (
+          !throughSymlink &&
+          nestedGitRoots.length === 0 &&
+          entries.length > 0 &&
+          !/^:|[*?[\\]/.test(target.relativePath) &&
+          entries.every((entry) => !/^:|[*?[\\]/.test(entry.path))
+        ) {
+          const nativeCheck = yield* Effect.promise(() =>
+            checkIgnoredPathsNative({
+              cwd: normalizedCwd,
+              paths: entries.map((entry) => ({
+                path: entry.path,
+                isDir: entry.kind === "directory",
+              })),
+            }),
+          );
+          if (nativeCheck?.ok) {
+            const ignored = new Set(nativeCheck.ignored);
+            return {
+              entries: entries.map((entry) =>
+                ignored.has(entry.path) ? { ...entry, ignored: true } : entry,
+              ),
+              truncated: false,
+            };
+          }
+        }
         let gitRoot = "";
         let gitPrefix = "";
         // stdin avoids argument limits; ignore classification is optional without git/repositories.

@@ -1,0 +1,19 @@
+[package]
+name = "j3-workspace-search"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[dependencies]
+ignore = "0.4"
+memchr = "2.7"
+regex = "1.11"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+panic = "abort"
+strip = true

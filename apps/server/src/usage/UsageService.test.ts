@@ -2353,6 +2353,49 @@ describe("UsageService", () => {
       }),
   );
 
+  it.effect("separates OpenDesign records from OpenCode records in the same store", () =>
+    Effect.gen(function* () {
+      const { settings, home } = yield* setup;
+      const openCodeMessage = yield* encodeUnknownJson({
+        id: "msg-oc-1",
+        sessionID: "session-oc",
+        role: "assistant",
+        modelID: "big-pickle",
+        providerID: "opencode",
+        time: { created: Date.parse("2026-08-01T10:00:00Z") },
+        cost: 0,
+        tokens: { input: 50, output: 10, reasoning: 0, cache: { read: 0, write: 0 } },
+      });
+      const openDesignMessage = yield* encodeUnknownJson({
+        id: "msg-od-1",
+        sessionID: "session-od",
+        role: "assistant",
+        modelID: "glm-5",
+        providerID: "open-design",
+        time: { created: Date.parse("2026-08-01T10:05:00Z") },
+        cost: 0,
+        tokens: { input: 100, output: 20, reasoning: 0, cache: { read: 0, write: 0 } },
+      });
+      yield* Effect.promise(async () => {
+        const ocDir = NodePath.join(home, "opencode", "storage", "message", "session-oc");
+        const odDir = NodePath.join(home, "opencode", "storage", "message", "session-od");
+        await NodeFSP.mkdir(ocDir, { recursive: true });
+        await NodeFSP.mkdir(odDir, { recursive: true });
+        await NodeFSP.writeFile(NodePath.join(ocDir, "msg-oc-1.json"), openCodeMessage);
+        await NodeFSP.writeFile(NodePath.join(odDir, "msg-od-1.json"), openDesignMessage);
+      });
+      const service = yield* UsageService.make.pipe(
+        Effect.provide(layerService({ prefix: "usage-service-opendesign", home, settings })),
+      );
+      const summary = yield* service.readSummary(WINDOW);
+      const byProvider = new Map(
+        summary.buckets.map((bucket) => [`${bucket.provider}:${bucket.model}`, bucket]),
+      );
+      assert.strictEqual(byProvider.get("opencode:big-pickle")?.totals.uncachedInputTokens, 50);
+      assert.strictEqual(byProvider.get("opendesign:glm-5")?.totals.uncachedInputTokens, 100);
+    }),
+  );
+
   it.effect("counts unpriced tokens from the unpriced records of a mixed model", () =>
     Effect.gen(function* () {
       const { settings, home } = yield* setup;

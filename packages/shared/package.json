@@ -383,6 +383,10 @@
       "types": "./src/HostProcess.ts",
       "import": "./src/HostProcess.ts"
     },
+    "./nativeSidecarWorker": {
+      "types": "./src/nativeSidecarWorker.ts",
+      "import": "./src/nativeSidecarWorker.ts"
+    },
     "./testing/gitRepositoryEnv": {
       "types": "./src/testing/gitRepositoryEnv.ts",
       "import": "./src/testing/gitRepositoryEnv.ts"
