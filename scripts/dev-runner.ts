@@ -332,7 +332,9 @@ export const createDevRunnerEnv = Effect.fn("dev-runner.createDevRunnerEnv")(fun
   const path = yield* Path.Path;
   // The server stores an explicit home's state in userdata, which for ~/.t3 is the live
   // install. Left implicit, dev state goes to ~/.t3/dev.
-  const isLiveHome = resolvedBaseDir === path.join(yield* HostProcess.HomeDirectory, ".t3");
+  const isLiveHome =
+    path.resolve(resolvedBaseDir) ===
+    path.resolve(path.join(yield* HostProcess.HomeDirectory, ".t3"));
   if (configuredBaseDir !== undefined && !isLiveHome) {
     output.T3CODE_HOME = resolvedBaseDir;
   } else {
@@ -773,18 +775,24 @@ export const runDevRunnerWithInput = Effect.fn("dev-runner.runDevRunnerWithInput
     checkPortAvailability: makeDefaultCheckPortAvailability(input.host),
   });
 
+  const path = yield* Path.Path;
   const hostEnvironment = yield* HostProcess.Environment;
   // A dev server started inside a worktree defaults to that worktree's own
   // (gitignored) `.t3` — see @t3tools/shared/devHome for why this must
   // outrank an ambient T3CODE_HOME. `--home-dir` still wins.
   const worktreeHome = yield* resolveWorktreeT3Home(yield* HostProcess.WorkingDirectory);
+  // Outside a worktree, J3 Code defaults to ~/.j3 (honoring J3CODE_HOME > T3CODE_HOME)
+  // so `vp run dev` / `vp run dev --share` never touches an upstream ~/.t3 install.
+  const defaultJ3Home = path.join(yield* HostProcess.HomeDirectory, ".j3");
   // Trim before choosing: `--home-dir ""` is not a selection, and treating it
   // as one would skip the worktree default and land on the shared home —
   // exactly the outcome this precedence exists to prevent.
   const resolvedT3Home =
     (input.t3Home?.trim() || undefined) ??
     worktreeHome ??
-    (hostEnvironment.T3CODE_HOME?.trim() || undefined);
+    (hostEnvironment.J3CODE_HOME?.trim() || undefined) ??
+    (hostEnvironment.T3CODE_HOME?.trim() || undefined) ??
+    defaultJ3Home;
   const env = yield* createDevRunnerEnv({
     mode: input.mode,
     baseEnv: hostEnvironment,

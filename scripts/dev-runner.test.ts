@@ -847,6 +847,52 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         }).pipe(Effect.scoped),
       );
 
+      it.effect(
+        "defaults to ~/.j3 outside a worktree and prefers J3CODE_HOME over T3CODE_HOME",
+        () =>
+          Effect.gen(function* () {
+            const path = yield* Path.Path;
+            const root = yield* Effect.acquireRelease(
+              Effect.sync(() => NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "j3-dev-home-"))),
+              (dir) => Effect.sync(() => NodeFS.rmSync(dir, { recursive: true, force: true })),
+            );
+            const fakeHome = path.join(root, "home");
+
+            const capture = (envVars: Record<string, string>) =>
+              Effect.gen(function* () {
+                let captured: Record<string, string | undefined> | undefined;
+                const spawnerLayer = Layer.succeed(
+                  ChildProcessSpawner.ChildProcessSpawner,
+                  ChildProcessSpawner.make((command) => {
+                    captured = (
+                      command as {
+                        readonly options?: { readonly env?: Record<string, string | undefined> };
+                      }
+                    ).options?.env;
+                    return Effect.succeed(mockProcess(0));
+                  }),
+                );
+                yield* runDevRunnerWithInput({ ...devServerInput, t3Home: undefined }).pipe(
+                  Effect.provide(Layer.mergeAll(emptyConfigLayer, netServiceLayer, spawnerLayer)),
+                  Effect.provideService(HostProcess.Platform, "linux"),
+                  Effect.provideService(HostProcess.WorkingDirectory, root),
+                  Effect.provideService(HostProcess.HomeDirectory, fakeHome),
+                  Effect.provideService(HostProcess.Environment, envVars),
+                );
+                return captured?.T3CODE_HOME;
+              });
+
+            assert.equal(yield* capture({}), path.join(fakeHome, ".j3"));
+            assert.equal(
+              yield* capture({
+                J3CODE_HOME: path.join(root, "custom-j3"),
+                T3CODE_HOME: path.join(root, "custom-t3"),
+              }),
+              path.join(root, "custom-j3"),
+            );
+          }).pipe(Effect.scoped),
+      );
+
       it.effect("seeds a worktree database from ~/.t3 only when it has none", () =>
         Effect.gen(function* () {
           const path = yield* Path.Path;
