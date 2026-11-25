@@ -52,7 +52,13 @@ export function useK3RelayHostActions(environmentId: EnvironmentId) {
     createOffer: (): K3RelayHostCall<K3RelayPairingOffer> =>
       settle(createPairingOffer({ environmentId, input: {} })),
     cancelOffer: () => settle(cancelPairing({ environmentId, input: {} })),
-    approve: (deviceId: string) => settle(approvePairing({ environmentId, input: { deviceId } })),
+    approve: (deviceId: string, confirmationCode?: string) =>
+      settle(
+        approvePairing({
+          environmentId,
+          input: confirmationCode === undefined ? { deviceId } : { deviceId, confirmationCode },
+        }),
+      ),
     reject: () => settle(rejectPairing({ environmentId, input: {} })),
     revoke: (deviceId: string) => settle(revokeDevice({ environmentId, input: { deviceId } })),
   };

@@ -48,7 +48,8 @@ export interface K3RelayHostActions {
   readonly setRelayUrl: (url: string) => K3RelayHostCall;
   readonly createOffer: () => K3RelayHostCall<K3RelayPairingOffer>;
   readonly cancelOffer: () => K3RelayHostCall;
-  readonly approve: (deviceId: string) => K3RelayHostCall;
+  /** With the confirmation code the user compared; omitted only when the host offered one tap. */
+  readonly approve: (deviceId: string, confirmationCode?: string) => K3RelayHostCall;
   readonly reject: () => K3RelayHostCall;
   readonly revoke: (deviceId: string) => K3RelayHostCall;
   readonly rename: (deviceId: string, name: string) => K3RelayHostCall;
@@ -70,7 +71,13 @@ export function useK3RelayHostActions(environmentId: EnvironmentId): K3RelayHost
       settle(updateSettings({ environmentId, input: { patch: { relay: { url } } } })),
     createOffer: () => settle(createPairingOffer({ environmentId, input: {} })),
     cancelOffer: () => settle(cancelPairing({ environmentId, input: {} })),
-    approve: (deviceId) => settle(approvePairing({ environmentId, input: { deviceId } })),
+    approve: (deviceId, confirmationCode) =>
+      settle(
+        approvePairing({
+          environmentId,
+          input: confirmationCode === undefined ? { deviceId } : { deviceId, confirmationCode },
+        }),
+      ),
     reject: () => settle(rejectPairing({ environmentId, input: {} })),
     revoke: (deviceId) => settle(revokeDevice({ environmentId, input: { deviceId } })),
     rename: (deviceId, name) => settle(renameDevice({ environmentId, input: { deviceId, name } })),
