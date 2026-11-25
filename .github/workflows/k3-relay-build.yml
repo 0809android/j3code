@@ -44,9 +44,6 @@ jobs:
         with:
           persist-credentials: false
           sparse-checkout: |
-            /infra/k3-relay/
-          sparse-checkout-cone-mode: false
-          sparse-checkout: |
             /.github/actions/setup-ci-deps/
             /pnpm-workspace.yaml
             /package.json
