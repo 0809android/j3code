@@ -43,6 +43,10 @@
       "types": "./src/relay/index.ts",
       "import": "./src/relay/index.ts"
     },
+    "./notify": {
+      "types": "./src/notify/index.ts",
+      "import": "./src/notify/index.ts"
+    },
     "./composerPullRequestMatches": {
       "types": "./src/composerPullRequestMatches.ts",
       "import": "./src/composerPullRequestMatches.ts"
