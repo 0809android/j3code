@@ -1,0 +1,11 @@
+[Unit]
+Description=K3 relay nightly backup to OCI Object Storage
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/k3-relay/backup.env
+ExecStart=@@RELAY_DIR@@/deploy/backup.sh
+TimeoutStartSec=30min
+Nice=10

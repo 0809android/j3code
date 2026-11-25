@@ -25,7 +25,9 @@ import {
   type DeviceAlg,
   type Grant,
 } from "./crypto.ts";
+import { createAlertNotifier } from "./alerts.ts";
 import { FairScheduler } from "./fair.ts";
+import { SelfPing } from "./keepalive.ts";
 import { ExpiringSet, PreAuthLimiter, SlidingWindow, ipKey } from "./limits.ts";
 import { Metrics, type DisconnectReason } from "./metrics.ts";
 import {
@@ -36,6 +38,8 @@ import {
 } from "./pow.ts";
 import { BufferBudget, Splice, type EarlyMessage } from "./splice.ts";
 import { RelayStore, SCHEMA_HASH } from "./store.ts";
+import { HostThrottle } from "./throttle.ts";
+import { TrafficGuard, type HostPolicy } from "./traffic.ts";
 import { UsageMeter } from "./usage.ts";
 
 const DAY_MS = 86_400_000;
@@ -87,12 +91,16 @@ export interface RelayOptions {
   readonly config: RelayConfig;
   readonly logger?: Logger;
   readonly now?: () => number;
+  /** For the alarm webhook. Tests pass their own. */
+  readonly fetch?: typeof fetch;
 }
 
 export interface Relay {
   readonly events: NodeEvents.EventEmitter;
   readonly metrics: Metrics;
   readonly store: RelayStore;
+  /** Re-reads the blocklist now, and cuts off hosts that were blocked since the last read. */
+  syncBlocked(): void;
   listen(): Promise<number>;
   close(): Promise<void>;
 }
@@ -227,8 +235,11 @@ class RelayServer implements Relay {
   readonly #statusNonces: ExpiringSet;
   readonly #powUsed: ExpiringSet;
   readonly #powSecret: Buffer;
-  readonly #blocked: ReadonlySet<string>;
-  readonly #weights = new Map<string, { weight: number; until: number }>();
+  #blocked: ReadonlySet<string>;
+  readonly #policies = new Map<string, HostPolicy & { baseWeight: number; until: number }>();
+  readonly #traffic: TrafficGuard;
+  readonly #throttle: HostThrottle;
+  readonly #selfPing: SelfPing | null;
   readonly #usage: UsageMeter;
   readonly #scheduler: FairScheduler;
   readonly #budget: BufferBudget;
@@ -258,6 +269,38 @@ class RelayServer implements Relay {
         return () => clearTimeout(timer);
       },
     });
+    this.#traffic = new TrafficGuard({
+      totalBytes: () => this.#usage.totalBytes(),
+      now,
+      budgetBytes: config.egressBudgetBytes,
+      warnFraction: config.egressWarnFraction,
+      degradedFraction: config.egressDegradedFraction,
+      degradedHostBytesPerSec: config.degradedHostBytesPerSec,
+      pressureWeightFactor: config.pressureWeightFactor,
+      onAlert: createAlertNotifier({
+        logger: this.#logger,
+        webhookUrl: config.alertWebhookUrl,
+        fetch: options.fetch ?? fetch,
+      }),
+      onLevelChange: () => this.#policies.clear(),
+    });
+    this.#throttle = new HostThrottle({
+      capFor: (hostId) => this.#policy(hostId).capBytesPerSec,
+      now: () => performance.now(),
+      schedule: (callback, delayMs) => {
+        const timer = setTimeout(callback, delayMs);
+        timer.unref();
+        return () => clearTimeout(timer);
+      },
+    });
+    this.#selfPing = config.selfPingUrl
+      ? new SelfPing({
+          url: config.selfPingUrl,
+          intervalMs: config.selfPingIntervalMs,
+          fetch: options.fetch ?? fetch,
+          logger: this.#logger,
+        })
+      : null;
     this.metrics = new Metrics(
       {
         sessions: () => this.#sessions.size,
@@ -265,6 +308,12 @@ class RelayServer implements Relay {
         controls: () => this.#controls.size,
         sockets: () => this.#webSockets.size,
         bufferedBytes: () => this.#budget.used,
+        traffic: () => this.#traffic.status(),
+        selfPing: () => ({
+          enabled: this.#selfPing !== null && config.selfPingIntervalMs > 0,
+          ok: this.#selfPing?.ok ?? 0,
+          failed: this.#selfPing?.failed ?? 0,
+        }),
       },
       now,
     );
@@ -281,7 +330,7 @@ class RelayServer implements Relay {
     this.#powSecret = config.powSecret
       ? NodeCrypto.createHash("sha256").update(config.powSecret).digest()
       : NodeCrypto.randomBytes(32);
-    this.#blocked = new Set(config.blockedHosts);
+    this.#blocked = new Set([...config.blockedHosts, ...this.store.blockedHosts()]);
 
     this.#wss = new WebSocketServer({
       noServer: true,
@@ -326,7 +375,11 @@ class RelayServer implements Relay {
     this.#every(30_000, () => this.#usage.flush());
     this.#every(HOUR_MS, () => this.#purge());
     this.#every(1_000, () => this.metrics.sample());
+    this.#every(config.trafficCheckMs, () => this.#traffic.evaluate());
+    this.#every(config.blockedPollMs, () => this.syncBlocked());
+    this.#selfPing?.start();
     this.#purge();
+    this.#traffic.evaluate();
     const address = this.#http.address();
     this.#logger.info("listening", {
       port: typeof address === "object" && address ? address.port : 0,
@@ -339,6 +392,8 @@ class RelayServer implements Relay {
     this.#closing = true;
     for (const timer of this.#timers) clearInterval(timer);
     this.#scheduler.close();
+    this.#throttle.close();
+    this.#selfPing?.stop();
     for (const session of this.#sessions.values()) {
       this.#endSession(session, "shutdown", 1001, "shutdown");
     }
@@ -354,6 +409,30 @@ class RelayServer implements Relay {
     this.#usage.flush();
     this.store.close();
     this.#logger.info("closed");
+  }
+
+  /**
+   * The blocklist is the `BLOCKED_HOSTS` setting plus the table that `cli block` writes, so a
+   * block reaches a running relay within `blockedPollMs`. Control and data sockets of a newly
+   * blocked host are closed at once, and its new connections are refused.
+   */
+  syncBlocked(): void {
+    const next = new Set([...this.#config.blockedHosts, ...this.store.blockedHosts()]);
+    const added = [...next].filter((hostId) => !this.#blocked.has(hostId));
+    this.#blocked = next;
+    for (const hostId of added) this.#cutOff(hostId);
+  }
+
+  #cutOff(hostId: string): void {
+    for (const session of this.#hostSessions.get(hostId) ?? []) {
+      this.#endSession(session, "blocked", CLOSE.blocked, "blocked");
+    }
+    const control = this.#controls.get(hostId);
+    if (control && !control.accounted) {
+      control.accounted = true;
+      this.metrics.recordDisconnect("blocked");
+      control.ws.close(CLOSE.blocked, "blocked");
+    }
   }
 
   /** A throw inside a socket handler must cost that socket, not the process. */
@@ -399,6 +478,7 @@ class RelayServer implements Relay {
     this.#recentRegistrations.sweep();
     this.#statusNonces.sweep();
     this.#powUsed.sweep();
+    this.#throttle.sweep();
     const now = this.#now();
     for (const [hostId, state] of this.#pairing) {
       state.attempts = state.attempts.filter((at) => at > now - HOUR_MS);
@@ -406,8 +486,8 @@ class RelayServer implements Relay {
         this.#pairing.delete(hostId);
       }
     }
-    for (const [hostId, entry] of this.#weights)
-      if (entry.until <= now) this.#weights.delete(hostId);
+    for (const [hostId, entry] of this.#policies)
+      if (entry.until <= now) this.#policies.delete(hostId);
   }
 
   #purge(): void {
@@ -444,19 +524,30 @@ class RelayServer implements Relay {
     ws.once("close", () => this.#liveness.delete(ws));
   }
 
-  #hostWeight(hostId: string): number {
+  /**
+   * How the relay treats a host right now: its weight (age and monthly quota, then squeezed
+   * further when the relay as a whole is short of egress) and its ceiling in degraded mode.
+   * Kept for 30 seconds, and dropped whenever the traffic level changes.
+   */
+  #policy(hostId: string): HostPolicy & { baseWeight: number } {
     const now = this.#now();
-    const cached = this.#weights.get(hostId);
-    if (cached && cached.until > now) return cached.weight;
+    const cached = this.#policies.get(hostId);
+    if (cached && cached.until > now) return cached;
     const config = this.#config;
     const host = this.store.getHost(hostId);
-    let weight = 1;
+    let baseWeight = 1;
     if (host && Math.floor(now / DAY_MS) - host.registeredDay < config.newHostAgeDays) {
-      weight = config.newHostWeight;
+      baseWeight = config.newHostWeight;
     }
-    if (this.#usage.monthBytes(hostId) > config.monthlyQuotaBytes) weight *= config.overQuotaWeight;
-    this.#weights.set(hostId, { weight, until: now + 30_000 });
-    return weight;
+    const overQuota = this.#usage.monthBytes(hostId) > config.monthlyQuotaBytes;
+    if (overQuota) baseWeight *= config.overQuotaWeight;
+    const policy = {
+      ...this.#traffic.policyFor(baseWeight, overQuota),
+      baseWeight,
+      until: now + 30_000,
+    };
+    this.#policies.set(hostId, policy);
+    return policy;
   }
 
   #onRequest(req: NodeHttp.IncomingMessage, res: NodeHttp.ServerResponse): void {
@@ -719,12 +810,19 @@ class RelayServer implements Relay {
       200,
       JSON.stringify({
         online: this.#controls.has(hostId),
+        state: this.#hostState(hostId),
         month: {
           bytes: this.#usage.monthBytes(hostId),
           limit: this.#config.monthlyQuotaBytes,
         },
       }),
     );
+  }
+
+  /** What a device may tell its user about why the relay is slow for them, if it is. */
+  #hostState(hostId: string): "ok" | "squeezed" | "blocked" {
+    if (this.#blocked.has(hostId)) return "blocked";
+    return this.#policy(hostId).squeezed ? "squeezed" : "ok";
   }
 
   /**
@@ -838,6 +936,7 @@ class RelayServer implements Relay {
   #pairingAdmission(hostId: string): "ok" | "closed" | "limit" {
     const now = this.#now();
     const state = this.#pairing.get(hostId);
+    if (this.#blocked.has(hostId)) return "closed";
     if (!this.#controls.has(hostId) || !state || state.expiresAt <= now) return "closed";
     state.attempts = state.attempts.filter((at) => at > now - HOUR_MS);
     if (state.active >= this.#config.pairingMaxConcurrent) return "limit";
@@ -873,8 +972,9 @@ class RelayServer implements Relay {
         clearTimeout(timer);
         const hostId = this.#authenticateControl(data, isBinary, nonce);
         if (!hostId) return this.#closeEarly(ws, CLOSE.unauthorized, "unauthorized", "auth-failed");
-        if (this.#blocked.has(hostId))
-          return this.#closeEarly(ws, CLOSE.blocked, "blocked", "auth-failed");
+        if (this.#blocked.has(hostId)) {
+          return this.#closeEarly(ws, CLOSE.blocked, "blocked", "blocked");
+        }
         control = this.#adoptControl(ws, hostId);
         release();
       }),
@@ -1107,6 +1207,9 @@ class RelayServer implements Relay {
     deviceId: string | null,
   ): void {
     const config = this.#config;
+    if (this.#blocked.has(hostId)) {
+      return this.#closeEarly(ws, CLOSE.blocked, "blocked", "blocked");
+    }
     const control = this.#controls.get(hostId);
     if (!control || control.ws.readyState !== WebSocket.OPEN) {
       return this.#closeEarly(ws, CLOSE.hostOffline, "host-offline", "host-offline");
@@ -1123,6 +1226,11 @@ class RelayServer implements Relay {
     ) {
       this.metrics.rejections += 1;
       return this.#closeEarly(ws, CLOSE.limit, "limit", "limit");
+    }
+    // Degraded mode (spec section 9): the lowest-priority hosts wait until the month turns.
+    if (!this.#traffic.admitsNewSession(this.#policy(hostId).baseWeight)) {
+      this.metrics.rejections += 1;
+      return this.#closeEarly(ws, CLOSE.limit, "degraded", "degraded");
     }
 
     const token = NodeCrypto.randomBytes(16);
@@ -1215,11 +1323,12 @@ class RelayServer implements Relay {
       {
         config: this.#config,
         scheduler: this.#scheduler,
+        throttle: this.#throttle,
         budget: this.#budget,
         usage: this.#usage,
         metrics: this.metrics,
         events: this.events,
-        hostWeight: (hostId) => this.#hostWeight(hostId),
+        hostWeight: (hostId) => this.#policy(hostId).weight,
       },
       session.id,
       session.hostId,

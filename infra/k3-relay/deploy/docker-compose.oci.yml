@@ -1,0 +1,12 @@
+# The production additions to docker-compose.example.yml, used by deploy/compose.sh:
+#   - the image comes from RELAY_IMAGE (a pulled image) or is built here when it is unset;
+#   - settings that should not live in git (the alarm webhook, the self-ping) come from
+#     /etc/k3-relay/relay.env;
+#   - a directory the backup script reads snapshots from.
+services:
+  relay:
+    image: ${RELAY_IMAGE:-k3-relay:local}
+    env_file:
+      - /etc/k3-relay/relay.env
+    volumes:
+      - /var/lib/k3-relay/backup:/backup

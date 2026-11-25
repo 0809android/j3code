@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off -- the relay persists to node:sqlite and hashes the schema.
 import * as NodeCrypto from "node:crypto";
+import * as NodeFS from "node:fs";
 import * as NodeSqlite from "node:sqlite";
 
 import type { DeviceAlg } from "./crypto.ts";
@@ -45,6 +46,10 @@ CREATE TABLE IF NOT EXISTS usage (
   month TEXT NOT NULL,
   bytes INTEGER NOT NULL,
   PRIMARY KEY (host_id, month)
+) STRICT;
+CREATE TABLE IF NOT EXISTS blocked_hosts (
+  host_id TEXT PRIMARY KEY,
+  blocked_at INTEGER NOT NULL
 ) STRICT;
 `;
 
@@ -218,6 +223,26 @@ export class RelayStore {
     return Number(result.changes) > 0;
   }
 
+  /** Returns true when the host was not blocked before. */
+  blockHost(hostId: string, now: number): boolean {
+    const result = this.#stmt(
+      "INSERT OR IGNORE INTO blocked_hosts (host_id, blocked_at) VALUES (?, ?)",
+    ).run(hostId, now);
+    return Number(result.changes) > 0;
+  }
+
+  /** Returns true when the host was blocked. */
+  unblockHost(hostId: string): boolean {
+    const result = this.#stmt("DELETE FROM blocked_hosts WHERE host_id = ?").run(hostId);
+    return Number(result.changes) > 0;
+  }
+
+  blockedHosts(): string[] {
+    return this.#stmt("SELECT host_id FROM blocked_hosts ORDER BY host_id")
+      .all()
+      .map((row) => String(row.host_id));
+  }
+
   getUsage(hostId: string, month: string): number {
     const row = this.#stmt("SELECT bytes FROM usage WHERE host_id = ? AND month = ?").get(
       hostId,
@@ -226,11 +251,35 @@ export class RelayStore {
     return row ? Number(row.bytes) : 0;
   }
 
+  /** Everything the relay carried in a month, over all hosts. Survives a restart. */
+  sumUsage(month: string): number {
+    const row = this.#stmt("SELECT COALESCE(SUM(bytes), 0) AS n FROM usage WHERE month = ?").get(
+      month,
+    );
+    return Number(row?.n ?? 0);
+  }
+
   setUsage(hostId: string, month: string, bytes: number): void {
     this.#stmt(
       `INSERT INTO usage (host_id, month, bytes) VALUES (?, ?, ?)
        ON CONFLICT (host_id, month) DO UPDATE SET bytes = excluded.bytes`,
     ).run(hostId, month, bytes);
+  }
+
+  /**
+   * A consistent copy of the whole database in one new file (`VACUUM INTO`), taken while the
+   * relay keeps running. It fails if the file exists. The copy is checked before it is trusted,
+   * and removed again when the check fails.
+   */
+  snapshotTo(destPath: string): SnapshotInfo {
+    this.#db.prepare("VACUUM INTO ?").run(destPath);
+    try {
+      NodeFS.chmodSync(destPath, 0o600);
+      return verifySnapshot(destPath);
+    } catch (error) {
+      NodeFS.rmSync(destPath, { force: true });
+      throw error;
+    }
   }
 
   transaction(work: () => void): void {
@@ -298,6 +347,24 @@ export class RelayStore {
   close(): void {
     this.#statements.clear();
     this.#db.close();
+  }
+}
+
+export interface SnapshotInfo {
+  readonly hosts: number;
+  readonly bytes: number;
+}
+
+/** Opens a snapshot read-only and refuses it unless SQLite's own check passes. */
+export function verifySnapshot(path: string): SnapshotInfo {
+  const db = new NodeSqlite.DatabaseSync(path, { readOnly: true });
+  try {
+    const check = db.prepare("PRAGMA integrity_check").get();
+    if (check?.integrity_check !== "ok") throw new Error("snapshot failed the integrity check");
+    const hosts = Number(db.prepare("SELECT COUNT(*) AS n FROM hosts").get()?.n ?? 0);
+    return { hosts, bytes: NodeFS.statSync(path).size };
+  } finally {
+    db.close();
   }
 }
 

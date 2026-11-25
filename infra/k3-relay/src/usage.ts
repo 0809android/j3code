@@ -13,6 +13,7 @@ interface UsageEntry {
  */
 export class UsageMeter {
   readonly #entries = new Map<string, UsageEntry>();
+  #total = { month: "", bytes: 0 };
 
   private readonly store: RelayStore;
   private readonly now: () => number;
@@ -22,8 +23,7 @@ export class UsageMeter {
     this.now = now;
   }
 
-  #entry(hostId: string): UsageEntry {
-    const month = monthKey(this.now());
+  #entry(hostId: string, month = monthKey(this.now())): UsageEntry {
     let entry = this.#entries.get(hostId);
     if (!entry || entry.month !== month) {
       if (entry?.dirty) this.store.setUsage(hostId, entry.month, entry.bytes);
@@ -34,9 +34,27 @@ export class UsageMeter {
   }
 
   add(hostId: string, bytes: number): void {
-    const entry = this.#entry(hostId);
+    const month = monthKey(this.now());
+    this.#rollTotal(month);
+    this.#total.bytes += bytes;
+    const entry = this.#entry(hostId, month);
     entry.bytes += bytes;
     entry.dirty = true;
+  }
+
+  /**
+   * Bytes carried this month, over all hosts. Read from the database when the process starts
+   * and when the UTC month turns, so a restart does not forget what was already counted (the
+   * counters not yet flushed, at most 30 seconds' worth, are the only thing a crash loses).
+   */
+  totalBytes(): number {
+    this.#rollTotal(monthKey(this.now()));
+    return this.#total.bytes;
+  }
+
+  #rollTotal(month: string): void {
+    if (this.#total.month === month) return;
+    this.#total = { month, bytes: this.store.sumUsage(month) };
   }
 
   monthBytes(hostId: string): number {
