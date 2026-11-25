@@ -79,7 +79,7 @@ export interface MuxStream {
   /** Next chunk, or `End` once the peer closed; `End` repeats. Returning credit is what lets the peer send more. */
   readonly read: Effect.Effect<MuxChunk, MuxStreamError>;
   readonly incoming: Stream.Stream<Uint8Array, MuxStreamError>;
-  /** Waits for window credit. Large buffers are split into frames. */
+  /** Waits for window credit. Buffers over one frame are split; one frame or less is sent whole. */
   readonly send: (bytes: Uint8Array) => Effect.Effect<void, MuxStreamError>;
   /** Half-close: nothing more will be sent. Idempotent. */
   readonly close: (payload?: Uint8Array) => Effect.Effect<void, MuxStreamError>;
@@ -169,6 +169,8 @@ interface StreamState {
   endChunk: MuxChunk | undefined;
   readonly outbox: Array<Uint8Array>;
   inReady: boolean;
+  /** Frames of this stream already handed to the socket; its OPEN is the first. */
+  framesWritten: number;
   readonly readWaiters: Waiters;
   readonly sendWaiters: Waiters;
   fiber: Fiber.Fiber<void, never> | undefined;
@@ -183,7 +185,12 @@ export const makeMuxSession = Effect.fn("MuxSession.make")(function* <E = never,
   options: MuxSessionOptions<E, R>,
 ) {
   const { role, handler } = options;
-  const limits: MuxLimits = { ...MUX_DEFAULT_LIMITS, ...options.limits };
+  const requested: MuxLimits = { ...MUX_DEFAULT_LIMITS, ...options.limits };
+  // A window smaller than a frame could never carry one.
+  const limits: MuxLimits = {
+    ...requested,
+    streamWindowBytes: Math.max(requested.streamWindowBytes, MUX_DATA_CHUNK_BYTES),
+  };
   const services = yield* Effect.context<R>();
   const runFork = Effect.runForkWith(services);
   const scope = yield* Effect.scope;
@@ -235,6 +242,7 @@ export const makeMuxSession = Effect.fn("MuxSession.make")(function* <E = never,
         stream.inReady = false;
         continue;
       }
+      stream.framesWritten += 1;
       if (stream.outbox.length > 0) ready.push(stream);
       else stream.inReady = false;
       return next;
@@ -275,7 +283,10 @@ export const makeMuxSession = Effect.fn("MuxSession.make")(function* <E = never,
 
   const resetStream = (stream: StreamState, code: MuxResetCode, detail: string) => {
     if (stream.done) return;
+    const peerKnowsStream = !stream.initiator || stream.framesWritten > 0;
     failStream(stream, new MuxStreamResetError({ code, detail, local: true }), false);
+    // An OPEN still queued never reached the peer; a RESET for it would look like a protocol error.
+    if (!peerKnowsStream) return;
     pushControl({
       streamId: stream.id,
       type: MuxFrameType.Reset,
@@ -318,6 +329,7 @@ export const makeMuxSession = Effect.fn("MuxSession.make")(function* <E = never,
     endChunk: undefined,
     outbox: [],
     inReady: false,
+    framesWritten: 0,
     readWaiters: new Waiters(),
     sendWaiters: new Waiters(),
     fiber: undefined,
@@ -350,12 +362,13 @@ export const makeMuxSession = Effect.fn("MuxSession.make")(function* <E = never,
       }
       let offset = 0;
       while (offset < bytes.length) {
+        // A frame goes out whole or not at all, so a buffer of one frame or less is never split.
+        const length = Math.min(bytes.length - offset, MUX_DATA_CHUNK_BYTES);
         yield* state.sendWaiters.waitUntil(
-          () => state.terminal !== undefined || state.localClosed || state.sendWindow > 0,
+          () => state.terminal !== undefined || state.localClosed || state.sendWindow >= length,
         );
         if (state.terminal !== undefined) return yield* state.terminal;
         if (state.localClosed) return yield* stateError("The stream is closed for sending.");
-        const length = Math.min(bytes.length - offset, state.sendWindow, MUX_DATA_CHUNK_BYTES);
         state.sendWindow -= length;
         enqueue(state, {
           streamId: state.id,

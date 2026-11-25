@@ -144,37 +144,48 @@ describe("mux session", () => {
       }),
   );
 
-  it.effect("stops at the window and sends exactly the credit it is given", () =>
+  it.effect("stops at the window, sends whole frames, and resumes on credit", () =>
     Effect.gen(function* () {
+      const frame = MUX_DATA_CHUNK_BYTES;
       const pair = yield* makeMemorySocketPair();
-      const client = yield* makeMuxSession({ socket: pair.a, role: "client" });
+      const client = yield* makeMuxSession({
+        socket: pair.a,
+        role: "client",
+        limits: { streamWindowBytes: 4 * frame },
+      });
       const peer = yield* makeRawPeer(pair.b);
-      const stream = yield* client.open({ kind: "http", method: "PUT", path: "/", headers: [] });
-      const sender = yield* Effect.forkChild(stream.send(new Uint8Array(WINDOW + 1000)));
+      const meta = { kind: "http", method: "PUT", path: "/", headers: [] } as const;
+      const bulk = yield* client.open(meta);
+      const other = yield* client.open(meta);
+      const sender = yield* Effect.forkChild(bulk.send(new Uint8Array(6 * frame)));
 
-      let received = 0;
-      while (received < WINDOW) {
-        const frame = yield* peer.readType(MuxFrameType.Data);
-        received += frame.payload.length;
+      for (let received = 0; received < 4; received += 1) {
+        assert.equal((yield* peer.readType(MuxFrameType.Data)).payload.length, frame);
       }
-      assert.equal(received, WINDOW);
+      // Anything the bulk stream may not send yet would go out before this one: it shares the turn order.
+      yield* other.send(new Uint8Array([9]));
+      const marker = yield* peer.readType(MuxFrameType.Data);
+      assert.equal(marker.streamId, other.id);
+
+      // Half a frame of credit is not enough for the next frame.
+      yield* peer.write({
+        streamId: bulk.id,
+        type: MuxFrameType.Window,
+        payload: encodeWindowPayload(frame / 2),
+      });
+      yield* other.send(new Uint8Array([9]));
+      assert.equal((yield* peer.readType(MuxFrameType.Data)).streamId, other.id);
 
       yield* peer.write({
-        streamId: stream.id,
+        streamId: bulk.id,
         type: MuxFrameType.Window,
-        payload: encodeWindowPayload(500),
+        payload: encodeWindowPayload(frame * 2),
       });
-      const next = yield* peer.readType(MuxFrameType.Data);
-      assert.equal(next.payload.length, 500);
-
-      yield* peer.write({
-        streamId: stream.id,
-        type: MuxFrameType.Window,
-        payload: encodeWindowPayload(500),
-      });
+      for (let received = 0; received < 2; received += 1) {
+        const next = yield* peer.readType(MuxFrameType.Data);
+        assert.deepStrictEqual([next.streamId, next.payload.length], [bulk.id, frame]);
+      }
       yield* Fiber.join(sender);
-      const last = yield* peer.readType(MuxFrameType.Data);
-      assert.equal(last.payload.length, 500);
     }),
   );
 
