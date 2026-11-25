@@ -17,7 +17,7 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import { ACCOUNT_APP_REDIRECT, type AccountProvider } from "@t3tools/shared/relay";
 import { RadioTowerIcon, ShieldCheckIcon } from "lucide-react";
 import { T, useGT, useMessages, Var } from "gt-react";
-import { useContext, useEffect, useEffectEvent, useState } from "react";
+import { useContext, useEffect, useEffectEvent, useRef, useState } from "react";
 
 import { k3relayAccount } from "~/connection/onboarding";
 import { m } from "~/i18n/messages";
@@ -392,6 +392,7 @@ export function K3RelayAccountPanel({
   const state = useAtomValue(k3relayAccountScreenAtom);
   const [desktopCallback, setDesktopCallback] = useAtom(pendingK3RelayAccountCallbackAtom);
   const [deviceName, setDeviceName] = useState(defaultDeviceName);
+  const redeemingRef = useRef(false);
   const offer = useAtomCommand(k3relayAccount.offer, { reportFailure: false });
   const startSignIn = useAtomCommand(k3relayAccount.startSignIn, { reportFailure: false });
   const completeSignIn = useAtomCommand(k3relayAccount.completeSignIn, { reportFailure: false });
@@ -451,7 +452,10 @@ export function K3RelayAccountPanel({
     const { pending } = current.signIn.pending;
     // Another sign-in's callback (an old tab, a second click) is not ours to redeem.
     if (!k3relayAccountCallbackMatches(pending, url)) return;
-    const result = await completeSignIn({ pending, callbackUrl: url });
+    redeemingRef.current = true;
+    const result = await completeSignIn({ pending, callbackUrl: url }).finally(() => {
+      redeemingRef.current = false;
+    });
     if (result._tag === "Success") {
       dispatch({ type: "signed-in", session: result.value });
       await loadHosts();
@@ -493,6 +497,8 @@ export function K3RelayAccountPanel({
 
   const cancelSignIn = () => {
     if (state.kind !== "signed-out" || state.signIn?.step !== "waiting") return;
+    // The callback already arrived and is being redeemed; let it finish.
+    if (redeemingRef.current) return;
     void forget({ keyId: state.signIn.pending.pending.keyId });
     dispatch({ type: "sign-in-cancelled" });
   };
