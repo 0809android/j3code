@@ -1181,12 +1181,13 @@ jobs:
   build_web:
     name: Build hosted web app
     needs: [preflight, relay_public_config]
-    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.relay_public_config.result == 'success' && needs.preflight.outputs.release_channel != 'preview' }}
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.relay_public_config.result == 'success' && needs.preflight.outputs.release_channel != 'preview' && vars.K3CODE_HOSTED_APP_URL != '' }}
     runs-on: blacksmith-8vcpu-ubuntu-2404
     timeout-minutes: 10
     outputs:
       deployment_url: ${{ steps.deploy.outputs.deployment_url }}
     env:
+      K3CODE_HOSTED_APP_URL: ${{ vars.K3CODE_HOSTED_APP_URL }}
       K3CODE_CLERK_PUBLISHABLE_KEY: ${{ needs.relay_public_config.outputs.clerk_publishable_key }}
       K3CODE_CLERK_JWT_TEMPLATE: ${{ needs.relay_public_config.outputs.clerk_jwt_template }}
       K3CODE_CLERK_CLI_OAUTH_CLIENT_ID: ${{ needs.relay_public_config.outputs.clerk_cli_oauth_client_id }}
@@ -1242,7 +1243,7 @@ jobs:
             exit 1
           fi
 
-          router_url="${K3CODE_WEB_ROUTER_URL:-https://app.t3.codes}"
+          router_url="${K3CODE_WEB_ROUTER_URL:-$K3CODE_HOSTED_APP_URL}"
           if [[ "${{ needs.preflight.outputs.release_channel }}" == "stable" ]]; then
             channel_name="latest"
           else
@@ -1282,10 +1283,11 @@ jobs:
   deploy_web:
     name: Deploy hosted web app
     needs: [preflight, build_web, release, publish_cli]
-    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.build_web.result == 'success' && needs.release.result == 'success' && needs.publish_cli.result == 'success' && needs.preflight.outputs.release_channel != 'preview' }}
+    if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.build_web.result == 'success' && needs.release.result == 'success' && needs.publish_cli.result == 'success' && needs.preflight.outputs.release_channel != 'preview' && vars.K3CODE_HOSTED_APP_URL != '' }}
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     env:
+      K3CODE_HOSTED_APP_URL: ${{ vars.K3CODE_HOSTED_APP_URL }}
       DEPLOYMENT_URL: ${{ needs.build_web.outputs.deployment_url }}
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
@@ -1322,9 +1324,9 @@ jobs:
             exit 1
           fi
 
-          router_url="${K3CODE_WEB_ROUTER_URL:-https://app.t3.codes}"
-          latest_domain="${K3CODE_WEB_LATEST_DOMAIN:-latest.app.t3.codes}"
-          nightly_domain="${K3CODE_WEB_NIGHTLY_DOMAIN:-nightly.app.t3.codes}"
+          router_url="${K3CODE_WEB_ROUTER_URL:-$K3CODE_HOSTED_APP_URL}"
+          latest_domain="${K3CODE_WEB_LATEST_DOMAIN:-}"
+          nightly_domain="${K3CODE_WEB_NIGHTLY_DOMAIN:-}"
           router_domain="${router_url#http://}"
           router_domain="${router_domain#https://}"
           router_domain="${router_domain%%/*}"
@@ -1335,6 +1337,11 @@ jobs:
           else
             channel_domain="$nightly_domain"
             channel_name="nightly"
+          fi
+
+          if [[ -z "$channel_domain" ]]; then
+            echo "Set the K3CODE_WEB_LATEST_DOMAIN or K3CODE_WEB_NIGHTLY_DOMAIN variable for the $channel_name channel." >&2
+            exit 1
           fi
 
           vercel_scope_args=(--scope "${VERCEL_TEAM_SLUG:-$VERCEL_ORG_ID}")
@@ -1557,7 +1564,7 @@ jobs:
       needs.preflight.outputs.release_channel != 'preview' &&
       needs.relay_public_config.result == 'success' &&
       needs.release.result == 'success' &&
-      needs.deploy_web.result == 'success' &&
+      (needs.deploy_web.result == 'success' || needs.deploy_web.result == 'skipped') &&
       (needs.finalize.result == 'success' || needs.finalize.result == 'skipped')
     needs: [preflight, relay_public_config, release, deploy_web, finalize]
     runs-on: blacksmith-8vcpu-ubuntu-2404
