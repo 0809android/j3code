@@ -62,5 +62,28 @@ export function createK3RelayEnvironmentAtoms<R, E>(
       scheduler,
       concurrency,
     }),
+    /** The host's account at the relay and the approval policy for account devices (§20). */
+    accountState: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:k3relay:account-state",
+      tag: WS_METHODS.k3RelayAccountSubscribe,
+    }),
+    accountSignIn: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:k3relay:account-sign-in",
+      tag: WS_METHODS.k3RelayAccountSignIn,
+      scheduler,
+      concurrency,
+    }),
+    accountSignOut: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:k3relay:account-sign-out",
+      tag: WS_METHODS.k3RelayAccountSignOut,
+      scheduler,
+      concurrency,
+    }),
+    accountSetApproval: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:k3relay:account-set-approval",
+      tag: WS_METHODS.k3RelayAccountSetApproval,
+      scheduler,
+      concurrency,
+    }),
   };
 }
