@@ -1,3 +1,4 @@
+import type { FetchEventSourceConstructor } from "@t3tools/shared/mux";
 import { EnvironmentId, type ExecutionEnvironmentDescriptor } from "@t3tools/contracts";
 import { RelayEnvironmentEndpointFailure } from "@t3tools/contracts/relay";
 import * as Schema from "effect/Schema";
@@ -204,6 +205,8 @@ export interface ConnectionTransport {
     url: string,
     protocols?: string | ReadonlyArray<string>,
   ) => Socket.WebSocketLike;
+  /** `EventSource` over this channel's `fetch`, with `Last-Event-ID` reconnects. */
+  readonly eventSourceConstructor?: FetchEventSourceConstructor;
 }
 
 export interface PreparedConnection {

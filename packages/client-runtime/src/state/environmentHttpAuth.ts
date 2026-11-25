@@ -153,7 +153,7 @@ const executeEnvironmentRequest = Effect.fnUntraced(function* <
 >(input: {
   readonly prepared: Pick<
     PreparedConnection,
-    "environmentId" | "httpBaseUrl" | "httpAuthorization" | "target"
+    "environmentId" | "httpBaseUrl" | "httpAuthorization" | "target" | "transport"
   >;
   readonly signer: Option.Option<ManagedRelay.ManagedRelayDpopSigner["Service"]>;
   readonly remoteAuthorization?: Option.Option<
@@ -272,6 +272,15 @@ const executeEnvironmentRequest = Effect.fnUntraced(function* <
       return result.success;
     }
   }).pipe(
+    // Through a K3 relay, every request (and its token renewal) goes over the E2E channel.
+    (effect) =>
+      input.prepared.transport === undefined
+        ? effect
+        : Effect.provideService(
+            effect,
+            FetchHttpClient.Fetch,
+            input.prepared.transport.fetch as typeof fetch,
+          ),
     Effect.timeoutOrElse({
       duration: input.timeoutMs,
       orElse: () =>

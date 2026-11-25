@@ -78,7 +78,8 @@ export interface K3RelaySettingsActions {
   readonly setRelayUrl: (relayUrl: string) => void;
   readonly createOffer: () => void;
   readonly cancelOffer: () => void;
-  readonly approve: (deviceId: string) => void;
+  /** With the compared code, or without one when the host offered one tap. */
+  readonly approve: (deviceId: string, confirmationCode?: string) => void;
   readonly reject: () => void;
   readonly revoke: (deviceId: string) => void;
   readonly rename: (deviceId: string, name: string) => void;
@@ -269,15 +270,26 @@ export function K3RelaySettingsView({
                   <Var>{pending.deviceName}</Var> wants to connect
                 </T>
               </p>
-              <p className="font-mono text-2xl font-semibold tracking-widest text-foreground tabular-nums">
-                {pending.confirmationCode}
-              </p>
-              <p className="text-xs leading-relaxed text-muted-foreground">
-                <T>
-                  Approve only if the new device is in your hands and shows this exact code. A
-                  different code means someone else is pairing: reject it.
-                </T>
-              </p>
+              {pending.approval === "one-tap" ? (
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  <T>
+                    It arrived while Add device was open, so one tap approves it. Approve only if
+                    the new device is in your hands.
+                  </T>
+                </p>
+              ) : (
+                <>
+                  <p className="font-mono text-2xl font-semibold tracking-widest text-foreground tabular-nums">
+                    {pending.confirmationCode}
+                  </p>
+                  <p className="text-xs leading-relaxed text-muted-foreground">
+                    <T>
+                      Approve only if the new device is in your hands and shows this exact code. A
+                      different code means someone else is pairing: reject it.
+                    </T>
+                  </p>
+                </>
+              )}
               <div className="flex gap-2">
                 <Button
                   size="xs"
@@ -290,7 +302,12 @@ export function K3RelaySettingsView({
                 <Button
                   size="xs"
                   disabled={disabled}
-                  onClick={() => actions.approve(pending.deviceId)}
+                  onClick={() =>
+                    actions.approve(
+                      pending.deviceId,
+                      pending.approval === "one-tap" ? undefined : pending.confirmationCode,
+                    )
+                  }
                 >
                   <T>Approve</T>
                 </Button>

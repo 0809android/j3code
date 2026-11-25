@@ -152,7 +152,11 @@ const previewStreamAccessAtom = Atom.family((environmentId: EnvironmentId) =>
       );
       const notBefore = get(previewStreamNotBeforeAtom(environmentId));
       if (prepared === null) return Effect.never;
-      const resolve = resolveDeviceHubAccess({ prepared, hubBasePath: PREVIEW_STREAM_BASE_PATH });
+      const resolve = resolveDeviceHubAccess({
+        prepared,
+        hubBasePath: PREVIEW_STREAM_BASE_PATH,
+        feature: "preview-stream",
+      });
       // A recompute interrupts the wait, so only the newest retry resolves.
       const wait = notBefore - Date.now();
       return wait > 0 ? Effect.andThen(Effect.sleep(wait), resolve) : resolve;

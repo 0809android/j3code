@@ -136,25 +136,44 @@ export function K3RelaySettingsSection(props: {
           <Text className="text-base text-foreground">
             {gt("{name} wants to connect", { name: pending.deviceName })}
           </Text>
-          <Text
-            selectable
-            className="font-mono text-2xl font-t3-semibold tracking-widest text-foreground"
-          >
-            {pending.confirmationCode}
-          </Text>
-          <Text className="text-sm leading-normal text-foreground-muted">
-            <T>
-              Approve only if the new device is in your hands and shows this exact code. A different
-              code means someone else is pairing: reject it.
-            </T>
-          </Text>
+          {pending.approval === "one-tap" ? (
+            <Text className="text-sm leading-normal text-foreground-muted">
+              <T>
+                It arrived while Add device was open, so one tap approves it. Approve only if the
+                new device is in your hands.
+              </T>
+            </Text>
+          ) : (
+            <>
+              <Text
+                selectable
+                className="font-mono text-2xl font-t3-semibold tracking-widest text-foreground"
+              >
+                {pending.confirmationCode}
+              </Text>
+              <Text className="text-sm leading-normal text-foreground-muted">
+                <T>
+                  Approve only if the new device is in your hands and shows this exact code. A
+                  different code means someone else is pairing: reject it.
+                </T>
+              </Text>
+            </>
+          )}
         </View>
       ) : null}
       {pending !== null ? (
         <ListActionRow
           label={gt("Approve")}
           disabled={disabled}
-          onPress={() => run(gt("Could not approve the device"), host.approve(pending.deviceId))}
+          onPress={() =>
+            run(
+              gt("Could not approve the device"),
+              host.approve(
+                pending.deviceId,
+                pending.approval === "one-tap" ? undefined : pending.confirmationCode,
+              ),
+            )
+          }
         />
       ) : null}
       {pending !== null ? (

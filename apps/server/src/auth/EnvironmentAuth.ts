@@ -72,6 +72,13 @@ export const relayPairedDeviceSubject = (deviceId: string) =>
 export const isRelayPairedDeviceSubject = (subject: string) =>
   subject === RELAY_PAIRED_DEVICE_SUBJECT || subject.startsWith(`${RELAY_PAIRED_DEVICE_SUBJECT}:`);
 
+/** The relay device a session belongs to; undefined for any other session. */
+export const relayPairedDeviceIdOf = (subject: string): string | undefined => {
+  const prefix = `${RELAY_PAIRED_DEVICE_SUBJECT}:`;
+  const deviceId = subject.startsWith(prefix) ? subject.slice(prefix.length) : "";
+  return deviceId.length > 0 ? deviceId : undefined;
+};
+
 /**
  * Stands in for a DPoP thumbprint on a relay device's bootstrap credential. A JWK thumbprint is
  * base64url and never holds a colon, so only an exchange the relay bridge made for that

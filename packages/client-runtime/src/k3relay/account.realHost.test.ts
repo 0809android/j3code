@@ -83,7 +83,8 @@ interface RealHost {
     predicate: (state: K3RelayHostState) => boolean,
     timeoutMs?: number,
   ) => Promise<K3RelayHostState>;
-  readonly approvePairing: (deviceId: string) => Promise<unknown>;
+  readonly createPairingOffer: () => Promise<unknown>;
+  readonly approvePairing: (deviceId: string, confirmationCode?: string) => Promise<unknown>;
   readonly rejectPairing: () => Promise<void>;
   readonly account: {
     readonly signIn: (provider: "github" | "google" | "apple") => Promise<{ authorizeUrl: string }>;
@@ -325,7 +326,18 @@ describe("K3 Relay accounts, end to end", () => {
         // Nothing is in the ledger until the user approves.
         expect((yield* Effect.promise(() => host.state())).devices).toEqual([]);
 
-        yield* Effect.promise(() => host.approvePairing(waiting.deviceId));
+        // No "Add device" window was open, so the user compares codes: approving needs the code.
+        expect(waiting.approval).toBe("compare-code");
+        const withoutCode = yield* Effect.promise(() =>
+          host.approvePairing(waiting.deviceId).then(
+            () => null,
+            (error: unknown) => error,
+          ),
+        );
+        expect(withoutCode).toMatchObject({ failure: "confirmation-required" });
+        yield* Effect.promise(() =>
+          host.approvePairing(waiting.deviceId, waiting.confirmationCode),
+        );
         const paired = yield* Fiber.join(fiber);
         expect(deviceIdFromPublicKey(paired.signer.alg, paired.signer.publicKey)).toBe(
           waiting.deviceId,
@@ -396,6 +408,34 @@ describe("K3 Relay accounts, end to end", () => {
           "awaiting-approval",
         );
       }).pipe(Effect.scoped, Effect.provide(Layer.merge(layerDevice, layerWebSocketGlobal))),
+  );
+
+  it.live('lets the first account device in an open "Add device" window in with one tap', () =>
+    Effect.gen(function* () {
+      const world = yield* startWorld;
+      const host = yield* world.startHost;
+      yield* signInHost(world, host);
+      yield* Effect.promise(() => host.createPairingOffer());
+
+      const session = yield* signInDevice(world);
+      const { fiber, deviceCode } = yield* knock(session, host);
+      yield* deviceCode;
+      const waiting = (yield* Effect.promise(() =>
+        host.awaitState((state) => state.pairing.phase === "awaiting-approval"),
+      )).pairing;
+      assert(waiting.phase === "awaiting-approval");
+      expect(waiting.approval).toBe("one-tap");
+      const accountState = yield* Effect.promise(() =>
+        host.account.awaitState((state) => state.pendingDevice !== null),
+      );
+      expect(accountState.pendingDevice).toEqual({ deviceId: waiting.deviceId, oneTap: true });
+
+      yield* Effect.promise(() => host.approvePairing(waiting.deviceId));
+      const paired = yield* Fiber.join(fiber);
+      expect(deviceIdFromPublicKey(paired.signer.alg, paired.signer.publicKey)).toBe(
+        waiting.deviceId,
+      );
+    }).pipe(Effect.scoped, Effect.provide(Layer.merge(layerDevice, layerWebSocketGlobal))),
   );
 
   it.live("approves without the user only after an acknowledged opt-out", () =>

@@ -1,5 +1,6 @@
 import { WS_METHODS } from "@t3tools/contracts";
-import type { Atom } from "effect/reactivity";
+import * as Cause from "effect/Cause";
+import type { AsyncResult, Atom } from "effect/reactivity";
 
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 import {
@@ -7,6 +8,33 @@ import {
   createEnvironmentRpcCommand,
   createEnvironmentRpcSubscriptionAtomFamily,
 } from "./runtime.ts";
+
+const UNKNOWN_RPC = /Unknown request tag/u;
+
+const failureText = (value: unknown): string =>
+  typeof value === "string"
+    ? value
+    : typeof value === "object" && value !== null && "message" in value
+      ? String((value as { readonly message: unknown }).message)
+      : "";
+
+/**
+ * Whether the host answered as one without the relay RPCs (an older K3 Code): its RPC server
+ * refuses the unknown method. Its settings then leave the relay out instead of showing an error.
+ */
+export const hostLacksK3Relay = (result: AsyncResult.AsyncResult<unknown, unknown>): boolean =>
+  result._tag === "Failure" &&
+  result.cause.reasons.some((reason) =>
+    UNKNOWN_RPC.test(
+      failureText(
+        Cause.isDieReason(reason)
+          ? reason.defect
+          : Cause.isFailReason(reason)
+            ? reason.error
+            : undefined,
+      ),
+    ),
+  );
 
 /**
  * The host's K3 relay as its settings screen uses it: the live state, pairing, and the device
@@ -84,6 +112,11 @@ export function createK3RelayEnvironmentAtoms<R, E>(
       tag: WS_METHODS.k3RelayAccountSetApproval,
       scheduler,
       concurrency,
+    }),
+    /** A relayed device takes itself off the host; the host reads which device from the session. */
+    forgetThisDevice: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:k3relay:forget-this-device",
+      tag: WS_METHODS.k3RelayForgetThisDevice,
     }),
   };
 }

@@ -71,7 +71,7 @@ const makeHandler = Effect.fnUntraced(function* (browser: ServerBrowser.ServerBr
   ) {
     return HttpServerResponse.text("Not Found", { status: 404 });
   }
-  const session = yield* authenticateMediaRequest(AuthOrchestrationReadScope);
+  const session = yield* authenticateMediaRequest(AuthOrchestrationReadScope, "preview-stream");
   const params = url.value.searchParams;
   const canOperate =
     session.scopes.includes(AuthPreviewOperateScope) && params.get("interactive") !== "false";
@@ -240,7 +240,7 @@ const serveDownload = Effect.fnUntraced(function* (
   browser: ServerBrowser.ServerBrowser["Service"],
   params: URLSearchParams,
 ) {
-  yield* authenticateMediaRequest(AuthOrchestrationReadScope);
+  yield* authenticateMediaRequest(AuthOrchestrationReadScope, "preview-stream");
   const download = yield* browser.openDownload({
     threadId: params.get("threadId") ?? "",
     tabId: params.get("tabId") ?? "",
@@ -261,7 +261,7 @@ const UPLOAD_MAX_FILES = 20;
 // The request span already covers this upload route.
 const receiveUpload = Effect.fnUntraced(
   function* (browser: ServerBrowser.ServerBrowser["Service"], params: URLSearchParams) {
-    yield* authenticateMediaRequest(AuthPreviewOperateScope);
+    yield* authenticateMediaRequest(AuthPreviewOperateScope, "preview-stream");
     const request = yield* HttpServerRequest.HttpServerRequest;
     const fs = yield* FileSystem.FileSystem;
     const parts = yield* request.multipart.pipe(

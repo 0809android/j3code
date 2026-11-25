@@ -166,7 +166,7 @@ const handler = Effect.gen(function* () {
   ) {
     return HttpServerResponse.text("Bad Request", { status: 400 });
   }
-  const session = yield* authenticateMediaRequest(AuthTerminalOperateScope);
+  const session = yield* authenticateMediaRequest(AuthTerminalOperateScope, "preview-tunnel");
   const sessions = yield* SessionStore.SessionStore;
   const tunnel = yield* PreviewTunnel;
   const connection = NodeHttpServerRequest.toIncomingMessage(request).socket;

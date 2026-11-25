@@ -1,3 +1,4 @@
+import { uploadThroughRelay } from "@t3tools/client-runtime/k3relay";
 import { resolveAssetUrl } from "@t3tools/client-runtime/state/assets";
 import {
   isAssetAttachmentNotFoundFailure,
@@ -233,6 +234,22 @@ async function uploadFileBytes(
       await file.write(inlineDataUrl.slice(inlineDataUrl.indexOf(",") + 1), {
         encoding: "base64",
       });
+    }
+    // Behind a K3 relay the slot is only reachable over the E2E channel, not by a native upload.
+    const relay = Option.getOrUndefined(
+      appAtomRegistry.get(environmentSession.preparedConnectionValueAtom(environmentId)),
+    )?.transport;
+    if (relay !== undefined) {
+      onProgress?.(0);
+      await uploadThroughRelay({
+        transport: relay,
+        url,
+        body: await file.bytes(),
+        mimeType: composerAttachmentWireMimeType(attachment),
+        signal,
+        onProgress,
+      });
+      return;
     }
     const result = await file.upload(url, {
       httpMethod: "POST",

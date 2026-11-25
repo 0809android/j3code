@@ -1,4 +1,5 @@
 import {
+  k3RelayUnsupportedResponse,
   AuthOrchestrationOperateScope,
   SPEECH_STREAM_PATH,
   SPEECH_STREAM_MAX_CHUNK_BYTES,
@@ -15,6 +16,7 @@ import * as Scope from "effect/Scope";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import * as Socket from "effect/socket/Socket";
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
+import { isRelayRequest } from "../auth/transportSecurity.ts";
 import * as SpeechService from "./SpeechService.ts";
 
 // A recording client streams audio continuously; behind a proxy a vanished
@@ -123,6 +125,12 @@ export const speechStreamRouteLayer = Layer.unwrap(
       SPEECH_STREAM_PATH,
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
+        // Live dictation authenticates with a media ticket in the URL, which the relay never carries.
+        if (isRelayRequest(request)) {
+          return HttpServerResponse.jsonUnsafe(k3RelayUnsupportedResponse("voice-input"), {
+            status: 403,
+          });
+        }
         const session = yield* auth
           .authenticateWebSocketUpgrade(request, "media")
           .pipe(Effect.result);

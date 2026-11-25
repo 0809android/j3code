@@ -1,7 +1,10 @@
 export * from "./admission.ts";
 export * from "./deviceKeyStore.ts";
 export * from "./failure.ts";
+export * from "./relayAssets.ts";
+export * from "./relayUpload.ts";
 export * from "./status.ts";
+export * from "./unsupported.ts";
 export {
   K3RelayOnboarding,
   K3RelayPairingError,

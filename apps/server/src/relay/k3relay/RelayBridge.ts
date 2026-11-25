@@ -8,7 +8,13 @@ import type * as HttpServerError from "effect/http/HttpServerError";
 import * as HttpServerRequest from "effect/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
 
-import { K3_RELAY_PROVISIONAL_ORIGIN } from "@t3tools/contracts";
+import {
+  GUEST_ROUTE_PREFIX,
+  K3_RELAY_PROVISIONAL_ORIGIN,
+  type K3RelayUnsupportedFeature,
+  SPEECH_STREAM_PATH,
+  k3RelayUnsupportedResponse,
+} from "@t3tools/contracts";
 import {
   type MuxHandler,
   type MuxHeaders,
@@ -74,13 +80,74 @@ const DROPPED_HEADERS = new Set([
   "sec-websocket-accept",
 ]);
 
+// What a proxy in front of the host would say about the client. The device is not such a proxy,
+// so whatever it put here is dropped (the mux host already drops most; this is the bridge's own).
+const SPOOFABLE_HEADERS = new Set(["forwarded", "x-real-ip", "true-client-ip"]);
+
+const isSpoofable = (lower: string) =>
+  SPOOFABLE_HEADERS.has(lower) || lower.startsWith("x-forwarded-") || lower.startsWith("cf-");
+
 const requestHeaders = (headers: MuxHeaders): Headers => {
   const out = new Headers();
   for (const [name, value] of headers) {
-    if (!DROPPED_HEADERS.has(name.toLowerCase())) out.append(name, value);
+    const lower = name.toLowerCase();
+    if (!DROPPED_HEADERS.has(lower) && !isSpoofable(lower)) out.append(name, value);
   }
   return out;
 };
+
+/**
+ * Routes that cannot work through the relay (spec §12), refused here before the router sees them.
+ * They hand out or redeem credentials in URLs, or reach for the Node socket under the request,
+ * which a bridged request does not have. Their own handlers refuse relayed requests too.
+ */
+const REFUSED_ROUTES: ReadonlyArray<readonly [prefix: string, feature: K3RelayUnsupportedFeature]> =
+  [
+    [GUEST_ROUTE_PREFIX, "guest-share"],
+    ["/api/preview/tunnel", "preview-tunnel"],
+    ["/api/device-hub", "device-hub"],
+    ["/api/preview-stream", "preview-stream"],
+    [SPEECH_STREAM_PATH, "voice-input"],
+    // Scheduled-task webhooks: a token in the path, for services outside, not for devices.
+    ["/api/hooks", "signed-url"],
+  ];
+
+/** The refused feature for a relayed path. Matching is loose on purpose: refusing more is safe. */
+export const refusedRelayFeature = (path: string): K3RelayUnsupportedFeature | undefined => {
+  let pathname: string;
+  try {
+    pathname = new URL(relayUrl(path)).pathname;
+  } catch {
+    return undefined;
+  }
+  const normalized = decodeURIComponentSafe(pathname).toLowerCase().replace(/\/+/gu, "/");
+  for (const [prefix, feature] of REFUSED_ROUTES) {
+    if (normalized === prefix || normalized.startsWith(`${prefix}/`)) return feature;
+  }
+  return undefined;
+};
+
+const decodeURIComponentSafe = (value: string) => {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+};
+
+const refusalBody = (feature: K3RelayUnsupportedFeature) =>
+  new TextEncoder().encode(JSON.stringify(k3RelayUnsupportedResponse(feature)));
+
+const refusalHeaders: MuxHeaders = [
+  ["content-type", "application/json"],
+  ["cache-control", "no-store"],
+];
+
+/**
+ * The most a relayed request body may carry. Uploads stream through with backpressure, so this
+ * bounds what one request can make the host write, not what it holds in memory.
+ */
+export const RELAY_MAX_REQUEST_BODY_BYTES = 64 * 1024 * 1024;
 
 const responseHeaders = (headers: Headers): MuxHeaders => {
   const out: Array<readonly [string, string]> = [];
@@ -112,16 +179,46 @@ const relayedResponse = (response: Response): MuxHttpResponse<MuxStreamStateErro
   };
 };
 
+const tooLarge = (maxBytes: number): MuxHttpResponse<never> => ({
+  status: 413,
+  headers: [["content-type", "text/plain; charset=utf-8"]],
+  body: `A request through the relay carries at most ${maxBytes} bytes.`,
+});
+
 /** The request's scope spans its body too, so aborting it on close never cuts a response short. */
 const forwardHttp = Effect.fn("RelayBridge.forwardHttp")(function* (
   relay: RelayRouter,
   deviceId: string,
   request: MuxHttpRequest,
+  maxBodyBytes: number,
 ) {
+  const refused = refusedRelayFeature(request.path);
+  if (refused !== undefined) {
+    return {
+      status: 403,
+      headers: refusalHeaders,
+      body: refusalBody(refused),
+    } satisfies MuxHttpResponse<never>;
+  }
+  const declared = request.headers.find(([name]) => name.toLowerCase() === "content-length")?.[1];
+  if (declared !== undefined && Number(declared) > maxBodyBytes) return tooLarge(maxBodyBytes);
   const signal = yield* Effect.abortSignal;
+  let received = 0;
+  let overflowed = false;
   const body = METHODS_WITHOUT_BODY.has(request.method.toUpperCase())
     ? undefined
-    : Stream.toReadableStream(request.body);
+    : Stream.toReadableStream(
+        request.body.pipe(
+          Stream.mapEffect((chunk) => {
+            received += chunk.byteLength;
+            if (received <= maxBodyBytes) return Effect.succeed(chunk);
+            overflowed = true;
+            return Effect.fail(
+              new MuxStreamStateError({ detail: "The relayed request body is too large." }),
+            );
+          }),
+        ),
+      );
   const init: RequestInit & { readonly duplex?: "half" } = {
     method: request.method,
     headers: requestHeaders(request.headers),
@@ -134,17 +231,23 @@ const forwardHttp = Effect.fn("RelayBridge.forwardHttp")(function* (
     never,
     HttpServerRequest.HttpServerRequest | Scope.Scope
   >(relay.context)(routerEffect(relay));
-  return relayedResponse(yield* Effect.promise(() => handler(webRequest)));
+  const response = yield* Effect.promise(() => handler(webRequest));
+  if (overflowed) {
+    // Whatever the route made of a cut-off body, the answer is that it was too large.
+    yield* Effect.promise(() => response.body?.cancel() ?? Promise.resolve());
+    return tooLarge(maxBodyBytes);
+  }
+  return relayedResponse(response);
 });
 
 const serveRelayedHttp =
-  (relay: RelayRouter, deviceId: string, local: RelayLocalRoute) =>
+  (relay: RelayRouter, deviceId: string, local: RelayLocalRoute, maxBodyBytes: number) =>
   (...args: Parameters<ReturnType<typeof serveHttp>>) =>
     Effect.scoped(
       serveHttp(
         (request: MuxHttpRequest) =>
           local(request) ??
-          (forwardHttp(relay, deviceId, request) as Effect.Effect<
+          (forwardHttp(relay, deviceId, request, maxBodyBytes) as Effect.Effect<
             MuxHttpResponse<MuxStreamStateError>,
             never,
             Scope.Scope
@@ -157,6 +260,10 @@ const forwardWebSocket = Effect.fn("RelayBridge.forwardWebSocket")(function* (
   deviceId: string,
   request: Parameters<Parameters<typeof serveWebSocket>[0]>[0],
 ) {
+  const refused = refusedRelayFeature(request.path);
+  if (refused !== undefined) {
+    return yield* request.reject(403, { headers: refusalHeaders, body: refusalBody(refused) });
+  }
   const webRequest = new Request(relayUrl(request.path), {
     method: "GET",
     headers: requestHeaders(request.headers),
@@ -196,9 +303,16 @@ export const makeRelayMuxHandler = (input: {
   readonly relay: RelayRouter;
   readonly deviceId: string;
   readonly local: RelayLocalRoute;
+  /** Defaults to {@link RELAY_MAX_REQUEST_BODY_BYTES}. */
+  readonly maxRequestBodyBytes?: number | undefined;
 }): MuxHandler<MuxStreamError> =>
   makeMuxHandler({
-    http: serveRelayedHttp(input.relay, input.deviceId, input.local),
+    http: serveRelayedHttp(
+      input.relay,
+      input.deviceId,
+      input.local,
+      input.maxRequestBodyBytes ?? RELAY_MAX_REQUEST_BODY_BYTES,
+    ),
     ws: serveWebSocket((request) => forwardWebSocket(input.relay, input.deviceId, request)),
   });
 

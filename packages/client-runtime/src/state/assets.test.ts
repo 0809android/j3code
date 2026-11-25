@@ -9,6 +9,7 @@ import {
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
@@ -19,10 +20,12 @@ import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
 import {
   AVAILABLE_CONNECTION_STATE,
   type PreparedConnection,
+  K3RelayConnectionTarget,
   PrimaryConnectionTarget,
   type SupervisorConnectionState,
 } from "../connection/model.ts";
 import * as EnvironmentRegistry from "../connection/registry.ts";
+import { makeRelayAssetCache, type RelayAssetCache } from "../k3relay/relayAssets.ts";
 import * as EnvironmentSupervisor from "../connection/supervisor.ts";
 import { resolveMediaSource } from "../mediaSource.ts";
 import type * as RpcSession from "../rpc/session.ts";
@@ -73,6 +76,11 @@ describe("project favicon URL cache", () => {
  */
 const makeAssetUrlHarness = Effect.fn("TestAssetUrl.makeHarness")(function* (
   environmentIds: ReadonlyArray<EnvironmentId>,
+  options: {
+    /** Reached through a K3 relay: this channel's fetch is the only way to the host. */
+    readonly transport?: PreparedConnection["transport"];
+    readonly relayAssets?: RelayAssetCache;
+  } = {},
 ) {
   const started = yield* Queue.unbounded<EnvironmentId>();
   const inFlight = new Map<EnvironmentId, number>();
@@ -128,7 +136,23 @@ const makeAssetUrlHarness = Effect.fn("TestAssetUrl.makeHarness")(function* (
           generation: 1,
         }),
         session,
-        prepared: yield* SubscriptionRef.make<Option.Option<PreparedConnection>>(Option.none()),
+        prepared: yield* SubscriptionRef.make<Option.Option<PreparedConnection>>(
+          options.transport === undefined
+            ? Option.none()
+            : Option.some({
+                environmentId,
+                label: environmentId,
+                httpBaseUrl: "https://k3host.invalid",
+                socketUrl: "wss://k3host.invalid/ws",
+                httpAuthorization: null,
+                target: new K3RelayConnectionTarget({
+                  environmentId,
+                  label: environmentId,
+                  connectionId: "relay",
+                }),
+                transport: options.transport,
+              }),
+        ),
         connect: Effect.void,
         disconnect: Effect.void,
         retryNow: Effect.void,
@@ -158,8 +182,26 @@ const makeAssetUrlHarness = Effect.fn("TestAssetUrl.makeHarness")(function* (
   yield* Effect.addFinalizer(() => Effect.sync(() => registry.dispose()));
   const atoms = createAssetEnvironmentAtoms(
     Atom.runtime(Layer.succeed(EnvironmentRegistry.EnvironmentRegistry, environmentRegistry)),
+    undefined,
+    { relayAssets: options.relayAssets },
   );
   return {
+    /** The URL an image gets once its asset resolves. */
+    resolvedUrl: (environmentId: EnvironmentId, attachmentId: string) =>
+      Effect.callback<string>((resume) => {
+        const atom = atoms.createUrl({
+          environmentId,
+          input: { resource: { _tag: "attachment", attachmentId } },
+        });
+        const check = (
+          result: AsyncResult.AsyncResult<{ readonly relativeUrl: string }, unknown>,
+        ) => {
+          if (result._tag === "Success") resume(Effect.succeed(result.value.relativeUrl));
+          if (result._tag === "Failure") resume(Effect.die(Cause.squash(result.cause)));
+        };
+        const stop = registry.subscribe(atom, check, { immediate: true });
+        return Effect.sync(stop);
+      }),
     started,
     inFlight: (environmentId: EnvironmentId) => inFlight.get(environmentId) ?? 0,
     maxInFlight: (environmentId: EnvironmentId) => maxInFlight.get(environmentId) ?? 0,
@@ -229,6 +271,47 @@ describe("asset URL requests", () => {
         yield* Queue.take(harness.started);
       }
       expect(harness.maxInFlight(remote)).toBe(ASSET_URL_MAX_IN_FLIGHT);
+    }),
+  );
+});
+
+describe("assets through a K3 relay", () => {
+  const relayed = EnvironmentId.make("asset-relayed");
+
+  it.effect("are fetched over the channel and shown from a local copy", () =>
+    Effect.gen(function* () {
+      const fetched: Array<string> = [];
+      const kept = new Map<string, Uint8Array>();
+      const relayAssets = makeRelayAssetCache({
+        put: async ({ bytes }) => {
+          const url = `blob:local/${kept.size + 1}`;
+          kept.set(url, bytes);
+          return url;
+        },
+        release: (url) => void kept.delete(url),
+      });
+      const harness = yield* makeAssetUrlHarness([relayed], {
+        relayAssets,
+        transport: {
+          fetch: async (input) => {
+            fetched.push(String(input));
+            return new Response(new Uint8Array([1, 2, 3]), {
+              headers: { "content-type": "image/png" },
+            });
+          },
+          webSocketConstructor: () => {
+            throw new Error("unused");
+          },
+        },
+      });
+      const url = yield* Effect.forkChild(harness.resolvedUrl(relayed, "image-0"));
+      yield* Queue.take(harness.started);
+      yield* harness.release(relayed);
+      const local = yield* Fiber.join(url);
+      // The page loads the local copy; the host's virtual origin never reaches an <img>.
+      expect(local).toBe("blob:local/1");
+      expect(kept.get(local)).toEqual(new Uint8Array([1, 2, 3]));
+      expect(fetched).toEqual(["https://k3host.invalid/api/assets/token/image.png"]);
     }),
   );
 });

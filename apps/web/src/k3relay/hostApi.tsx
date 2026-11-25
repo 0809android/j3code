@@ -1,4 +1,7 @@
-import { createK3RelayEnvironmentAtoms } from "@t3tools/client-runtime/state/k3relay";
+import {
+  createK3RelayEnvironmentAtoms,
+  hostLacksK3Relay,
+} from "@t3tools/client-runtime/state/k3relay";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -14,7 +17,7 @@ import type {
 import { useMessages } from "gt-react";
 
 import { connectionAtomRuntime } from "../connection/runtime";
-import { useEnvironmentQuery } from "../state/query";
+import { useEnvironmentQuery, useEnvironmentQuerySelector } from "../state/query";
 import { serverEnvironment } from "../state/server";
 import { useAtomCommand } from "../state/use-atom-command";
 
@@ -23,17 +26,21 @@ export const k3RelayEnvironment = createK3RelayEnvironmentAtoms(connectionAtomRu
 
 export interface K3RelayHostStateView {
   readonly state: K3RelayHostState | null;
+  /** Null too for a host without the relay (an older K3 Code): its settings leave it out. */
   readonly error: string | null;
 }
 
 /** The host's live relay state. Nothing until the first state, so hosts without it show nothing. */
 export function useK3RelayHostState(environmentId: EnvironmentId | null): K3RelayHostStateView {
   const resolve = useMessages();
-  const query = useEnvironmentQuery(
-    environmentId === null ? null : k3RelayEnvironment.state({ environmentId, input: {} }),
-    resolve,
-  );
-  return { state: query.data, error: query.data === null ? query.error : null };
+  const atom =
+    environmentId === null ? null : k3RelayEnvironment.state({ environmentId, input: {} });
+  const query = useEnvironmentQuery(atom, resolve);
+  const lacksRelay = useEnvironmentQuerySelector(atom, hostLacksK3Relay);
+  return {
+    state: query.data,
+    error: query.data === null && !lacksRelay ? query.error : null,
+  };
 }
 
 /** A failed call's message, or null when it succeeded or was cut off. */
@@ -54,7 +61,8 @@ export interface K3RelayHostActions {
   readonly setRelayUrl: (url: string) => K3RelayHostCall;
   readonly createOffer: () => K3RelayHostCall<K3RelayPairingOffer>;
   readonly cancelOffer: () => K3RelayHostCall;
-  readonly approve: (deviceId: string) => K3RelayHostCall;
+  /** With the confirmation code the user compared; omitted only when the host offered one tap. */
+  readonly approve: (deviceId: string, confirmationCode?: string) => K3RelayHostCall;
   readonly reject: () => K3RelayHostCall;
   readonly revoke: (deviceId: string) => K3RelayHostCall;
   readonly rename: (deviceId: string, name: string) => K3RelayHostCall;
@@ -76,7 +84,13 @@ export function useK3RelayHostActions(environmentId: EnvironmentId): K3RelayHost
       settle(updateSettings({ environmentId, input: { patch: { relay: { url } } } })),
     createOffer: () => settle(createPairingOffer({ environmentId, input: {} })),
     cancelOffer: () => settle(cancelPairing({ environmentId, input: {} })),
-    approve: (deviceId) => settle(approvePairing({ environmentId, input: { deviceId } })),
+    approve: (deviceId, confirmationCode) =>
+      settle(
+        approvePairing({
+          environmentId,
+          input: confirmationCode === undefined ? { deviceId } : { deviceId, confirmationCode },
+        }),
+      ),
     reject: () => settle(rejectPairing({ environmentId, input: {} })),
     revoke: (deviceId) => settle(revokeDevice({ environmentId, input: { deviceId } })),
     rename: (deviceId, name) => settle(renameDevice({ environmentId, input: { deviceId, name } })),

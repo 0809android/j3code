@@ -1,4 +1,8 @@
-import { createK3RelayEnvironmentAtoms } from "@t3tools/client-runtime/state/k3relay";
+import { useAtomValue } from "@effect/atom-react";
+import {
+  createK3RelayEnvironmentAtoms,
+  hostLacksK3Relay,
+} from "@t3tools/client-runtime/state/k3relay";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -19,8 +23,11 @@ export function useK3RelayHostState(environmentId: EnvironmentId): {
   readonly state: K3RelayHostState | null;
   readonly error: string | null;
 } {
-  const query = useEnvironmentQuery(k3RelayEnvironment.state({ environmentId, input: {} }));
-  return { state: query.data, error: query.data === null ? query.error : null };
+  const atom = k3RelayEnvironment.state({ environmentId, input: {} });
+  const query = useEnvironmentQuery(atom);
+  // An older host without the relay RPCs: leave the relay out instead of showing an error.
+  const lacksRelay = useAtomValue(atom, hostLacksK3Relay);
+  return { state: query.data, error: query.data === null && !lacksRelay ? query.error : null };
 }
 
 /** A failed call's message, or null when it succeeded or was cut off. */
@@ -52,7 +59,13 @@ export function useK3RelayHostActions(environmentId: EnvironmentId) {
     createOffer: (): K3RelayHostCall<K3RelayPairingOffer> =>
       settle(createPairingOffer({ environmentId, input: {} })),
     cancelOffer: () => settle(cancelPairing({ environmentId, input: {} })),
-    approve: (deviceId: string) => settle(approvePairing({ environmentId, input: { deviceId } })),
+    approve: (deviceId: string, confirmationCode?: string) =>
+      settle(
+        approvePairing({
+          environmentId,
+          input: confirmationCode === undefined ? { deviceId } : { deviceId, confirmationCode },
+        }),
+      ),
     reject: () => settle(rejectPairing({ environmentId, input: {} })),
     revoke: (deviceId: string) => settle(revokeDevice({ environmentId, input: { deviceId } })),
   };

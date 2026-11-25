@@ -271,6 +271,26 @@ describe("mux fetch", () => {
     }),
   );
 
+  it.effect("takes a stream body as is, pulling it only as the window allows", () =>
+    Effect.gen(function* () {
+      const { fetch } = yield* start(yield* makeProbe);
+      const size = 1024 * 1024;
+      let pulled = 0;
+      // No `duplex`: the stream never goes into a `Request`, which WebKit and React Native refuse.
+      const echoed = yield* Effect.promise(async () => {
+        const response = await fetch("/echo", {
+          method: "POST",
+          body: streamingBody(size, (bytes) => {
+            pulled = bytes;
+          }),
+        });
+        return new Uint8Array(await response.arrayBuffer());
+      });
+      checkPattern(echoed, size);
+      assert.equal(pulled, size);
+    }),
+  );
+
   it.effect("streams large bodies in both directions through the flow-control window", () =>
     Effect.gen(function* () {
       const { fetch, client } = yield* start(yield* makeProbe);

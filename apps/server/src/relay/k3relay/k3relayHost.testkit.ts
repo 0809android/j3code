@@ -1,11 +1,13 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
+  AttachmentCreateUploadUrlInput,
   EnvironmentHttpApi,
   type K3RelayAccountProvider,
   type K3RelayAccountState,
   type K3RelayDevice,
   type K3RelayDeviceAlgorithm,
+  K3RelayError,
   type K3RelayHostState,
   K3RelayHostState as K3RelayHostStateSchema,
   type K3RelayPairingOffer,
@@ -47,12 +49,28 @@ import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
 import * as SessionStore from "../../auth/SessionStore.ts";
 import {
   classifyRequestTransport,
+  relayDeviceIdOf,
   transportAllowedByPolicy,
 } from "../../auth/transportSecurity.ts";
 import { deriveAuthClientMetadata } from "../../auth/utils.ts";
 import * as ServerConfig from "../../config.ts";
 import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
-import { layerServerEnvironmentHttpApi } from "../../http.ts";
+import { issueAssetUrl } from "../../assets/AssetAccess.ts";
+import * as AssetSigner from "../../assets/AssetSigner.ts";
+import { issueAttachmentUploadUrl } from "../../assets/AttachmentUpload.ts";
+import * as NativeAppIconResolver from "../../assets/NativeAppIconResolver.ts";
+import * as WorkspacePreviewRevisions from "../../assets/WorkspacePreviewRevisions.ts";
+import {
+  layerAssetRoute,
+  layerAttachmentUploadRoute,
+  layerServerEnvironmentHttpApi,
+} from "../../http.ts";
+import * as Orchestrator from "../../orchestration-v2/Orchestrator.ts";
+import * as ProjectFaviconResolver from "../../project/ProjectFaviconResolver.ts";
+import * as RepositoryIdentityResolver from "../../project/RepositoryIdentityResolver.ts";
+import * as DocumentText from "../../provider/DocumentText.ts";
+import * as SourceControlDrivers from "../../sourceControl/builtInDrivers.ts";
+import * as WorkspacePaths from "../../workspace/WorkspacePaths.ts";
 import * as SqlitePersistence from "../../persistence/Sqlite.ts";
 import * as ManagedPolicy from "../../policy/ManagedPolicy.ts";
 import * as ServerSettings from "../../serverSettings.ts";
@@ -73,16 +91,91 @@ class HostTestApi extends HttpApi.make("environment")
 
 export const RelayProbeWhoAmI = Schema.Struct({ subject: Schema.String, transport: Schema.String });
 
+/** What the server's real asset and upload issuers return to the caller. */
+export const RelayProbeIssued = Schema.Struct({
+  relativeUrl: Schema.String,
+  attachmentId: Schema.optionalKey(Schema.String),
+});
+
 export const RelayProbeRpcs = RpcGroup.make(
   Rpc.make("relayProbe.whoami", { success: RelayProbeWhoAmI }),
+  /** `assets.createUrl` for an attachment, as `ws.ts` issues it to this socket's caller. */
+  Rpc.make("relayProbe.assetUrl", {
+    payload: Schema.Struct({ attachmentId: Schema.String }),
+    success: RelayProbeIssued,
+    error: Schema.String,
+  }),
+  /** `attachments.createUploadUrl`, as `ws.ts` issues it to this socket's caller. */
+  Rpc.make("relayProbe.uploadUrl", {
+    payload: AttachmentCreateUploadUrlInput,
+    success: RelayProbeIssued,
+    error: Schema.String,
+  }),
   Rpc.make(WS_METHODS.k3RelaySubscribe, {
     payload: Schema.Struct({}),
     success: K3RelayHostStateSchema,
     stream: true,
   }),
+  /** As `ws.ts` serves it: the session's own device, whatever the payload says. */
+  Rpc.make(WS_METHODS.k3RelayForgetThisDevice, {
+    payload: Schema.Struct({}),
+    error: K3RelayError,
+  }),
 );
 
 export const TEST_ENVIRONMENT_LABEL = "Relay test host";
+
+/** What the real asset and upload routes and issuers read, besides the platform. */
+type AssetServices =
+  | AssetSigner.AssetSigner
+  | DocumentText.DocumentText
+  | WorkspacePaths.WorkspacePaths
+  | NativeAppIconResolver.NativeAppIconResolver
+  | WorkspacePreviewRevisions.WorkspacePreviewRevisions
+  | ProjectFaviconResolver.ProjectFaviconResolver
+  | RepositoryIdentityResolver.RepositoryIdentityResolver
+  | SourceControlDrivers.SourceControlDrivers
+  | Orchestrator.OrchestratorV2;
+
+/**
+ * Services the asset routes reach only for kinds these tests never serve (tool output, project
+ * icons, source-control media): present for the types, failing loudly if a test ever calls them.
+ */
+const unavailable = <S>(name: string) =>
+  new Proxy(
+    {},
+    {
+      get: () => {
+        throw new Error(`The relay test host has no ${name}.`);
+      },
+    },
+  ) as S;
+
+const layerAssets = Layer.mergeAll(
+  AssetSigner.layer,
+  DocumentText.layer,
+  WorkspacePaths.layer,
+  NativeAppIconResolver.layer,
+  WorkspacePreviewRevisions.layer,
+  Layer.succeed(
+    Orchestrator.OrchestratorV2,
+    unavailable<Orchestrator.OrchestratorV2["Service"]>("orchestrator"),
+  ),
+  Layer.succeed(
+    ProjectFaviconResolver.ProjectFaviconResolver,
+    unavailable<ProjectFaviconResolver.ProjectFaviconResolver["Service"]>("project icons"),
+  ),
+  Layer.succeed(
+    RepositoryIdentityResolver.RepositoryIdentityResolver,
+    unavailable<RepositoryIdentityResolver.RepositoryIdentityResolver["Service"]>(
+      "repository identities",
+    ),
+  ),
+  Layer.succeed(
+    SourceControlDrivers.SourceControlDrivers,
+    unavailable<SourceControlDrivers.SourceControlDrivers["Service"]>("source control"),
+  ),
+);
 
 const layerRpcRoute = HttpRouter.add(
   "GET",
@@ -106,6 +199,9 @@ const layerRpcRoute = HttpRouter.add(
     if (session._tag === "Failure") {
       return HttpServerResponse.jsonUnsafe({ code: "auth_invalid" }, { status: 401 });
     }
+    const relayDeviceId = relayDeviceIdOf(request);
+    const assetContext = yield* Effect.context<AssetServices>();
+    const issueFailed = (error: { readonly _tag: string }) => Effect.fail(error._tag);
     const { protocol, httpEffect } = yield* RpcServer.makeProtocolWithHttpEffectWebsocket;
     yield* RpcServer.make(RelayProbeRpcs).pipe(
       Effect.provideService(RpcServer.Protocol, protocol),
@@ -113,7 +209,24 @@ const layerRpcRoute = HttpRouter.add(
         RelayProbeRpcs.toLayer({
           "relayProbe.whoami": () =>
             Effect.succeed({ subject: session.success.subject, transport }),
+          "relayProbe.assetUrl": ({ attachmentId }) =>
+            issueAssetUrl({
+              resource: { _tag: "attachment", attachmentId },
+              relayDeviceId,
+            }).pipe(
+              Effect.map(({ relativeUrl }) => ({ relativeUrl })),
+              Effect.catch(issueFailed),
+              Effect.provideContext(assetContext),
+            ),
+          "relayProbe.uploadUrl": (input) =>
+            issueAttachmentUploadUrl(input, relayDeviceId).pipe(
+              Effect.map(({ relativeUrl, attachmentId }) => ({ relativeUrl, attachmentId })),
+              Effect.catch(issueFailed),
+              Effect.provideContext(assetContext),
+            ),
           [WS_METHODS.k3RelaySubscribe]: () => connector.changes,
+          [WS_METHODS.k3RelayForgetThisDevice]: () =>
+            connector.forgetSessionDevice({ subject: session.success.subject, relayDeviceId }),
         }),
       ),
       Effect.forkScoped,
@@ -137,6 +250,26 @@ const layerProbeRoute = HttpRouter.add(
       ipAddress: deriveAuthClientMetadata({ request }).ipAddress ?? null,
     }),
   ),
+);
+
+/**
+ * Server-sent events that resume after `Last-Event-ID`: three events per response, then the
+ * response ends, so an EventSource reconnects and must pick up where it left off.
+ */
+const layerEventsProbeRoute = HttpRouter.add(
+  "GET",
+  "/relay-probe/events",
+  Effect.map(HttpServerRequest.HttpServerRequest, (request) => {
+    const last = Number(request.headers["last-event-id"] ?? "0");
+    const from = Number.isInteger(last) && last >= 0 ? last + 1 : 1;
+    const body = [from, from + 1, from + 2]
+      .map((id) => `id: ${id}\ndata: {"n":${id}}\n\n`)
+      .join("");
+    return HttpServerResponse.text(`retry: 20\n\n${body}`, {
+      contentType: "text/event-stream",
+      headers: { "cache-control": "no-store" },
+    });
+  }),
 );
 
 /** The test settings service, plus the change stream the connector follows. */
@@ -188,6 +321,7 @@ export const layerK3RelayTestHost = (options: K3RelayTestHostOptions) => {
     Layer.provideMerge(config),
   );
   const core = EnvironmentAuth.layer.pipe(
+    Layer.provideMerge(layerAssets),
     Layer.provideMerge(layerEnvironment),
     Layer.provideMerge(Layer.mergeAll(ServerE2eeIdentity.layer, ServerEnvironment.layerIdentity)),
     Layer.provideMerge(ManagedPolicy.layerTest(options.policy)),
@@ -217,6 +351,9 @@ export const layerK3RelayTestHost = (options: K3RelayTestHostOptions) => {
     ),
     layerRpcRoute,
     layerProbeRoute,
+    layerEventsProbeRoute,
+    layerAssetRoute,
+    layerAttachmentUploadRoute,
   ).pipe(
     // Routes read these per request, as `HttpRouter.serve` provides them in the server.
     HttpRouter.provideRequest(
@@ -229,6 +366,7 @@ export const layerK3RelayTestHost = (options: K3RelayTestHostOptions) => {
           | ServerEnvironment.ServerEnvironment
           | RelayConnector.RelayConnector
           | Digest.Digest
+          | AssetServices
         >(),
       ),
     ),
@@ -314,7 +452,7 @@ export interface K3RelayTestHost {
     timeoutMs?: number,
   ) => Promise<K3RelayHostState>;
   readonly createPairingOffer: () => Promise<K3RelayPairingOffer>;
-  readonly approvePairing: (deviceId: string) => Promise<K3RelayDevice>;
+  readonly approvePairing: (deviceId: string, confirmationCode?: string) => Promise<K3RelayDevice>;
   readonly rejectPairing: () => Promise<void>;
   readonly revokeDevice: (deviceId: string) => Promise<K3RelayDevice>;
   /** This host's account at the relay (spec §20.4), as the settings screen drives it. */
@@ -404,8 +542,12 @@ export const startK3RelayTestHost = async (
       awaitState,
       createPairingOffer: () =>
         run(Effect.flatMap(RelayConnector.RelayConnector, (c) => c.createPairingOffer)),
-      approvePairing: (deviceId) =>
-        run(Effect.flatMap(RelayConnector.RelayConnector, (c) => c.approvePairing(deviceId))),
+      approvePairing: (deviceId, confirmationCode) =>
+        run(
+          Effect.flatMap(RelayConnector.RelayConnector, (c) =>
+            c.approvePairing(deviceId, confirmationCode),
+          ),
+        ),
       rejectPairing: () =>
         run(Effect.flatMap(RelayConnector.RelayConnector, (c) => c.rejectPairing)),
       revokeDevice: (deviceId) =>

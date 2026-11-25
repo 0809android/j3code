@@ -56,6 +56,7 @@ describe("K3RelaySettingsView", () => {
             alg: "ed25519",
             confirmationCode: "K7QM-2XFD",
             approvalDeadline: NOW + 600_000,
+            approval: "compare-code",
           },
         }}
       />,
@@ -67,9 +68,40 @@ describe("K3RelaySettingsView", () => {
       .element(pending.getByText(/is in your hands and shows this exact code/))
       .toBeVisible();
     await screen.getByRole("button", { name: "Approve" }).click();
-    expect(actions.approve).toHaveBeenCalledWith("d".repeat(32));
+    // The approval names the code the user compared; the host refuses one without it.
+    expect(actions.approve).toHaveBeenCalledWith("d".repeat(32), "K7QM-2XFD");
     await screen.getByRole("button", { name: "Reject" }).click();
     expect(actions.reject).toHaveBeenCalled();
+  });
+
+  it("approves with one tap, and no code, when the host offers it", async () => {
+    const actions = makeActions();
+    await using screen = await render(
+      <K3RelaySettingsView
+        canWrite
+        busy={false}
+        offer={null}
+        networkAccessEnabled
+        actions={actions}
+        state={{
+          ...baseState,
+          pairing: {
+            phase: "awaiting-approval",
+            deviceId: "e".repeat(32),
+            deviceName: "Kino's tablet",
+            alg: "p256",
+            confirmationCode: "K7QM-2XFD",
+            approvalDeadline: NOW + 600_000,
+            approval: "one-tap",
+          },
+        }}
+      />,
+    );
+    const pending = screen.getByTestId("k3relay-pending");
+    await expect.element(pending).not.toHaveTextContent("K7QM-2XFD");
+    await expect.element(pending.getByText(/new device is in your hands/)).toBeVisible();
+    await screen.getByRole("button", { name: "Approve" }).click();
+    expect(actions.approve).toHaveBeenCalledWith("e".repeat(32), undefined);
   });
 
   it("warns about hijacking before showing the offer as a link", async () => {
