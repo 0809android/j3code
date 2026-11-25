@@ -1,4 +1,4 @@
-import { DEFAULT_HOSTED_APP_URL } from "./connectAuth.ts";
+import { hostedAppOrigin } from "./hostedApp.ts";
 import { parseUrl } from "./url.ts";
 
 export const PROMPT_LINK_MAX_PROMPT_LENGTH = 8_000;
@@ -189,14 +189,21 @@ export function withoutPromptLinkParams(search: string): string {
   return rest ? `?${rest}` : "";
 }
 
+/**
+ * A link that starts a thread from a prompt. It is the configured hosted app's `/new` page when
+ * `origin` names one; otherwise it is the `k3code://new` link, which only K3 Code opens.
+ */
 export function buildNewThreadLink(input: {
   readonly prompt: string;
   readonly repository?: PromptLinkRepository | null;
   readonly provider?: string | null;
   readonly model?: string | null;
-  readonly origin?: string;
+  readonly origin?: string | null | undefined;
+  readonly scheme?: string;
 }): string {
-  const url = new URL("/new", input.origin ?? DEFAULT_HOSTED_APP_URL);
+  const hosted = hostedAppOrigin(input.origin);
+  const url =
+    hosted === undefined ? new URL(`${input.scheme ?? "k3code"}://new`) : new URL("/new", hosted);
   url.searchParams.set("prompt", input.prompt);
   if (input.repository) {
     url.searchParams.set("repo", `${input.repository.owner}/${input.repository.name}`);
@@ -209,9 +216,10 @@ export function buildNewThreadLink(input: {
 const APP_SCHEME = /^k3code(?:-[a-z]+)?:$/;
 const THREAD_PATH = /^\/([^/]+)\/([^/]+)\/?$/;
 
+/** Without a hosted app (`hostedAppUrl`), only the app's own `k3code://` links resolve. */
 export function promptLinkAppPath(
   value: string,
-  hostedAppUrl: string = DEFAULT_HOSTED_APP_URL,
+  hostedAppUrl?: string | null | undefined,
 ): string | null {
   const url = parseUrl(value);
   if (!url) return null;
@@ -222,7 +230,8 @@ export function promptLinkAppPath(
     const thread = url.host === "threads" ? THREAD_PATH.exec(url.pathname) : null;
     return thread ? `/${thread[1]}/${thread[2]}${url.search}` : null;
   }
-  if (url.origin !== parseUrl(hostedAppUrl)?.origin) return null;
+  const hosted = hostedAppOrigin(hostedAppUrl);
+  if (hosted === undefined || url.origin !== hosted) return null;
   if (url.pathname === "/new") return `/new${url.search}`;
   // The web app's own thread route is a link only with a prompt, so reloading a tab never asks.
   const thread = url.pathname.startsWith("/threads/")
