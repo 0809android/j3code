@@ -19,10 +19,18 @@ import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
+import * as SubscriptionRef from "effect/SubscriptionRef";
 import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
 
 import * as EnvironmentRegistry from "../connection/registry.ts";
 import * as EnvironmentSupervisor from "../connection/supervisor.ts";
+import {
+  RelayAssetFetchError,
+  type RelayAssetCache,
+  blobRelayAssetStore,
+  makeRelayAssetCache,
+  resolveRelayAssetUrl,
+} from "../k3relay/relayAssets.ts";
 import { request } from "../rpc/client.ts";
 import type { ProjectFaviconCache, ProjectFaviconTarget } from "../projectFaviconCache.ts";
 import { createEnvironmentQueryAtomFamily } from "./runtime.ts";
@@ -238,13 +246,28 @@ export function makeRevisionedAssetUrlFamily(
     family(JSON.stringify([target.environmentId, target.input.resource, target.revision]));
 }
 
+const encodeRelayAssetKey = Schema.encodeSync(
+  Schema.fromJsonString(Schema.Tuple([EnvironmentId, AssetResource, Schema.String])),
+);
+const relayAssetKey = (environmentId: EnvironmentId, resource: AssetResource, revision: string) =>
+  encodeRelayAssetKey([environmentId, resource, revision]);
+
+/** The default relay asset cache: `blob:` URLs where the platform has them (web, desktop). */
+const defaultRelayAssets = (): RelayAssetCache | undefined =>
+  typeof URL.createObjectURL === "function" ? makeRelayAssetCache(blobRelayAssetStore) : undefined;
+
 export function createAssetEnvironmentAtoms<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry.EnvironmentRegistry | R, E>,
   localMediaEnvironment?: Atom.Atom<{
     readonly environmentId: EnvironmentId;
     readonly httpBaseUrl: string;
   } | null>,
+  options: {
+    /** Where assets of hosts behind a K3 relay become local URLs (mobile keeps files). */
+    readonly relayAssets?: RelayAssetCache | undefined;
+  } = {},
 ) {
+  const relayAssets = options.relayAssets ?? defaultRelayAssets();
   // A thread with hundreds of images asks for hundreds of URLs at once. Over a slow remote
   // they would all wait on one socket and read as stalled, so each environment gets a few
   // at a time. A query that is interrupted, such as by a new session, gives its slot back.
@@ -260,7 +283,27 @@ export function createAssetEnvironmentAtoms<R, E>(
   const execute = Effect.fn("assets.createUrl")(function* (input: AssetCreateUrlInput) {
     const supervisor = yield* EnvironmentSupervisor.EnvironmentSupervisor;
     const result = yield* mint(supervisor.target.environmentId, input).pipe(Effect.result);
-    if (Result.isSuccess(result)) return result.success;
+    if (Result.isSuccess(result)) {
+      const prepared = yield* SubscriptionRef.get(supervisor.prepared);
+      if (Option.isNone(prepared) || prepared.value.transport === undefined) return result.success;
+      if (relayAssets === undefined) {
+        return yield* new RelayAssetFetchError({ reason: "store" });
+      }
+      // Behind a relay the minted URL is reachable only over the mux: hand out a local copy.
+      // Keyed by resource and revision, so a re-mint of an unchanged file keeps its URL.
+      const key = relayAssetKey(
+        supervisor.target.environmentId,
+        input.resource,
+        result.success.fileRevision ?? result.success.relativeUrl,
+      );
+      const local = yield* resolveRelayAssetUrl(
+        relayAssets,
+        prepared.value,
+        result.success.relativeUrl,
+        key,
+      );
+      return { ...result.success, relativeUrl: local };
+    }
     const error = result.failure;
     const resource = input.resource;
     const local = localMediaEnvironment

@@ -8,6 +8,7 @@ import {
 } from "@t3tools/contracts";
 import { parseScopedThreadKey } from "@t3tools/client-runtime/environment";
 import { errorDisplayMessage } from "@t3tools/client-runtime/errors";
+import { uploadThroughRelay } from "@t3tools/client-runtime/k3relay";
 import { resolveAssetUrl } from "@t3tools/client-runtime/state/assets";
 import {
   attachmentUploadError,
@@ -277,24 +278,38 @@ const uploadJob = Effect.fn("WebAttachmentUploads.upload")(function* (job: Uploa
     },
     transport: (url) =>
       Effect.tryPromise({
-        try: (signal) =>
-          uploadBytes({
+        try: (signal) => {
+          const onProgress = (progress: number) => {
+            const step = Math.floor(progress * 20);
+            if (step === lastStep || signal.aborted) return;
+            lastStep = step;
+            setUploadState(job.image.id, {
+              status: "uploading",
+              environmentId: job.environmentId,
+              progress,
+              ...(job.previous ? { previous: job.previous } : {}),
+            });
+          };
+          // Behind a K3 relay the slot is only reachable over the E2E channel.
+          const relay = readPreparedConnection(job.environmentId)?.transport;
+          if (relay !== undefined) {
+            return uploadThroughRelay({
+              transport: relay,
+              url,
+              body: file,
+              mimeType,
+              signal,
+              onProgress,
+            });
+          }
+          return uploadBytes({
             url,
             file,
             mimeType,
             signal,
-            onProgress: (progress) => {
-              const step = Math.floor(progress * 20);
-              if (step === lastStep || signal.aborted) return;
-              lastStep = step;
-              setUploadState(job.image.id, {
-                status: "uploading",
-                environmentId: job.environmentId,
-                progress,
-                ...(job.previous ? { previous: job.previous } : {}),
-              });
-            },
-          }),
+            onProgress,
+          });
+        },
         catch: attachmentUploadError,
       }),
   });

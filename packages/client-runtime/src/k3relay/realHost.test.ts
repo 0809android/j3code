@@ -9,6 +9,7 @@ import {
   type K3RelayPairingOffer,
   K3_RELAY_PROVISIONAL_ORIGIN,
   WS_METHODS,
+  k3RelayUnsupportedFeatureOf,
 } from "@t3tools/contracts";
 import { DpopPublicJwk } from "@t3tools/shared/dpop";
 import { type RelayGrant, decodeBase64url, encodeBase64url } from "@t3tools/shared/relay";
@@ -52,6 +53,8 @@ import {
 } from "./broker.ts";
 import * as DeviceKeyStore from "./deviceKeyStore.ts";
 import { k3relayFailureText } from "./failure.ts";
+import { RELAY_ASSET_LIMITS, makeRelayAssetCache, resolveRelayAssetUrl } from "./relayAssets.ts";
+import { uploadThroughRelay } from "./relayUpload.ts";
 import { layerTestCrypto, layerWebSocketGlobal } from "./k3relay.testkit.ts";
 import {
   type K3RelayPairingProgress,
@@ -185,9 +188,28 @@ const recordingRegistry = (saved: Ref.Ref<Option.Option<ConnectionRegistration>>
   } as unknown as EnvironmentRegistry.EnvironmentRegistry["Service"]);
 
 /** The two RPCs the host's test socket serves, as the client declares them. */
+const Issued = Schema.Struct({
+  relativeUrl: Schema.String,
+  attachmentId: Schema.optionalKey(Schema.String),
+});
+
 const HostRpcs = RpcGroup.make(
   Rpc.make("relayProbe.whoami", {
     success: Schema.Struct({ subject: Schema.String, transport: Schema.String }),
+  }),
+  Rpc.make("relayProbe.assetUrl", {
+    payload: Schema.Struct({ attachmentId: Schema.String }),
+    success: Issued,
+    error: Schema.String,
+  }),
+  Rpc.make("relayProbe.uploadUrl", {
+    payload: Schema.Struct({
+      name: Schema.String,
+      mimeType: Schema.String,
+      sizeBytes: Schema.Number,
+    }),
+    success: Issued,
+    error: Schema.String,
   }),
   Rpc.make(WS_METHODS.k3RelaySubscribe, {
     payload: Schema.Struct({}),
@@ -262,6 +284,26 @@ const openRpc = (transport: Parameters<typeof overTransport>[0] & object, access
   });
 
 const DAY_MS = 86_400_000;
+
+/** A relay asset store that keeps bytes in memory and names them, as `blob:` URLs would. */
+const memoryAssetStore = () => {
+  const kept = new Map<string, Uint8Array>();
+  let next = 0;
+  return {
+    kept,
+    store: {
+      put: async ({ bytes }: { readonly bytes: Uint8Array }) => {
+        next += 1;
+        const url = `memory:${next}`;
+        kept.set(url, bytes);
+        return url;
+      },
+      release: (url: string) => {
+        kept.delete(url);
+      },
+    },
+  };
+};
 const isK3RelayRegistration = Schema.is(K3RelayConnectionRegistration);
 
 describe("K3 Relay client against the real host", () => {
@@ -388,6 +430,129 @@ describe("K3 Relay client against the real host", () => {
         ),
       );
       expect(again).toBe(true);
+    }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(layerDevice, layerWebSocketGlobal))),
+  );
+
+  it.live(
+    "uploads an attachment, then shows it, over the mux: handles only, local copies, size cap",
+    () =>
+      Effect.gen(function* () {
+        const relay = yield* startRelay;
+        const host = yield* startHost(relay.url);
+        const { registration } = yield* pairThroughOnboarding(host);
+        const input = yield* k3relayTunnelInput(registration.profile);
+        const tunnel = yield* openK3RelayTunnel(input);
+        const rpc = yield* openRpc(tunnel.transport, registration.credential.accessToken);
+        const prepared = { httpBaseUrl: K3_RELAY_PROVISIONAL_ORIGIN, transport: tunnel.transport };
+        const bytes = Uint8Array.from({ length: 700_000 }, (_, index) => (index * 31) % 256);
+
+        // The composer's upload: a relay slot, the bytes streamed with progress.
+        const slot = yield* rpc["relayProbe.uploadUrl"]({
+          name: "photo.png",
+          mimeType: "image/png",
+          sizeBytes: bytes.byteLength,
+        });
+        expect(slot.relativeUrl.startsWith("/api/attachments/upload/relay/")).toBe(true);
+        const progress: Array<number> = [];
+        yield* Effect.promise(() =>
+          uploadThroughRelay({
+            transport: tunnel.transport,
+            url: `${K3_RELAY_PROVISIONAL_ORIGIN}${slot.relativeUrl}`,
+            body: new Blob([bytes]),
+            mimeType: "image/png",
+            onProgress: (value) => progress.push(value),
+          }),
+        );
+        expect(progress.at(-1)).toBe(1);
+
+        // `<img>` gets a local URL holding exactly the uploaded bytes.
+        const minted = yield* rpc["relayProbe.assetUrl"]({ attachmentId: slot.attachmentId! });
+        expect(minted.relativeUrl.startsWith("/api/assets/file/")).toBe(true);
+        const memory = memoryAssetStore();
+        const cache = makeRelayAssetCache(memory.store);
+        const local = yield* resolveRelayAssetUrl(cache, prepared, minted.relativeUrl, "photo");
+        expect(memory.kept.get(local)).toEqual(bytes);
+        // A re-mint names a new handle; the same asset key keeps the copy and its URL.
+        const reminted = yield* rpc["relayProbe.assetUrl"]({ attachmentId: slot.attachmentId! });
+        expect(reminted.relativeUrl).not.toBe(minted.relativeUrl);
+        expect(yield* resolveRelayAssetUrl(cache, prepared, reminted.relativeUrl, "photo")).toBe(
+          local,
+        );
+        expect(cache.stats().entries).toBe(1);
+
+        // Over the cap, the fetch stops and nothing is kept.
+        const small = makeRelayAssetCache(memoryAssetStore().store, {
+          ...RELAY_ASSET_LIMITS,
+          maxAssetBytes: 100_000,
+        });
+        const tooLarge = yield* resolveRelayAssetUrl(small, prepared, reminted.relativeUrl).pipe(
+          Effect.flip,
+        );
+        expect(tooLarge.reason).toBe("too-large");
+        expect(small.stats().entries).toBe(0);
+
+        // The cache lets go of the oldest copy past its budget, releasing it.
+        const tight = memoryAssetStore();
+        const tightCache = makeRelayAssetCache(tight.store, {
+          ...RELAY_ASSET_LIMITS,
+          maxCacheBytes: bytes.byteLength + 10,
+        });
+        const first = yield* resolveRelayAssetUrl(tightCache, prepared, minted.relativeUrl, "a");
+        yield* resolveRelayAssetUrl(tightCache, prepared, reminted.relativeUrl, "b");
+        expect(tight.kept.has(first)).toBe(false);
+        expect(tightCache.stats().entries).toBe(1);
+      }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(layerDevice, layerWebSocketGlobal))),
+  );
+
+  it.live("an EventSource over the mux resumes after Last-Event-ID when its stream ends", () =>
+    Effect.gen(function* () {
+      const relay = yield* startRelay;
+      const host = yield* startHost(relay.url);
+      const { registration } = yield* pairThroughOnboarding(host);
+      const tunnel = yield* openK3RelayTunnel(yield* k3relayTunnelInput(registration.profile));
+      const EventSource = tunnel.transport.eventSourceConstructor!;
+      const seen = yield* Effect.promise(
+        () =>
+          new Promise<Array<{ readonly data: string; readonly lastEventId: string }>>((resolve) => {
+            const source = new EventSource(`${K3_RELAY_PROVISIONAL_ORIGIN}/relay-probe/events`);
+            const events: Array<{ readonly data: string; readonly lastEventId: string }> = [];
+            source.onmessage = (event) => {
+              events.push({ data: event.data, lastEventId: event.lastEventId });
+              if (events.length === 7) {
+                source.close();
+                resolve(events);
+              }
+            };
+          }),
+      ).pipe(Effect.timeout("10 seconds"));
+      // Each response carries three events and ends; every reconnect picks up the next one.
+      expect(seen.map((event) => JSON.parse(event.data).n)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+      expect(seen.at(-1)?.lastEventId).toBe("7");
+    }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(layerDevice, layerWebSocketGlobal))),
+  );
+
+  it.live("what a device says about its address is not believed, and media routes refuse it", () =>
+    Effect.gen(function* () {
+      const relay = yield* startRelay;
+      const host = yield* startHost(relay.url);
+      const { registration } = yield* pairThroughOnboarding(host);
+      const tunnel = yield* openK3RelayTunnel(yield* k3relayTunnelInput(registration.profile));
+      const probe = yield* Effect.promise(async () =>
+        (
+          await tunnel.transport.fetch(`${K3_RELAY_PROVISIONAL_ORIGIN}/relay-probe`, {
+            headers: { "x-forwarded-for": "127.0.0.1", "x-real-ip": "127.0.0.1" },
+          })
+        ).json(),
+      );
+      expect(probe).toEqual({ transport: "k3relay", ipAddress: "k3relay" });
+      const refused = yield* Effect.promise(async () => {
+        const response = await tunnel.transport.fetch(
+          `${K3_RELAY_PROVISIONAL_ORIGIN}/api/preview/tunnel?port=22`,
+        );
+        return { status: response.status, body: await response.json() };
+      });
+      expect(refused.status).toBe(403);
+      expect(k3RelayUnsupportedFeatureOf(refused.body)).toBe("preview-tunnel");
     }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(layerDevice, layerWebSocketGlobal))),
   );
 

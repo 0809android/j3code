@@ -1,6 +1,7 @@
 import {
   type MuxClient,
   type MuxConnectionClosedError,
+  makeFetchEventSource,
   makeMuxClient,
   makeMuxFetch,
   makeMuxWebSocket,
@@ -154,6 +155,7 @@ export const openK3RelayTunnel: (
     fetch,
     webSocketConstructor: (url, protocols) =>
       new MuxWebSocket(url, protocols === undefined ? [] : protocols),
+    eventSourceConstructor: makeFetchEventSource(fetch),
   };
   return { mux, transport, session, closed: mux.closed } satisfies K3RelayTunnel;
 });
