@@ -397,6 +397,14 @@ const startup = Effect.gen(function* () {
   }
   const userDataPath = yield* appIdentity.resolveUserDataPath;
   yield* electronApp.setPath("userData", userDataPath);
+  // One app per profile. On Windows and Linux a `k3relay://` link launches a second process; it
+  // hands its arguments to this one (`second-instance`) and quits. Development builds skip the
+  // lock so several worktrees can run side by side.
+  if (!environment.isDevelopment && !(yield* electronApp.requestSingleInstanceLock)) {
+    yield* logStartupInfo("another instance is running; handing over and quitting");
+    yield* electronApp.quit;
+    return yield* Effect.interrupt;
+  }
   yield* logStartupInfo("runtime logging configured", { logDir: environment.logDir });
   yield* desktopSettings.load;
 
