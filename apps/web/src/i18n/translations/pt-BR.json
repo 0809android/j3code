@@ -13024,5 +13024,10 @@
   "27d76249d09eb69f": "Guia de revisão pronto",
   "faa3bb26abb39c93": "O guia de revisão falhou",
   "b7df38b7d8792d78": "Abrir guia",
-  "9e91e9a77b664e4e": "Não foi possível iniciar um guia de revisão"
+  "9e91e9a77b664e4e": "Não foi possível iniciar um guia de revisão",
+  "e28e72a08ef671f4": "Notificações pelo relay",
+  "43d21ea5d95279c9": "Celulares pareados que ativam as notificações do relay ficam sabendo de aprovações, pedidos de resposta e execuções concluídas ou com falha. Cada notificação é criptografada de ponta a ponta para o dispositivo; o relay, a Apple e o Google não conseguem lê-la, e ela nunca leva títulos de threads ou conteúdo de arquivos.",
+  "ea59b6afbc856df4": "Ativar ou desativar as notificações do relay",
+  "28ec637365a62040": "Não foi possível alterar as notificações do relay",
+  "edd5ea9481ebd306": "Notificações ativadas ·"
 }

@@ -13024,5 +13024,10 @@
   "27d76249d09eb69f": "Guide de revue prêt",
   "faa3bb26abb39c93": "Échec du guide de revue",
   "b7df38b7d8792d78": "Ouvrir le guide",
-  "9e91e9a77b664e4e": "Impossible de démarrer un guide de revue"
+  "9e91e9a77b664e4e": "Impossible de démarrer un guide de revue",
+  "e28e72a08ef671f4": "Notifications via le relais",
+  "43d21ea5d95279c9": "Les téléphones associés qui activent les notifications du relais sont avertis des approbations, des demandes de réponse et des exécutions terminées ou échouées. Chaque notification est chiffrée de bout en bout pour son appareil ; ni le relais, ni Apple, ni Google ne peuvent la lire, et elle ne contient jamais de titres de fils ni de contenu de fichiers.",
+  "ea59b6afbc856df4": "Activer ou désactiver les notifications du relais",
+  "28ec637365a62040": "Impossible de modifier les notifications du relais",
+  "edd5ea9481ebd306": "Notifications activées ·"
 }

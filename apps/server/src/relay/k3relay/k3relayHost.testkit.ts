@@ -81,6 +81,7 @@ import * as ServerSettings from "../../serverSettings.ts";
 import * as RelayAccount from "./RelayAccount.ts";
 import * as RelayConnector from "./RelayConnector.ts";
 import * as RelayDeviceLedger from "./RelayDeviceLedger.ts";
+import * as RelayNotifier from "./RelayNotifier.ts";
 
 /**
  * A K3 relay host as the server runs it, minus the parts the relay does not touch: the real
@@ -417,6 +418,10 @@ const loadRelay = async () => {
     readonly createRelay: (options: {
       readonly config: object;
       readonly now: () => number;
+      readonly logger: {
+        info(event: string, fields?: object): void;
+        error(event: string, fields?: object): void;
+      };
     }) => InProcessRelay;
   };
   return { config: testkit.TEST_CONFIG, createRelay: server.createRelay };
@@ -432,12 +437,17 @@ export const startK3RelayTestRelayWith = (overrides: object) =>
       Effect.promise(async () => {
         const { config, createRelay } = await loadRelay();
         const clock = { skewMs: 0 };
+        // What the relay would write to its log, so a test can check what it leaves out.
+        const logs: Array<string> = [];
+        const record = (event: string, fields?: object) =>
+          void logs.push(JSON.stringify({ event, ...fields }));
         const relay = createRelay({
           config: { ...config, ...overrides },
           now: () => testClock.currentTimeMillisUnsafe() + clock.skewMs,
+          logger: { info: record, error: record },
         });
         const port = await relay.listen();
-        return { relay, port, clock, url: `ws://127.0.0.1:${port}` };
+        return { relay, port, clock, logs, url: `ws://127.0.0.1:${port}` };
       }),
     ),
     ({ relay }) => Effect.promise(() => relay.close()),
@@ -465,6 +475,11 @@ export interface K3RelayTestHost {
   readonly approvePairing: (deviceId: string, confirmationCode?: string) => Promise<K3RelayDevice>;
   readonly rejectPairing: () => Promise<void>;
   readonly revokeDevice: (deviceId: string) => Promise<K3RelayDevice>;
+  /** Seals and sends a notification of this kind for this thread to every registered device. */
+  readonly notify: (
+    kind: "approval" | "input" | "completed" | "failed",
+    threadId: string,
+  ) => Promise<ReadonlyArray<string>>;
   /** This host's account at the relay (spec §20.4), as the settings screen drives it. */
   readonly account: {
     readonly signIn: (provider: K3RelayAccountProvider) => Promise<{ authorizeUrl: string }>;
@@ -490,6 +505,8 @@ export interface K3RelayTestHost {
 
 export interface K3RelayTestRelayHandle {
   readonly url: string;
+  /** Every line the relay logged so far. */
+  readonly logs: () => ReadonlyArray<string>;
   readonly dispose: () => Promise<void>;
 }
 
@@ -505,10 +522,10 @@ export const startK3RelayTestRelayHandle = async (
     await runtime.dispose();
   };
   try {
-    const { url } = await runtime.runPromise(
+    const { url, logs } = await runtime.runPromise(
       startK3RelayTestRelayWith(overrides).pipe(Scope.provide(scope)),
     );
-    return { url, dispose };
+    return { url, logs: () => [...logs], dispose };
   } catch (error) {
     await dispose();
     throw error;
@@ -562,6 +579,8 @@ export const startK3RelayTestHost = async (
         run(Effect.flatMap(RelayConnector.RelayConnector, (c) => c.rejectPairing)),
       revokeDevice: (deviceId) =>
         run(Effect.flatMap(RelayConnector.RelayConnector, (c) => c.revokeDevice(deviceId))),
+      notify: (kind, threadId) =>
+        run(Effect.flatMap(RelayNotifier.RelayNotifier, (n) => n.notify({ kind, threadId }))),
       account: {
         signIn: (provider) =>
           run(Effect.flatMap(RelayAccount.RelayAccount, (a) => a.signIn(provider))),

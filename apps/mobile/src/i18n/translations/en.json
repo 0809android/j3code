@@ -5733,5 +5733,14 @@
   "ad208e3e32c85029": "Hide all",
   "3328503592789bed": "Zen",
   "856812e7e1fc445e": "Tool calls in chat",
-  "8d545d54c0a9e950": "Hide the commands, edits, and searches agents run. Hide successful keeps failures. Zen shows only final answers. Approvals, questions, and errors always show."
+  "8d545d54c0a9e950": "Hide the commands, edits, and searches agents run. Hide successful keeps failures. Zen shows only final answers. Approvals, questions, and errors always show.",
+  "696fafb324c77af8": "Notifications are off",
+  "7fe05ae4d1bbb22d": "Allow notifications for {product} in Settings to get relay notifications.",
+  "7db0befe137138a8": "Notifications from hosts you reach through the K3 relay are end-to-end encrypted to this device. The relay, Apple and Google cannot read them; they only carry what happened, never thread titles or file contents. Changes reach each host the next time this device connects to it.",
+  "b4aaa7b0a3025fce": "Relay Notifications",
+  "0e9fd498e2a93dea": "This app build cannot receive notifications.",
+  "fd1316b1f627872b": "Approval needed",
+  "62e626804919b294": "Input needed",
+  "0f8b99938bb11d38": "Task completed",
+  "65d0dd48ec3a3d52": "Agent run failed"
 }

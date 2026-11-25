@@ -123,6 +123,17 @@ const PullRequestActivityVisibility = Schema.Struct({
 });
 export type PullRequestActivityVisibility = typeof PullRequestActivityVisibility.Type;
 
+/** Notifications through the K3 relay on this device (spec §13). Off until the user turns them on. */
+export const K3RelayNotificationPreferences = Schema.Struct({
+  enabled: Schema.Boolean,
+  approval: Schema.Boolean,
+  input: Schema.Boolean,
+  completed: Schema.Boolean,
+  failed: Schema.Boolean,
+});
+export type K3RelayNotificationPreferences = typeof K3RelayNotificationPreferences.Type;
+const isK3RelayNotificationPreferences = Schema.is(K3RelayNotificationPreferences);
+
 const isThreadListFilters = Schema.is(ThreadListFilters);
 const isPullRequestActivityVisibility = Schema.is(PullRequestActivityVisibility);
 const isWorkspaceSelections = Schema.is(WorkspaceSelections);
@@ -143,6 +154,7 @@ export interface Preferences {
   readonly pullRequestActivityVisibility?: PullRequestActivityVisibility;
   readonly pullRequestMergeMethod?: PullRequestMergeMethod;
   readonly liveActivitiesEnabled?: boolean;
+  readonly k3relayNotifications?: K3RelayNotificationPreferences;
   readonly themeId?: MobileThemeId;
   readonly lightThemeId?: MobileThemeId;
   readonly darkThemeId?: MobileThemeId;
@@ -234,6 +246,7 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     pullRequestActivityVisibility?: PullRequestActivityVisibility;
     pullRequestMergeMethod?: PullRequestMergeMethod;
     liveActivitiesEnabled?: boolean;
+    k3relayNotifications?: K3RelayNotificationPreferences;
     themeId?: MobileThemeId;
     lightThemeId?: MobileThemeId;
     darkThemeId?: MobileThemeId;
@@ -299,6 +312,9 @@ function sanitizePreferences(parsed: Preferences): Preferences {
 
   if (typeof parsed.liveActivitiesEnabled === "boolean") {
     preferences.liveActivitiesEnabled = parsed.liveActivitiesEnabled;
+  }
+  if (isK3RelayNotificationPreferences(parsed.k3relayNotifications)) {
+    preferences.k3relayNotifications = parsed.k3relayNotifications;
   }
   if (
     typeof parsed.themeId === "string" &&

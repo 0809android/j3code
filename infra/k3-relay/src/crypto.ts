@@ -14,6 +14,9 @@ export const LABELS = {
   register: "k3relay-v1/register",
   pow: "k3relay-v1/pow",
   powChallenge: "k3relay-v1/pow-challenge",
+  pushRegister: "k3relay-v1/push-register",
+  pushRemove: "k3relay-v1/push-remove",
+  pushSend: "k3relay-v1/push-send",
 } as const;
 
 const KEY_LENGTHS: Record<DeviceAlg, number> = { ed25519: 32, p256: 65 };

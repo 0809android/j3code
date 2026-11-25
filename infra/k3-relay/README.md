@@ -76,29 +76,32 @@ RELAY_DOMAIN=relay.example.com docker compose -f docker-compose.example.yml up -
 | `K3_SELF_PING_URL` / `K3_SELF_PING_INTERVAL_SEC`                     | なし / `0`（オフ）   | リレー自身の公開 URL（`https://<ドメイン>/health`）へ、この秒数ごとに軽い GET を送る（アイドル回収への備え。下を参照）          |
 | `GIT_COMMIT` / `IMAGE_DIGEST`                                        | `unknown`            | `/.well-known/k3-relay` に出す。`GIT_COMMIT` はビルド引数、`IMAGE_DIGEST` は配備のときに渡す                                    |
 
+通知（P4）の変数（`APNS_KEY_ID`、`APNS_TEAM_ID`、`APNS_PRIVATE_KEY`、`APNS_TOPIC`、`FCM_PROJECT_ID`、`FCM_CLIENT_EMAIL`、`FCM_PRIVATE_KEY` と上限）は、[docs/NOTIFICATIONS.md](docs/NOTIFICATIONS.md) にまとめています。**APNs にも FCM にも資格情報がなければ、通知の API はすべて `404` です。**
+
 アカウント（GitHub / Google / Apple でのサインイン）の変数（`RELAY_PUBLIC_URL`、`ACCOUNT_TOKEN_SEED`、`ACCOUNT_ID_HMAC_KEY`、提供元ごとの ID と秘密など）は、[docs/ACCOUNTS.md](docs/ACCOUNTS.md) にまとめています。**どの提供元も設定しなければ、アカウントは無効で、その API はすべて `404` です。**
 
 上限値の一覧は、実行中のリレーの `/.well-known/k3-relay` にも出ます。
 
 ## 保存するデータ
 
-SQLite（`node:sqlite`）に、次の 9 つだけを置きます（スキーマは `src/store.ts` の `SCHEMA_SQL`。ハッシュは `/.well-known/k3-relay` の `schemaHash`）。
+SQLite（`node:sqlite`）に、次の 10 だけを置きます（スキーマは `src/store.ts` の `SCHEMA_SQL`。ハッシュは `/.well-known/k3-relay` の `schemaHash`）。
 
-| テーブル        | 内容                                                                      | 保持                                 |
-| --------------- | ------------------------------------------------------------------------- | ------------------------------------ |
-| `hosts`         | hostId、`Hk`、登録日、最終接続日（日単位）                                | 365 日接続がなければ削除             |
-| `grants`        | hostId、deviceId、`Dk`、`alg`、grant（名前なし）、期限                    | 期限から 30 日、または失効から 30 日 |
-| `revocations`   | hostId、deviceId、失効の時刻、署名                                        | 30 日                                |
-| `invites`       | コードのハッシュ、使用済みの印、期限（`REQUIRE_INVITE=1` のときだけ使う） | 使用後 30 日                         |
-| `usage`         | hostId、月、中継したバイト数                                              | 2 か月                               |
-| `blocked_hosts` | 運営が遮断した hostId と、遮断した時刻（理由や IP は持たない）            | `unblock` するまで                   |
-| `accounts`      | ランダムなアカウント ID、作成日（アカウントを使う人だけ）                 | アカウントの削除まで                 |
-| `identities`    | 提供元、識別子（GitHub の数値 ID、OIDC の `sub`）の HMAC、アカウント ID   | アカウントの削除まで                 |
-| `account_hosts` | アカウント ID、hostId                                                     | 一覧から外すか、アカウントの削除まで |
+| テーブル        | 内容                                                                           | 保持                                                                            |
+| --------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------- |
+| `hosts`         | hostId、`Hk`、登録日、最終接続日（日単位）                                     | 365 日接続がなければ削除                                                        |
+| `grants`        | hostId、deviceId、`Dk`、`alg`、grant（名前なし）、期限                         | 期限から 30 日、または失効から 30 日                                            |
+| `revocations`   | hostId、deviceId、失効の時刻、署名                                             | 30 日                                                                           |
+| `invites`       | コードのハッシュ、使用済みの印、期限（`REQUIRE_INVITE=1` のときだけ使う）      | 使用後 30 日                                                                    |
+| `usage`         | hostId、月、中継したバイト数                                                   | 2 か月                                                                          |
+| `blocked_hosts` | 運営が遮断した hostId と、遮断した時刻（理由や IP は持たない）                 | `unblock` するまで                                                              |
+| `accounts`      | ランダムなアカウント ID、作成日（アカウントを使う人だけ）                      | アカウントの削除まで                                                            |
+| `identities`    | 提供元、識別子（GitHub の数値 ID、OIDC の `sub`）の HMAC、アカウント ID        | アカウントの削除まで                                                            |
+| `account_hosts` | アカウント ID、hostId                                                          | 一覧から外すか、アカウントの削除まで                                            |
+| `push_targets`  | hostId、deviceId、OS、プッシュのトークン、最後に使った日（通知を使う端末だけ） | 90 日使われなければ削除。失効、無効なトークン、端末による取り消しで、すぐに削除 |
 
 メモリだけに置くもの: nonce、セッション、token、ペアリングの窓、IP ごとの数（IP は保存しない）、指標。
 
-**保存しない**: 通信内容、端末名、ホスト名、プロジェクト名、IP アドレス、メールアドレス、氏名、アバター、ログイン名、提供元のトークン。grant に未知の項目があれば拒否し、保存する grant は読み取った項目だけから作り直します。
+**保存しない**: 通信内容、通知の中身、端末名、ホスト名、プロジェクト名、IP アドレス、メールアドレス、氏名、アバター、ログイン名、提供元のトークン。grant に未知の項目があれば拒否し、保存する grant は読み取った項目だけから作り直します。
 
 **ログ**: アクセスログは出しません。リレーが書く行は `listening`、`purged`、`closed`、全体の転送量の警報（`alert`。しきい値と数字だけ）、自己通信の失敗と回復（`self-ping-failed`、`self-ping-recovered`）、警報 webhook の失敗（`alert-webhook-failed`）と、例外の種類（`error.code`）だけで、パス、メソッド、hostId、IP、URL は含みません。Caddy も、`log` を書かないので、アクセスログは出ません（`src/ops.test.ts` が CI で検査します）。ただし Caddy のエラーログ（ERROR）には、TLS の失敗などで接続元が出ることがあります。compose の例は、そのログを 1 MiB の 1 ファイルで回します。残したくなければ `logging: driver: none` にしてください。
 
@@ -125,6 +128,8 @@ SQLite（`node:sqlite`）に、次の 9 つだけを置きます（スキーマ�
 | `POST`   | `/v1/hosts`                  | 登録。1 回目は `{hk}` を送ると `428` と課題 `{ts, difficulty, salt, mac}` が返る。2 回目は `{hk, challenge, nonce, sig, invite?}`。新規は `201`、登録済みは `200`。`sha256(lp("k3relay-v1/pow") ‖ lp(Hk) ‖ lp(mac の文字列) ‖ lp(nonce のバイト列))` の先頭のゼロが `difficulty` ビット以上で、`sig` は `Hk` による `k3relay-v1/register`、`Hk`、`mac`、`nonce`（送った文字列のまま）への署名。課題は有効 5 分、一回限り |
 | `POST`   | `/v1/grants/revoke`          | `{hostId, deviceId, issuedAt, sig}`。`sig` は `Hk` による `k3relay-v1/revoke`、hostId、deviceId、`issuedAt`（10 進の文字列）への署名。`issuedAt` は現在から 5 分以内                                                                                                                                                                                                                                                     |
 | `POST`   | `/v1/client/<hostId>/status` | `{alg, dk, grant, ts, nonce, sig}`。`sig` は `Dk` による `k3relay-v1/status`、hostId、deviceId、`ts`（10 進の文字列）、`nonce`（文字列）への署名。`ts` は ±60 秒、nonce は一回限り                                                                                                                                                                                                                                       |
+
+通知（[docs/NOTIFICATIONS.md](docs/NOTIFICATIONS.md)。APNs も FCM も設定されていなければ、すべて `404`）: `POST /v1/client/<hostId>/push`（端末がトークンを登録）、`POST /v1/client/<hostId>/push/remove`、`POST /v1/push/send`（ホストが暗号文を渡す）。
 
 アカウント（[docs/ACCOUNTS.md](docs/ACCOUNTS.md)。提供元が 1 つも設定されていなければ、すべて `404`）:
 

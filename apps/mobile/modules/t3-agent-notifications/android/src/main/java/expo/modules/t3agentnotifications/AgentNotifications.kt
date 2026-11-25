@@ -20,7 +20,10 @@ import expo.modules.notifications.service.ExpoFirebaseMessagingService
 
 class AgentMessagingService : ExpoFirebaseMessagingService() {
   override fun onMessageReceived(remoteMessage: RemoteMessage) {
-    if (remoteMessage.data["t3_kind"] == "agent_activity") {
+    val relayEnvelope = remoteMessage.data["k3"]
+    if (relayEnvelope != null) {
+      RelayNotify.receive(this, relayEnvelope)
+    } else if (remoteMessage.data["t3_kind"] == "agent_activity") {
       AgentNotifications.receive(this, remoteMessage.data)
     } else {
       super.onMessageReceived(remoteMessage)

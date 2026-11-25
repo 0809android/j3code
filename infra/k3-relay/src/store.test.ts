@@ -11,6 +11,7 @@ const RETENTION = {
   grantAfterExpiryDays: 30,
   revocationDays: 30,
   inviteAfterUseDays: 30,
+  pushTargetIdleDays: 90,
 };
 
 const grantRow = (deviceId: string, issuedAt: number, expiresAt: number) => ({
@@ -86,8 +87,17 @@ describe("RelayStore", () => {
     store.createAccount("o".repeat(32), "github", Buffer.alloc(32, 1), 1);
     store.addAccountHost("o".repeat(32), "idle".padEnd(32, "a"), 1);
     store.addAccountHost("o".repeat(32), "live".padEnd(32, "a"), 1);
+    const token = "ab".repeat(32);
+    store.upsertPushTarget("idle".padEnd(32, "a"), "5".repeat(32), "ios", token, today);
+    store.upsertPushTarget("live".padEnd(32, "a"), "6".repeat(32), "ios", token, today - 91);
+    store.upsertPushTarget("live".padEnd(32, "a"), "7".repeat(32), "android", token, today - 89);
 
     const result = store.purge(NOW, RETENTION);
+    // Unused for 90 days, or its host gone: the token goes too.
+    expect(result.pushTargets).toBe(1);
+    expect(store.getPushTarget("idle".padEnd(32, "a"), "5".repeat(32))).toBeUndefined();
+    expect(store.getPushTarget("live".padEnd(32, "a"), "6".repeat(32))).toBeUndefined();
+    expect(store.getPushTarget("live".padEnd(32, "a"), "7".repeat(32))?.platform).toBe("android");
     expect(result.hosts).toBe(1);
     expect(result.accountHosts).toBe(1);
     expect(store.accountHostIds("o".repeat(32))).toEqual(["live".padEnd(32, "a")]);

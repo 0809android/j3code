@@ -131,6 +131,7 @@ describe("what the relay keeps", () => {
         "hosts",
         "identities",
         "invites",
+        "push_targets",
         "revocations",
         "usage",
       ]);

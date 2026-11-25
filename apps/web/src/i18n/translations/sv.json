@@ -13031,5 +13031,10 @@
   "27d76249d09eb69f": "Granskningsguiden är klar",
   "faa3bb26abb39c93": "Granskningsguiden misslyckades",
   "b7df38b7d8792d78": "Öppna guiden",
-  "9e91e9a77b664e4e": "Kunde inte starta en granskningsguide"
+  "9e91e9a77b664e4e": "Kunde inte starta en granskningsguide",
+  "e28e72a08ef671f4": "Aviseringar via reläet",
+  "43d21ea5d95279c9": "Parkopplade telefoner som slår på reläaviseringar får veta om godkännanden, begäranden om svar och avslutade eller misslyckade körningar. Varje avisering är krypterad hela vägen till sin enhet; reläet, Apple och Google kan inte läsa den, och den innehåller aldrig trådrubriker eller filinnehåll.",
+  "ea59b6afbc856df4": "Slå på eller av reläaviseringar",
+  "28ec637365a62040": "Det gick inte att ändra reläaviseringarna",
+  "edd5ea9481ebd306": "Aviseringar på ·"
 }

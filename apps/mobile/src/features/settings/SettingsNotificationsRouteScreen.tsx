@@ -66,6 +66,7 @@ import { SettingsRow } from "./components/SettingsRow";
 import { SettingsSection } from "./components/SettingsSection";
 import { SettingsSwitchRow } from "./components/SettingsSwitchRow";
 import { SettingsScreen } from "./components/SettingsScreen";
+import { SettingsK3RelayNotificationsSection } from "./SettingsK3RelayNotificationsSection";
 import { resolveAgentAwarenessPlatformPresentation } from "./SettingsRouteScreen.logic";
 
 const updateLiveActivityPreference = createEnvironmentCommand(connectionAtomRuntime, {
@@ -196,7 +197,8 @@ export function SettingsNotificationsRouteScreen() {
           contentInsetAdjustmentBehavior="automatic"
           contentContainerClassName="px-5 pt-4"
         >
-          <Text className="text-base text-foreground-muted">
+          <SettingsK3RelayNotificationsSection />
+          <Text className="pt-6 text-base text-foreground-muted">
             {gt("Notifications require {product} in this app build.", { product: "T3 Connect" })}
           </Text>
         </ScrollView>
@@ -627,6 +629,7 @@ function ConfiguredSettingsNotificationsRouteScreen() {
             />
           ) : null}
         </SettingsSection>
+        <SettingsK3RelayNotificationsSection />
       </ScrollView>
     </SettingsScreen>
   );

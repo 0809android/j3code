@@ -120,6 +120,8 @@ import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerOwnership from "./serverOwnership.ts";
 import * as AgentAwarenessRelay from "./relay/AgentAwarenessRelay.ts";
 import * as RelayConnector from "./relay/k3relay/RelayConnector.ts";
+import * as RelayNotifier from "./relay/k3relay/RelayNotifier.ts";
+import * as RelayNotifyWatcher from "./relay/k3relay/RelayNotifyWatcher.ts";
 import { hasCloudPublicConfig } from "./cloud/publicConfig.ts";
 import * as ServerSettings from "./serverSettings.ts";
 import * as ManagedLimits from "./policy/managedLimits.ts";
@@ -727,6 +729,10 @@ const layerServerRestart = Layer.effect(
 
 const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   AgentAwarenessRelay.layer,
+  // The relay connector's notifier, by layer memoization: devices register with the same one.
+  Layer.effectDiscard(
+    Effect.flatMap(RelayNotifyWatcher.RelayNotifyWatcher, (watcher) => watcher.start),
+  ).pipe(Layer.provide(RelayNotifyWatcher.layer), Layer.provide(RelayNotifier.layer)),
   HeldHooksWaker.layer,
   layerThreadSettlementWorker,
   layerIdleCompactionWorker,

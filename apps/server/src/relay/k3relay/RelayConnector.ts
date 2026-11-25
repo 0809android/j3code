@@ -1,6 +1,8 @@
 import {
   K3_RELAY_BOOTSTRAP_PATH,
   K3_RELAY_GRANT_PATH,
+  K3_RELAY_NOTIFY_PATH,
+  K3RelayNotifyRegistration,
   type K3RelayApprovalMode,
   K3RelayConnectionError,
   type K3RelayConnectionStatus,
@@ -104,6 +106,7 @@ import { captureRelayRouter, makeRelayMuxHandler, type RelayLocalRoute } from ".
 import * as RelayAccount from "./RelayAccount.ts";
 import * as RelayDeviceLedger from "./RelayDeviceLedger.ts";
 import { relayStateDirectory } from "./RelayDeviceLedger.ts";
+import * as RelayNotifier from "./RelayNotifier.ts";
 import { makeGrantOutbox } from "./grantOutbox.ts";
 import { forgetRelayHandlesOf } from "./relayHandles.ts";
 import { openRelayWebSocket } from "./relaySockets.ts";
@@ -156,7 +159,11 @@ const encodeFrame = (frame: object): string => JSON.stringify(frame);
 
 const relayError = (failure: K3RelayError["failure"]) => new K3RelayError({ failure });
 
-const toDevice = (device: LedgerDevice, sessions: Iterable<LiveSession>): K3RelayDevice => {
+const toDevice = (
+  device: LedgerDevice,
+  sessions: Iterable<LiveSession>,
+  notified: ReadonlySet<string>,
+): K3RelayDevice => {
   let connectedSessions = 0;
   for (const session of sessions) if (session.deviceId === device.deviceId) connectedSessions += 1;
   return {
@@ -168,6 +175,7 @@ const toDevice = (device: LedgerDevice, sessions: Iterable<LiveSession>): K3Rela
     status: device.status,
     revokedAt: device.revokedAt,
     connectedSessions,
+    notifications: notified.has(device.deviceId),
   };
 };
 
@@ -240,6 +248,28 @@ const jsonResponse = (status: number, body: unknown): MuxHttpResponse<never> => 
 const orInternalError = <E>(effect: Effect.Effect<MuxHttpResponse<never>, E>) =>
   Effect.catchCause(effect, () => Effect.succeed(jsonResponse(500, { error: "internal" })));
 
+const NOTIFY_MAX_BODY_BYTES = 4 * 1024;
+const decodeNotifyRegistration = Schema.decodeUnknownOption(K3RelayNotifyRegistration);
+
+/** A small JSON body from the mux, or `undefined` when it is too large or not JSON. */
+const readSmallJson = (request: MuxHttpRequest) =>
+  request.body.pipe(
+    Stream.runFoldEffect(
+      () => new Uint8Array(0),
+      (collected, chunk) =>
+        collected.length + chunk.length > NOTIFY_MAX_BODY_BYTES
+          ? Effect.fail("too-large" as const)
+          : Effect.sync(() => {
+              const next = new Uint8Array(collected.length + chunk.length);
+              next.set(collected);
+              next.set(chunk, collected.length);
+              return next;
+            }),
+    ),
+    Effect.map((bytes) => parseJson(new TextDecoder().decode(bytes))),
+    Effect.orElseSucceed(() => undefined),
+  );
+
 const parseJson = (text: string): unknown => {
   try {
     return JSON.parse(text);
@@ -304,6 +334,7 @@ const make = Effect.gen(function* () {
   const auth = yield* EnvironmentAuth.EnvironmentAuth;
   const ledger = yield* RelayDeviceLedger.RelayDeviceLedger;
   const account = yield* RelayAccount.RelayAccount;
+  const notifier = yield* RelayNotifier.RelayNotifier;
   const http = yield* HttpClient.HttpClient;
   const services = yield* Effect.context<
     Aead.Aead | SecureRandom.SecureRandom | FileSystem.FileSystem | Path.Path
@@ -345,6 +376,7 @@ const make = Effect.gen(function* () {
     const settings = yield* currentSettings;
     const view = yield* Ref.get(connection);
     const devices = yield* ledger.list.pipe(Effect.orElseSucceed(() => []));
+    const notified = yield* notifier.registeredDeviceIds;
     const live = [...sessions.values()];
     return {
       enabled: settings.relay.enabled,
@@ -360,8 +392,9 @@ const make = Effect.gen(function* () {
       maxSessions: settings.relay.maxSessions,
       reachableWhenNetworkAccessOff: policyAllowed && settings.relay.enabled,
       requireApproval: approvalRequired(yield* account.approvalPolicy),
+      notifications: settings.relay.notifications,
       pairing: pairingView(pairing, pendingApproval),
-      devices: devices.map((device) => toDevice(device, live)),
+      devices: devices.map((device) => toDevice(device, live, notified)),
     } satisfies K3RelayHostState;
   });
 
@@ -542,7 +575,7 @@ const make = Effect.gen(function* () {
     yield* settlePending(approved.reply);
     yield* stopPairingTimer;
     yield* publish;
-    return toDevice(approved.device, sessions.values());
+    return toDevice(approved.device, sessions.values(), yield* notifier.registeredDeviceIds);
   });
 
   /** The user's approval: the compared code is required unless a one-tap offer still stands. */
@@ -794,15 +827,77 @@ const make = Effect.gen(function* () {
     });
   });
 
+  /**
+   * The device's own notification key and kinds (spec §13). The device is the session's, never one
+   * the body names, and the body carries only the public key and the kinds.
+   */
+  const notifyRoute = Effect.fn("RelayConnector.notifyRoute")(function* (
+    info: AuthenticatedSession,
+    method: string,
+    test: boolean,
+  ) {
+    const deviceId = info.device.deviceId;
+    if (test) {
+      if (method !== "POST") return jsonResponse(405, { error: "method-not-allowed" });
+      const delivery = yield* Effect.result(notifier.sendTest(deviceId));
+      return delivery._tag === "Success"
+        ? jsonResponse(200, { delivery: delivery.success })
+        : jsonResponse(429, { error: "too-many-requests" });
+    }
+    switch (method) {
+      case "GET":
+        return jsonResponse(200, yield* notifier.status(deviceId));
+      case "DELETE":
+        yield* notifier.unregister(deviceId);
+        yield* publish;
+        return jsonResponse(200, yield* notifier.status(deviceId));
+      default:
+        return jsonResponse(405, { error: "method-not-allowed" });
+    }
+  });
+
+  const registerNotify = Effect.fn("RelayConnector.registerNotify")(function* (
+    info: AuthenticatedSession,
+    request: MuxHttpRequest,
+  ) {
+    const registration = decodeNotifyRegistration(yield* readSmallJson(request));
+    if (registration._tag === "None") return jsonResponse(400, { error: "bad-request" });
+    const result = yield* Effect.result(
+      notifier.register(info.device.deviceId, registration.value),
+    );
+    if (result._tag === "Failure") {
+      const reason = result.failure.reason;
+      return jsonResponse(
+        reason === "invalid-key" ? 400 : reason === "inactive-device" ? 403 : 500,
+        { error: reason },
+      );
+    }
+    yield* publish;
+    return jsonResponse(200, result.success);
+  });
+
   /** The device-only routes; each call first re-checks the ledger, which may have changed. */
   const localRoutes =
     (info: AuthenticatedSession): RelayLocalRoute =>
     (request: MuxHttpRequest) => {
       const pathname = request.path.split("?")[0];
+      const method = request.method.toUpperCase();
+      if (pathname === K3_RELAY_NOTIFY_PATH || pathname === `${K3_RELAY_NOTIFY_PATH}/test`) {
+        const route =
+          method === "PUT" && pathname === K3_RELAY_NOTIFY_PATH
+            ? orInternalError(registerNotify(info, request))
+            : orInternalError(notifyRoute(info, method, pathname !== K3_RELAY_NOTIFY_PATH));
+        return verifyActiveDevice(info.device).pipe(
+          Effect.matchEffect({
+            onFailure: (error) => Effect.succeed(jsonResponse(403, { error: error.reason })),
+            onSuccess: () => route,
+          }),
+        );
+      }
       if (pathname !== K3_RELAY_GRANT_PATH && pathname !== K3_RELAY_BOOTSTRAP_PATH) {
         return undefined;
       }
-      if (request.method.toUpperCase() !== "POST") {
+      if (method !== "POST") {
         return Effect.succeed(jsonResponse(405, { error: "method-not-allowed" }));
       }
       const route =
@@ -1060,7 +1155,9 @@ const make = Effect.gen(function* () {
   const applySettings = Effect.fn("RelayConnector.applySettings")(function* (
     settings: ServerSettings,
   ) {
-    const key = encodeFrame(settings.relay);
+    // Turning notifications on or off must not drop the connection and its sessions.
+    const { notifications: _notifications, ...connectionSettings } = settings.relay;
+    const key = encodeFrame(connectionSettings);
     if (key === appliedKey) return yield* publish;
     appliedKey = key;
     // Tell connected devices why before their sockets go with the connection.
@@ -1117,6 +1214,7 @@ const make = Effect.gen(function* () {
     );
     yield* grantOutbox.drop(deviceId);
     yield* forgetRelayHandlesOf(deviceId);
+    yield* notifier.unregister(deviceId);
     if (controlWriter !== undefined) {
       yield* Effect.ignore(controlWriter({ type: "revoke", ...revocation }));
     } else if (endpoints !== undefined) {
@@ -1134,7 +1232,7 @@ const make = Effect.gen(function* () {
     const live = [...sessions.values()].filter((session) => session.deviceId === deviceId);
     for (const session of live) yield* session.close("revoked");
     yield* publish;
-    return toDevice(device, sessions.values());
+    return toDevice(device, sessions.values(), yield* notifier.registeredDeviceIds);
   });
 
   const renameDevice = Effect.fn("RelayConnector.renameDevice")(function* (
@@ -1151,7 +1249,7 @@ const make = Effect.gen(function* () {
         ),
       );
     yield* publish;
-    return toDevice(device, sessions.values());
+    return toDevice(device, sessions.values(), yield* notifier.registeredDeviceIds);
   });
 
   const forgetSessionDevice = Effect.fn("RelayConnector.forgetSessionDevice")(function* (session: {
@@ -1184,6 +1282,8 @@ const make = Effect.gen(function* () {
 export const layer = Layer.effect(RelayConnector, make).pipe(
   // One account service, shared with the RPC handlers that sign the host in.
   Layer.provideMerge(RelayAccount.layer),
+  // One notifier, shared with the watcher that turns thread events into notifications.
+  Layer.provideMerge(RelayNotifier.layer),
   Layer.provide(RelayDeviceLedger.layer),
   Layer.provide(layerE2eeCrypto),
 );

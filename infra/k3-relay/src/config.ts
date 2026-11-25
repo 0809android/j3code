@@ -1,5 +1,7 @@
 const MIB = 1024 * 1024;
 
+import type { ApnsCredentials, FcmCredentials } from "./push.ts";
+
 export type AccountProviderKind = "github" | "google" | "apple";
 
 /**
@@ -129,6 +131,16 @@ export interface RelayConfig {
   readonly accountAdmissionsPerHostPerHour: number;
   readonly accountMaxConcurrentPerHost: number;
   readonly accountSessionMaxMs: number;
+
+  /** Push (spec §13, P4). A platform is off unless all of its credentials are set. */
+  readonly apns: ApnsCredentials | null;
+  readonly fcm: FcmCredentials | null;
+  readonly pushPerMinutePerHost: number;
+  readonly pushPerMinutePerDevice: number;
+  readonly pushRegistrationsPerMinutePerDevice: number;
+  readonly pushMaxEnvelopeBytes: number;
+  readonly maxPushTargetsPerHost: number;
+  readonly pushTargetIdleDays: number;
 }
 
 export const DEFAULT_CONFIG: RelayConfig = {
@@ -221,6 +233,16 @@ export const DEFAULT_CONFIG: RelayConfig = {
   accountMaxConcurrentPerHost: 2,
   // The device waits on this session while the host's user compares codes (10 minutes).
   accountSessionMaxMs: 11 * 60_000,
+
+  apns: null,
+  fcm: null,
+  pushPerMinutePerHost: 60,
+  pushPerMinutePerDevice: 10,
+  pushRegistrationsPerMinutePerDevice: 6,
+  // The host's largest envelope is 1081 bytes; APNs and FCM each take 4 KB with base64url.
+  pushMaxEnvelopeBytes: 2048,
+  maxPushTargetsPerHost: 64,
+  pushTargetIdleDays: 90,
 };
 
 type NumericKey = {
@@ -268,6 +290,12 @@ const NUMERIC_ENV: ReadonlyArray<readonly [NumericKey, string]> = [
   ["accountStartsPerMinutePerIp", "ACCOUNT_STARTS_PER_MINUTE_PER_IP"],
   ["accountsPerIpPerDay", "ACCOUNTS_PER_IP_PER_DAY"],
   ["accountAdmissionsPerHostPerHour", "ACCOUNT_ADMISSIONS_PER_HOST_PER_HOUR"],
+  ["pushPerMinutePerHost", "PUSH_PER_MINUTE_PER_HOST"],
+  ["pushPerMinutePerDevice", "PUSH_PER_MINUTE_PER_DEVICE"],
+  ["pushRegistrationsPerMinutePerDevice", "PUSH_REGISTRATIONS_PER_MINUTE_PER_DEVICE"],
+  ["pushMaxEnvelopeBytes", "PUSH_MAX_ENVELOPE_BYTES"],
+  ["maxPushTargetsPerHost", "MAX_PUSH_TARGETS_PER_HOST"],
+  ["pushTargetIdleDays", "PUSH_TARGET_IDLE_DAYS"],
 ];
 
 export type RelayEnv = Readonly<Record<string, string | undefined>>;
@@ -321,7 +349,7 @@ export function loadConfig(env: RelayEnv): RelayConfig {
     .split(",")
     .map((entry) => entry.trim())
     .filter((entry) => entry !== "");
-  Object.assign(overrides, loadAccountConfig(env));
+  Object.assign(overrides, loadAccountConfig(env), loadPushConfig(env));
   const config = { ...DEFAULT_CONFIG, ...overrides };
   if (
     !(config.egressWarnFraction > 0) ||
@@ -439,6 +467,37 @@ function loadAccountConfig(env: RelayEnv): Partial<RelayConfig> {
   };
 }
 
+const APNS_URL = "https://api.push.apple.com";
+const APNS_SANDBOX_URL = "https://api.sandbox.push.apple.com";
+const FCM_URL = "https://fcm.googleapis.com";
+const FCM_TOKEN_URL = "https://oauth2.googleapis.com/token";
+
+/** APNs (`.p8` key) and FCM (a service account), each all-or-nothing. Unset means off. */
+function loadPushConfig(env: RelayEnv): Partial<RelayConfig> {
+  const pem = (value: string) => value.replace(/\\n/gu, "\n");
+  const out: { -readonly [K in "apns" | "fcm"]?: RelayConfig[K] } = {};
+  if (group(env, "APNs", ["APNS_KEY_ID", "APNS_TEAM_ID", "APNS_PRIVATE_KEY", "APNS_TOPIC"])) {
+    out.apns = {
+      keyId: env.APNS_KEY_ID!.trim(),
+      teamId: env.APNS_TEAM_ID!.trim(),
+      privateKeyPem: pem(env.APNS_PRIVATE_KEY!),
+      topic: env.APNS_TOPIC!.trim(),
+      url: APNS_URL,
+      sandboxUrl: APNS_SANDBOX_URL,
+    };
+  }
+  if (group(env, "FCM", ["FCM_PROJECT_ID", "FCM_CLIENT_EMAIL", "FCM_PRIVATE_KEY"])) {
+    out.fcm = {
+      projectId: env.FCM_PROJECT_ID!.trim(),
+      clientEmail: env.FCM_CLIENT_EMAIL!.trim(),
+      privateKeyPem: pem(env.FCM_PRIVATE_KEY!),
+      url: FCM_URL,
+      tokenUrl: FCM_TOKEN_URL,
+    };
+  }
+  return out;
+}
+
 function isSeed(value: string): boolean {
   if (!/^[A-Za-z0-9_-]{43}$/u.test(value)) return false;
   const bytes = Buffer.from(value, "base64url");
@@ -486,5 +545,8 @@ export function publicLimits(config: RelayConfig) {
     powBaseDifficulty: config.powBaseDifficulty,
     requireInvite: config.requireInvite,
     maxHostsPerAccount: config.maxHostsPerAccount,
+    pushPerMinutePerHost: config.pushPerMinutePerHost,
+    pushPerMinutePerDevice: config.pushPerMinutePerDevice,
+    pushMaxEnvelopeBytes: config.pushMaxEnvelopeBytes,
   };
 }

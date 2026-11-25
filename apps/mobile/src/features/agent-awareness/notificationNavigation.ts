@@ -1,6 +1,7 @@
 import * as Notifications from "expo-notifications";
 
 import { setAndroidThreadOnScreen } from "./androidNotifications";
+import { openK3RelayNotificationData } from "./k3relayNotifications";
 import { foregroundNotificationBehavior } from "./foregroundNotificationBehavior";
 import { routeAgentNotificationResponseOnce, threadDeepLinkOnScreen } from "./notificationPayload";
 import { consumeLastAgentNotificationResponse } from "./notificationResponseConsumer";
@@ -26,6 +27,18 @@ export function installAgentNotificationNavigation(navigate: (href: string) => v
   });
 
   const handleResponse = (response: Notifications.NotificationResponse): void => {
+    const data = response.notification.request.content.data as Record<string, unknown> | null;
+    if (data && typeof data.k3 === "string" && typeof data.environmentId !== "string") {
+      // The extension could not open this K3 relay notification; the app opens it instead.
+      void openK3RelayNotificationData(data).then((opened) => {
+        if (opened?.ok && opened.payload.thread !== undefined) {
+          navigate(
+            `/threads/${encodeURIComponent(opened.payload.env)}/${encodeURIComponent(opened.payload.thread)}`,
+          );
+        }
+      });
+      return;
+    }
     routeAgentNotificationResponseOnce({ handledResponseIds, response, navigate });
   };
   const subscription = Notifications.addNotificationResponseReceivedListener(handleResponse);

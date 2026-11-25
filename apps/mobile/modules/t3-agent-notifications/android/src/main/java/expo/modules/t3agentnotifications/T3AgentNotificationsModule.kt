@@ -30,6 +30,17 @@ class T3AgentNotificationsModule : Module() {
       appContext.reactContext?.let { AgentNotifications.showcase(it, scheme, data) }
     }
 
+    Function("setRelayNotifyKey") { name: String, value: String, scheme: String ->
+      appContext.reactContext?.let {
+        RelayNotify.storeKey(it, name, value)
+        RelayNotify.setScheme(it, scheme)
+      }
+    }
+
+    Function("removeRelayNotifyKey") { name: String ->
+      appContext.reactContext?.let { RelayNotify.removeKey(it, name) }
+    }
+
     Function("setThreadOnScreen") { path: String? ->
       AgentNotifications.setThreadOnScreen(path)
     }

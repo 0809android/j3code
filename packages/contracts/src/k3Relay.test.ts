@@ -15,6 +15,7 @@ describe("K3 relay settings", () => {
       url: DEFAULT_K3_RELAY_URL,
       maxSessions: 8,
       maxSessionBufferBytes: 16 * 1024 * 1024,
+      notifications: true,
     });
     expect(DEFAULT_K3_RELAY_URL).toBe("wss://relay.k3.kinocode.jp");
   });

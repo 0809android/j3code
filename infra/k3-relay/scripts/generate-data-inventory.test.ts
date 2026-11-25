@@ -29,6 +29,7 @@ describe("data inventory", () => {
       "accounts",
       "identities",
       "account_hosts",
+      "push_targets",
     ]);
     const markdown = renderDataMarkdown();
     for (const table of tables) {

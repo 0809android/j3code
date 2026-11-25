@@ -469,6 +469,8 @@ const config: ExpoConfig = {
     ["expo-sensors", { motionPermission: false }],
     // Mods run in reverse order; expo-widgets must create and wipe the target before assets are added.
     ...(!isIosPersonalTeamBuild ? ["./plugins/withWidgetLogoAsset.cjs", widgetsPlugin] : []),
+    // Opens end-to-end encrypted K3 relay notifications; Personal Team builds cannot receive pushes.
+    ...(!isIosPersonalTeamBuild ? ["./plugins/withK3RelayNotificationService.cjs"] : []),
     "./plugins/withAndroidNetworkSecurityConfig.cjs",
     "./plugins/withAndroidGradleHeap.cjs",
     "./plugins/withAndroidInputBackground.cjs",

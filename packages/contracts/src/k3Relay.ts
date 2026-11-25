@@ -27,6 +27,11 @@ export const k3RelayE2eeEnvironmentId = (hostId: string): string => hostId;
 /** Device-only routes, served by the host's relay bridge inside the mux and nowhere else. */
 export const K3_RELAY_GRANT_PATH = "/api/relay/grant";
 export const K3_RELAY_BOOTSTRAP_PATH = "/api/relay/bootstrap";
+/**
+ * The device's notification key `Nk` and what it wants to hear about (spec §13). `PUT` registers,
+ * `GET` reads, `DELETE` removes; always for the E2E-authenticated device itself.
+ */
+export const K3_RELAY_NOTIFY_PATH = "/api/relay/notify";
 
 /**
  * Relayed devices never get a signed URL (spec §12): a signed URL is a bearer capability that
@@ -133,6 +138,8 @@ export const K3RelaySettings = Schema.Struct({
   maxSessionBufferBytes: PositiveInt.check(
     Schema.isBetween({ minimum: 1024 * 1024, maximum: 256 * 1024 * 1024 }),
   ).pipe(Schema.withDecodingDefaultKey(Effect.succeed(16 * 1024 * 1024))),
+  /** Sends end-to-end encrypted notifications to devices that asked for them (spec §13). */
+  notifications: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(true))),
 });
 export type K3RelaySettings = typeof K3RelaySettings.Type;
 
@@ -143,6 +150,7 @@ export const K3RelaySettingsPatch = Schema.Struct({
   maxSessionBufferBytes: Schema.optionalKey(
     PositiveInt.check(Schema.isBetween({ minimum: 1024 * 1024, maximum: 256 * 1024 * 1024 })),
   ),
+  notifications: Schema.optionalKey(Schema.Boolean),
 });
 export type K3RelaySettingsPatch = typeof K3RelaySettingsPatch.Type;
 
@@ -181,8 +189,36 @@ export const K3RelayDevice = Schema.Struct({
   revokedAt: Schema.NullOr(NonNegativeInt),
   /** Live E2E sessions through the relay right now. */
   connectedSessions: NonNegativeInt,
+  /** The device registered a notification key; older hosts do not say. */
+  notifications: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false))),
 });
 export type K3RelayDevice = typeof K3RelayDevice.Type;
+
+/** What a device asked to be notified about. Every kind is off unless the device turns it on. */
+export const K3RelayNotifyKinds = Schema.Struct({
+  approval: Schema.Boolean,
+  input: Schema.Boolean,
+  completed: Schema.Boolean,
+  failed: Schema.Boolean,
+});
+export type K3RelayNotifyKinds = typeof K3RelayNotifyKinds.Type;
+
+export const K3RelayNotifyRegistration = Schema.Struct({
+  /** `Nk`'s X25519 public key, base64url. The secret never leaves the device. */
+  publicKey: TrimmedNonEmptyString,
+  kinds: K3RelayNotifyKinds,
+});
+export type K3RelayNotifyRegistration = typeof K3RelayNotifyRegistration.Type;
+
+export const K3RelayNotifyStatus = Schema.Struct({
+  registered: Schema.Boolean,
+  /** `notifyKeyId` of the registered key, so a device sees whether the host has its current key. */
+  keyId: Schema.NullOr(TrimmedNonEmptyString),
+  kinds: Schema.NullOr(K3RelayNotifyKinds),
+  /** False when the host's user turned relay notifications off. */
+  hostEnabled: Schema.Boolean,
+});
+export type K3RelayNotifyStatus = typeof K3RelayNotifyStatus.Type;
 
 export const K3RelayPairingCloseReason = Schema.Literals([
   "approved",
@@ -243,6 +279,8 @@ export const K3RelayHostState = Schema.Struct({
   reachableWhenNetworkAccessOff: Schema.Boolean,
   /** New devices always need approval with compared codes; on by default (spec §20.3). */
   requireApproval: Schema.Boolean,
+  /** End-to-end encrypted notifications to devices that registered for them (spec §13). */
+  notifications: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false))),
   pairing: K3RelayPairingState,
   devices: Schema.Array(K3RelayDevice),
 });

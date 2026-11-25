@@ -5725,5 +5725,14 @@
   "ad208e3e32c85029": "Ocultar todas",
   "3328503592789bed": "Zen",
   "856812e7e1fc445e": "Chamadas de ferramentas no chat",
-  "8d545d54c0a9e950": "Oculta os comandos, edições e pesquisas que os agentes executam. \"Ocultar bem-sucedidas\" mantém as falhas. Zen mostra só as respostas finais. Aprovações, perguntas e erros sempre aparecem."
+  "8d545d54c0a9e950": "Oculta os comandos, edições e pesquisas que os agentes executam. \"Ocultar bem-sucedidas\" mantém as falhas. Zen mostra só as respostas finais. Aprovações, perguntas e erros sempre aparecem.",
+  "696fafb324c77af8": "As notificações estão desativadas",
+  "7fe05ae4d1bbb22d": "Permita as notificações do {product} nos Ajustes para receber notificações do relay.",
+  "7db0befe137138a8": "As notificações dos hosts que você acessa pelo relay do K3 são criptografadas de ponta a ponta para este dispositivo. O relay, a Apple e o Google não conseguem lê-las; elas só dizem o que aconteceu, nunca títulos de threads ou conteúdo de arquivos. As alterações chegam a cada host na próxima vez que este dispositivo se conectar a ele.",
+  "b4aaa7b0a3025fce": "Notificações do relay",
+  "0e9fd498e2a93dea": "Esta versão do app não pode receber notificações.",
+  "fd1316b1f627872b": "Aprovação necessária",
+  "62e626804919b294": "Resposta necessária",
+  "0f8b99938bb11d38": "Tarefa concluída",
+  "65d0dd48ec3a3d52": "A execução do agente falhou"
 }
