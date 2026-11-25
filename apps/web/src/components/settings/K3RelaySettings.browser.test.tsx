@@ -151,6 +151,7 @@ describe("K3RelaySettingsView", () => {
               status: "revoked",
               revokedAt: NOW,
               connectedSessions: 0,
+              notifications: false,
             },
             {
               deviceId: "b".repeat(32),
@@ -161,6 +162,7 @@ describe("K3RelaySettingsView", () => {
               status: "active",
               revokedAt: null,
               connectedSessions: 0,
+              notifications: false,
             },
           ],
         }}
