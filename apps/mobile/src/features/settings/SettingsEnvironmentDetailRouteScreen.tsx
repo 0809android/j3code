@@ -224,7 +224,15 @@ function EnvironmentDetail({ environmentId }: { readonly environmentId: Environm
               }
             />
             {connected ? (
-              <K3RelaySettingsSection environmentId={environmentId} canWrite={allowed} />
+              <K3RelaySettingsSection
+                environmentId={environmentId}
+                canWrite={allowed}
+                networkAccessEnabled={
+                  session?.auth.policy === "remote-reachable" ||
+                  (session?.auth.policy === "loopback-browser" &&
+                    (config?.directEndpoints?.length ?? 0) > 0)
+                }
+              />
             ) : null}
             {outdated ? (
               <OutdatedServerUpdateSection

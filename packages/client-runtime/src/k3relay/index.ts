@@ -1,8 +1,6 @@
 export * from "./admission.ts";
 export * from "./deviceKeyStore.ts";
 export * from "./failure.ts";
-export * from "./fakeHostApi.ts";
-export * from "./relayHostContract.ts";
 export * from "./status.ts";
 export {
   K3RelayOnboarding,
