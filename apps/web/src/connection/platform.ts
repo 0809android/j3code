@@ -42,6 +42,7 @@ import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import { FetchHttpClient } from "effect/http";
+import * as K3RelayDeviceKeys from "./k3relayDeviceKeys";
 
 import { APP_VERSION } from "../branding";
 import { readDesktopPrimaryBearerToken } from "../environments/primary/desktopAuth";
@@ -848,6 +849,7 @@ const layerRpcRequestObserver = Layer.succeed(
 
 type ConnectionPlatformLayerSource =
   | typeof ConnectionStorage.layer
+  | typeof K3RelayDeviceKeys.layer
   | typeof layerConnectivity
   | typeof layerWakeups
   | typeof layerCapabilities
@@ -861,6 +863,7 @@ export const layer: Layer.Layer<
   Layer.Services<ConnectionPlatformLayerSource>
 > = Layer.mergeAll(
   ConnectionStorage.layer,
+  K3RelayDeviceKeys.layer,
   layerConnectivity,
   layerWakeups,
   layerCapabilities,

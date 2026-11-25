@@ -29,6 +29,7 @@ import { configuredHostedAppUrl } from "../../hostedPairing";
 import { useOpenChangeRequestLink } from "../../lib/openPullRequestLink";
 import { selectActiveRightPanelSurface, useRightPanelStore } from "../../rightPanelStore";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
+import { isK3RelayLink, pendingK3RelayLinkAtom } from "../../k3relay/pendingLink";
 import { resolveThreadRouteTarget } from "../../threadRoutes";
 import { assetEnvironment } from "../../state/assets";
 import { readProject, readThreadShell } from "../../state/entities";
@@ -207,6 +208,11 @@ export function DesktopWebLinkCoordinator() {
   });
 
   const openLink = useEffectEvent(async (url: string) => {
+    if (isK3RelayLink(url)) {
+      appAtomRegistry.set(pendingK3RelayLinkAtom, url.trim());
+      await router.navigate({ to: "/settings/connections" });
+      return;
+    }
     const pairingUrl = readPairingAppLink(url);
     if (pairingUrl !== null) {
       await pairFromLink(pairingUrl);

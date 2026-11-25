@@ -49,9 +49,11 @@ import { useSearchableSetting } from "./settingsSearch";
 import { ConnectDeviceApprovalSettings } from "./ConnectDeviceApprovalSettings";
 import { EnvironmentIconMenu } from "./EnvironmentIconPicker";
 import { FoldedSettingsSection } from "./FoldedSettingsSection";
+import { K3RelaySettings } from "./K3RelaySettings";
 import { EnvironmentsMap } from "./EnvironmentsMap";
 import { LinkedEnvironmentsSettings } from "./LinkedEnvironmentsSettings";
 import { addEnvironmentPrefillAtom } from "~/state/linkedThreadView";
+import { pendingK3RelayLinkAtom } from "~/k3relay/pendingLink";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { useMediaQuery } from "~/hooks/useMediaQuery";
 import { usePeerLinkHosts } from "~/state/peerLinks";
@@ -365,6 +367,8 @@ function ConnectionsSettingsContent({
   const [savedBackendError, setSavedBackendError] = useState<string | null>(null);
   // Set by a read-only linked thread whose machine this client is about to pair with.
   const [addPrefill, setAddPrefill] = useAtom(addEnvironmentPrefillAtom);
+  // A `k3relay://` link the OS handed the desktop app opens the dialog on the relay tab.
+  const [pendingRelayLink, setPendingRelayLink] = useAtom(pendingK3RelayLinkAtom);
   const handleAddBackendDialogOpenChange = (open: boolean) => {
     setAddBackendDialogOpen(open);
     if (open) {
@@ -373,6 +377,7 @@ function ConnectionsSettingsContent({
     } else {
       setSavedBackendError(null);
       setAddPrefill(null);
+      setPendingRelayLink(null);
     }
   };
   const openAddRoute = (target: EnvironmentPresentation) => {
@@ -1530,6 +1535,7 @@ function ConnectionsSettingsContent({
               requestRevoke={requestConnectRevoke}
             />
           ) : null}
+          <K3RelaySettings environmentId={accessEnvironmentId} canWrite={canWriteAccess} />
           <RevokeConnectDeviceDialog
             request={pendingConnectRevoke}
             onClose={() => setPendingConnectRevoke(null)}
@@ -1881,11 +1887,12 @@ function ConnectionsSettingsContent({
             ) : null}
             {/* Actions on several machines at once, such as linking several, go here. */}
             <AddEnvironmentDialog
-              key={`${addPrefill?.environmentId ?? "any"}:${addBackendHost}`}
-              open={addBackendDialogOpen || addPrefill !== null}
+              key={`${addPrefill?.environmentId ?? "any"}:${addBackendHost}:${pendingRelayLink ?? ""}`}
+              open={addBackendDialogOpen || addPrefill !== null || pendingRelayLink !== null}
               prefill={addPrefill}
               routeTarget={routeTarget}
               initialHost={addBackendHost}
+              initialRelayLink={pendingRelayLink ?? ""}
               error={savedBackendError}
               savedEnvironments={savedEnvironments}
               onOpenChange={handleAddBackendDialogOpenChange}

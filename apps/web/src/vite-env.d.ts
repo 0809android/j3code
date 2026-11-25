@@ -25,6 +25,8 @@ interface ImportMeta {
 declare global {
   interface Window {
     desktopBridge?: DesktopBridge;
+    /** Desktop only: K3 Relay device keys, encrypted by the OS keychain in the main process. */
+    k3relayDeviceKeys?: import("./connection/k3relayDeviceKeys").DesktopK3RelayDeviceKeys;
     /** Dev builds only, from DevReplayHost. Agents call these from the browser console. */
     t3dev?: {
       readonly replayScenarios: () => ReadonlyArray<string>;
