@@ -17,6 +17,7 @@ const USAGE = `usage:
   node src/cli.ts block <hostId>      cut a host off: control and data closed, new connections refused
   node src/cli.ts unblock <hostId>    lift the block
   node src/cli.ts blocked             list blocked hosts
+  node src/cli.ts backup <file>       write a consistent snapshot of the database (a new file)
 `;
 
 /** The operator's commands. They act on the database, a running relay notices within seconds. */
@@ -53,6 +54,22 @@ export function runAdmin(
     return withStore(env, (store) => {
       for (const hostId of store.blockedHosts()) io.out(`${hostId}\n`);
       return 0;
+    });
+  }
+  if (command === "backup") {
+    if (!argument) {
+      io.err("backup needs the path of the file to write\n");
+      return 2;
+    }
+    return withStore(env, (store) => {
+      try {
+        const info = store.snapshotTo(argument);
+        io.out(`snapshot written to ${argument} (${info.hosts} hosts, ${info.bytes} bytes)\n`);
+        return 0;
+      } catch (error) {
+        io.err(`backup failed: ${error instanceof Error ? error.message : "unknown error"}\n`);
+        return 1;
+      }
     });
   }
   if (command === "invite") {

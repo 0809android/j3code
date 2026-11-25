@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off -- the relay persists to node:sqlite and hashes the schema.
 import * as NodeCrypto from "node:crypto";
+import * as NodeFS from "node:fs";
 import * as NodeSqlite from "node:sqlite";
 
 import type { DeviceAlg } from "./crypto.ts";
@@ -265,6 +266,22 @@ export class RelayStore {
     ).run(hostId, month, bytes);
   }
 
+  /**
+   * A consistent copy of the whole database in one new file (`VACUUM INTO`), taken while the
+   * relay keeps running. It fails if the file exists. The copy is checked before it is trusted,
+   * and removed again when the check fails.
+   */
+  snapshotTo(destPath: string): SnapshotInfo {
+    this.#db.prepare("VACUUM INTO ?").run(destPath);
+    try {
+      NodeFS.chmodSync(destPath, 0o600);
+      return verifySnapshot(destPath);
+    } catch (error) {
+      NodeFS.rmSync(destPath, { force: true });
+      throw error;
+    }
+  }
+
   transaction(work: () => void): void {
     this.#db.exec("BEGIN");
     try {
@@ -330,6 +347,24 @@ export class RelayStore {
   close(): void {
     this.#statements.clear();
     this.#db.close();
+  }
+}
+
+export interface SnapshotInfo {
+  readonly hosts: number;
+  readonly bytes: number;
+}
+
+/** Opens a snapshot read-only and refuses it unless SQLite's own check passes. */
+export function verifySnapshot(path: string): SnapshotInfo {
+  const db = new NodeSqlite.DatabaseSync(path, { readOnly: true });
+  try {
+    const check = db.prepare("PRAGMA integrity_check").get();
+    if (check?.integrity_check !== "ok") throw new Error("snapshot failed the integrity check");
+    const hosts = Number(db.prepare("SELECT COUNT(*) AS n FROM hosts").get()?.n ?? 0);
+    return { hosts, bytes: NodeFS.statSync(path).size };
+  } finally {
+    db.close();
   }
 }
 
