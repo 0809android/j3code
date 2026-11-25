@@ -177,15 +177,12 @@ const layerDevice = Layer.mergeAll(
 
 /** Records what onboarding saves; onboarding calls only these three methods. */
 const recordingRegistry = (saved: Ref.Ref<Option.Option<ConnectionRegistration>>) =>
-  Layer.succeed(
-    EnvironmentRegistry.EnvironmentRegistry,
-    {
-      register: (registration: ConnectionRegistration) =>
-        Ref.set(saved, Option.some(registration)).pipe(Effect.as(true)),
-      setCompatibility: () => Effect.void,
-      setEnabled: () => Effect.void,
-    } as unknown as EnvironmentRegistry.EnvironmentRegistry["Service"],
-  );
+  Layer.succeed(EnvironmentRegistry.EnvironmentRegistry, {
+    register: (registration: ConnectionRegistration) =>
+      Ref.set(saved, Option.some(registration)).pipe(Effect.as(true)),
+    setCompatibility: () => Effect.void,
+    setEnabled: () => Effect.void,
+  } as unknown as EnvironmentRegistry.EnvironmentRegistry["Service"]);
 
 /** The two RPCs the host's test socket serves, as the client declares them. */
 const HostRpcs = RpcGroup.make(
