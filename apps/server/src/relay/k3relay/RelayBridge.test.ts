@@ -60,6 +60,11 @@ const routes = Layer.mergeAll(
           bytes += chunk.byteLength;
           chunks += 1;
         }),
+      ).pipe(
+        // A failed body read answers as the router answers any failure (both go through
+        // `Respondable`); as a defect it no longer leaves an unhandled `Request<"Error">` marker
+        // in the routes layer's requirements.
+        Effect.orDie,
       );
       return HttpServerResponse.jsonUnsafe({ bytes, chunks });
     }),

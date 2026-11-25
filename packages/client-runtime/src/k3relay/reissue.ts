@@ -91,9 +91,9 @@ const sessionRefused = (error: ConnectionAttemptError) =>
  * the device's own credential and tries again. Any other failure, or a failed reissue, is the
  * original failure.
  */
-export const authorizeWithReissue = <A, R1, R2>(input: {
+export const authorizeWithReissue = <A, R1, E2, R2>(input: {
   readonly authorize: Effect.Effect<A, ConnectionAttemptError, R1>;
-  readonly reissue: Effect.Effect<void, unknown, R2>;
+  readonly reissue: Effect.Effect<void, E2, R2>;
 }): Effect.Effect<A, ConnectionAttemptError, R1 | R2> =>
   input.authorize.pipe(
     Effect.catchIf(sessionRefused, (refused) =>

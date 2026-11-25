@@ -17,11 +17,14 @@ import {
 } from "@t3tools/contracts";
 import * as Clock from "effect/Clock";
 import * as Digest from "effect/crypto/Digest";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
@@ -34,6 +37,7 @@ import * as HttpServerRequest from "effect/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import * as HttpApi from "effect/http-api/HttpApi";
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import * as Rpc from "effect/rpc/Rpc";
 import * as RpcGroup from "effect/rpc/RpcGroup";
 import * as RpcSerialization from "effect/rpc/RpcSerialization";
@@ -367,6 +371,12 @@ export const layerK3RelayTestHost = (options: K3RelayTestHostOptions) => {
           | RelayConnector.RelayConnector
           | Digest.Digest
           | AssetServices
+          | ServerConfig.ServerConfig
+          | HttpPlatform.HttpPlatform
+          | FileSystem.FileSystem
+          | Path.Path
+          | SecureRandom.SecureRandom
+          | ChildProcessSpawner.ChildProcessSpawner
         >(),
       ),
     ),
