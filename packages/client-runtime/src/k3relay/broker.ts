@@ -10,6 +10,7 @@ import {
 } from "@t3tools/shared/relay";
 import type { E2eeDeviceSigner } from "@t3tools/shared/socketE2ee";
 import * as Clock from "effect/Clock";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
@@ -23,13 +24,17 @@ import type {
   ConnectionAttemptError,
   ConnectionTransport,
   K3RelayConnectionTarget,
+  K3RelayFailureReason,
   PreparedConnection,
 } from "../connection/model.ts";
+import * as ConnectionCredentialStore from "../connection/credentialStore.ts";
 import * as ConnectionProfileStore from "../connection/profileStore.ts";
 import { credentialConnectionId } from "../connection/routes.ts";
 import { DeviceKeyStore } from "./deviceKeyStore.ts";
 import { k3relayConnectionError } from "./failure.ts";
+import { authorizeWithReissue, reissueK3RelaySession } from "./reissue.ts";
 import { K3RelayTunnels } from "./tunnels.ts";
+import { fetchK3RelayHostPresence } from "./status.ts";
 import type { K3RelayTunnelInput } from "./tunnel.ts";
 
 const isK3RelayProfile = Schema.is(K3RelayConnectionProfile);
@@ -115,6 +120,39 @@ export const renewK3RelayGrant = Effect.fn("K3Relay.renewGrant")(function* (inpu
   );
 });
 
+/**
+ * When the tunnel failed without saying why (the relay did not answer the socket in time), the
+ * relay's signed status names it (spec §18.3): the host offline, this device revoked, or its pass
+ * expired. The connection list then says so instead of "can't reach the relay".
+ */
+export const refineWithPresence = Effect.fn("K3Relay.refineWithPresence")(function* (
+  reason: K3RelayFailureReason,
+  input: K3RelayTunnelInput,
+  fetch?: typeof globalThis.fetch,
+) {
+  if (reason !== "relay-unreachable") return reason;
+  const presence = yield* fetchK3RelayHostPresence({
+    relayUrl: input.relayUrl,
+    hostId: input.hostId,
+    signer: input.signer,
+    grant: input.grant,
+    ...(fetch === undefined ? {} : { fetch }),
+  }).pipe(
+    Effect.provide(SecureRandom.layerWebCrypto),
+    Effect.orElseSucceed(() => null),
+  );
+  switch (presence?.kind) {
+    case "reachable":
+      return presence.online ? reason : "host-offline";
+    case "revoked":
+      return "revoked";
+    case "grant-expired":
+      return "grant-expired";
+    default:
+      return reason;
+  }
+});
+
 export const pairingRecordOf = (profile: K3RelayConnectionProfile, grant: RelayGrant) =>
   ({
     relayUrl: profile.relayUrl,
@@ -129,6 +167,7 @@ export const makeK3RelayBroker = Effect.fn("clientRuntime.connection.broker.make
     const keys = yield* Effect.serviceOption(DeviceKeyStore);
     const profiles = yield* ConnectionProfileStore.ConnectionProfileStore;
     const remote = yield* RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization;
+    const credentials = yield* ConnectionCredentialStore.ConnectionCredentialStore;
 
     return Effect.fn("clientRuntime.connection.broker.k3relay")(function* (
       entry: ConnectionCatalogEntry & { readonly target: K3RelayConnectionTarget },
@@ -154,15 +193,31 @@ export const makeK3RelayBroker = Effect.fn("clientRuntime.connection.broker.make
       );
       const tunnel = yield* tunnels.value
         .acquire(target.connectionId, input)
-        .pipe(Effect.mapError((error) => k3relayConnectionError(error.reason, target.label)));
-      const authorized = yield* remote
-        .authorizeDirectDpop({
-          expectedEnvironmentId: target.environmentId,
-          connectionId: credentialConnectionId(target.connectionId),
-          httpBaseUrl: K3_RELAY_PROVISIONAL_ORIGIN,
-          wsBaseUrl: K3RELAY_VIRTUAL_WS_ORIGIN,
-        })
-        .pipe(overTransport(tunnel.transport));
+        .pipe(
+          Effect.catch((error) =>
+            refineWithPresence(error.reason, input).pipe(
+              Effect.flatMap((reason) => Effect.fail(k3relayConnectionError(reason, target.label))),
+            ),
+          ),
+        );
+      const credentialId = credentialConnectionId(target.connectionId);
+      const authorized = yield* authorizeWithReissue({
+        authorize: remote
+          .authorizeDirectDpop({
+            expectedEnvironmentId: target.environmentId,
+            connectionId: credentialId,
+            httpBaseUrl: K3_RELAY_PROVISIONAL_ORIGIN,
+            wsBaseUrl: K3RELAY_VIRTUAL_WS_ORIGIN,
+          })
+          .pipe(overTransport(tunnel.transport)),
+        // A lapsed session renews through the device's own credential, not a new pairing.
+        reissue: reissueK3RelaySession(tunnel.transport).pipe(
+          Effect.flatMap((credential) => credentials.put(credentialId, credential)),
+          Effect.tapError((error) =>
+            Effect.logWarning("Could not renew the relay session.", { error }),
+          ),
+        ),
+      });
       const renewed = yield* renewK3RelayGrant({
         record: pairingRecordOf(profile, input.grant),
         signer: input.signer,
