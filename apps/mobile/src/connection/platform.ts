@@ -26,6 +26,7 @@ import { appAtomRegistry } from "../state/atom-registry";
 import { mobileApplicationActiveWakeup } from "./app-state-wakeups";
 import * as EnvironmentOwnedDataCleanup from "./environment-owned-data-cleanup";
 import * as ConnectionStorage from "./storage";
+import * as K3RelayDeviceKeys from "./k3relayDeviceKeys";
 
 function networkStatus(state: Network.NetworkState): "unknown" | "offline" | "online" {
   if (state.isConnected === false) {
@@ -263,6 +264,7 @@ const layerProvidedCapabilities = layerCapabilities.pipe(Layer.provide(Runtime.l
 
 type ConnectionPlatformLayerSource =
   | typeof layerProvidedConnectionStorage
+  | typeof K3RelayDeviceKeys.layer
   | typeof Runtime.layer
   | typeof layerConnectivity
   | typeof layerWakeups
@@ -276,6 +278,7 @@ export const layer: Layer.Layer<
   Layer.Services<ConnectionPlatformLayerSource>
 > = Layer.mergeAll(
   layerProvidedConnectionStorage,
+  K3RelayDeviceKeys.layer,
   Runtime.layer,
   layerConnectivity,
   layerWakeups,

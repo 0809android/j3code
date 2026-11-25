@@ -49,8 +49,9 @@ export async function applyLinkedPromptToThreadDraft(
 
 export async function copyPromptLink(prompt: string): Promise<void> {
   // Without a hosted app the link is this app's own scheme link, such as k3code://new.
-  const scheme =
-    typeof Constants.expoConfig?.scheme === "string" ? Constants.expoConfig.scheme : undefined;
+  // The app's own scheme comes first; `k3relay` after it is only for pairing links.
+  const configured = Constants.expoConfig?.scheme;
+  const scheme = Array.isArray(configured) ? configured[0] : configured;
   const link = buildNewThreadLink({
     prompt,
     origin: configuredHostedAppUrl(),

@@ -42,6 +42,7 @@ const REMOVE_SIZE = 20;
 
 const ROUTE_ICONS: Record<ConnectionRouteKind, AppSymbolName> = {
   relay: "cloud",
+  k3relay: "link",
   loopback: "desktopcomputer",
   lan: "wifi",
   tailnet: "point.3.connected.trianglepath.dotted",

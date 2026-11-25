@@ -26,6 +26,13 @@ describe("shouldHandleAppLink", () => {
     expect(shouldHandleAppLink(url, true)).toBe(true);
   });
 
+  it.each(["k3relay://pair?v=1&host=x#s=secret", "K3RELAY://pair"])(
+    "leaves K3 Relay pairing link %s to its own handler",
+    (url) => {
+      expect(shouldHandleAppLink(url, true)).toBe(false);
+    },
+  );
+
   it.each(["k3code://expo-development-client/?url=x", "k3code://expo-sharing/anything"])(
     "ignores lifecycle URL %s",
     (url) => {

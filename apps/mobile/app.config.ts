@@ -246,7 +246,8 @@ const config: ExpoConfig = {
   name: variant.appName,
   slug: "t3-code",
   platforms: ["ios", "android"],
-  scheme: variant.scheme,
+  // `k3relay://` pairing links from a K3 Relay host (spec §8) open the app too.
+  scheme: [variant.scheme, "k3relay"],
   version: repoEnv.K3CODE_MOBILE_VERSION ?? "2.3.0",
   runtimeVersion: {
     // Skip costly fingerprinting on dev launches; preview and production OTAs require matching native projects.
