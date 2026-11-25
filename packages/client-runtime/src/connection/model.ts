@@ -4,6 +4,7 @@ import * as Schema from "effect/Schema";
 import type * as Socket from "effect/socket/Socket";
 
 import { MarkedText } from "../errors/translatable.ts";
+import type { K3RelayConnectionProfile } from "./catalog.ts";
 
 const ConnectionTargetBase = {
   environmentId: EnvironmentId,
@@ -222,6 +223,8 @@ export interface PreparedConnection {
   readonly e2eeServerIdentityKey?: string;
   /** Set when this connection's traffic goes through a channel instead of the network. */
   readonly transport?: ConnectionTransport;
+  /** The saved relay profile with the grant this connection renewed; the registry adopts it. */
+  readonly renewedK3RelayProfile?: K3RelayConnectionProfile;
 }
 
 export type SupervisorConnectionPhase =

@@ -21,11 +21,13 @@ import {
   type ConnectionProfile,
   type ConnectionRegistration,
   type ConnectionRoute,
+  type K3RelayConnectionProfile,
   type PlatformConnectionRegistration,
   SshConnectionProfile,
   connectionRegistrationCatalogEntry,
 } from "./catalog.ts";
 import { DeviceKeyStore } from "../k3relay/deviceKeyStore.ts";
+import { K3RelayTunnels } from "../k3relay/tunnels.ts";
 import * as ConnectionCredentialStore from "./credentialStore.ts";
 import * as ConnectionProfileStore from "./profileStore.ts";
 import * as Connectivity from "./connectivity.ts";
@@ -224,6 +226,7 @@ export const make = Effect.gen(function* () {
   const wakeups = yield* ConnectionWakeups.ConnectionWakeups;
   const ssh = yield* ClientCapabilities.SshEnvironmentGateway;
   const deviceKeys = yield* Effect.serviceOption(DeviceKeyStore);
+  const k3relayTunnels = yield* Effect.serviceOption(K3RelayTunnels);
   const persistedTargets = yield* storage.list;
   const disabledEnvironmentIds = new Set(yield* storage.listDisabled);
   const loadRoute = Effect.fn("EnvironmentRegistry.loadRoute")(function* (
@@ -374,6 +377,7 @@ export const make = Effect.gen(function* () {
             // before an enabled, compatible environment starts connecting.
             initiallyDesired: entry.enabled && entry.unsupportedReason === undefined,
             learnRoutes: (input) => learnRoutes({ environmentId, ...input }),
+            adoptK3RelayProfile: (profile) => adoptK3RelayProfile(environmentId, profile),
           }).pipe(
             Effect.provideService(Connectivity.Connectivity, connectivity),
             Effect.provideService(ConnectionDriver.ConnectionDriver, driver),
@@ -908,6 +912,9 @@ export const make = Effect.gen(function* () {
       if (profile !== null && isSshConnectionProfile(profile)) {
         yield* disconnectSsh(environmentId, profile);
       }
+      if (profile?._tag === "K3RelayConnectionProfile" && Option.isSome(k3relayTunnels)) {
+        yield* k3relayTunnels.value.close(profile.connectionId);
+      }
       // The pairing's device key is useless without the pairing; the user pairs anew to return.
       if (profile?._tag === "K3RelayConnectionProfile" && Option.isSome(deviceKeys)) {
         yield* deviceKeys.value
@@ -1000,6 +1007,43 @@ export const make = Effect.gen(function* () {
           error,
         }).pipe(Effect.as(Option.none<ConnectionCatalogEntry>())),
       ),
+    );
+  });
+
+  /** The broker saved a renewed grant; the routes in memory take the same profile. */
+  const adoptK3RelayProfile = Effect.fn("EnvironmentRegistry.adoptK3RelayProfile")(function* (
+    environmentId: EnvironmentId,
+    profile: K3RelayConnectionProfile,
+  ) {
+    return yield* withLeaseLock(
+      environmentId,
+      Effect.gen(function* () {
+        const entry = (yield* SubscriptionRef.get(entries)).get(environmentId);
+        if (entry === undefined) return Option.none<ConnectionCatalogEntry>();
+        let adopted = false;
+        const routes = connectionRoutes(entry).map((route) => {
+          if (
+            route.target._tag !== "K3RelayConnectionTarget" ||
+            route.target.connectionId !== profile.connectionId
+          ) {
+            return route;
+          }
+          adopted = true;
+          return { ...route, profile: Option.some<ConnectionProfile>(profile) };
+        });
+        if (!adopted) return Option.none<ConnectionCatalogEntry>();
+        const next = entryWithRoutes(entry, routes);
+        const lease = (yield* SubscriptionRef.get(serviceScopes)).get(environmentId);
+        if (lease !== undefined) {
+          yield* SubscriptionRef.update(serviceScopes, (current) =>
+            new Map(current).set(environmentId, { ...lease, entry: next }),
+          );
+        }
+        yield* SubscriptionRef.update(entries, (current) =>
+          new Map(current).set(environmentId, next),
+        );
+        return Option.some(next);
+      }),
     );
   });
 

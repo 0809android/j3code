@@ -17,7 +17,11 @@ import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import * as Tracer from "effect/Tracer";
 
-import type { ConnectionCatalogEntry, ConnectionRoute } from "./catalog.ts";
+import type {
+  ConnectionCatalogEntry,
+  ConnectionRoute,
+  K3RelayConnectionProfile,
+} from "./catalog.ts";
 import * as Connectivity from "./connectivity.ts";
 import * as ConnectionDriver from "./driver.ts";
 import {
@@ -155,6 +159,10 @@ export interface EnvironmentSupervisorOptions {
     readonly activeRoute: ConnectionRoute;
     readonly reported: ReadonlyArray<ReportedEndpoint>;
   }) => Effect.Effect<Option.Option<ConnectionCatalogEntry>>;
+  /** Keeps a relay profile the connection renewed, so later attempts start from it. */
+  readonly adoptK3RelayProfile?: (
+    profile: K3RelayConnectionProfile,
+  ) => Effect.Effect<Option.Option<ConnectionCatalogEntry>>;
 }
 
 function retryDelayMs(failureCount: number, random: number): number {
@@ -1082,6 +1090,15 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
     yield* SubscriptionRef.set(session, Option.some(connectedLease.session));
     if (options?.learnRoutes !== undefined) {
       yield* learnRoutesFrom(options.learnRoutes, connectedLease).pipe(Effect.forkScoped);
+    }
+    const renewedProfile = connectedLease.prepared.renewedK3RelayProfile;
+    if (renewedProfile !== undefined && options?.adoptK3RelayProfile !== undefined) {
+      yield* options.adoptK3RelayProfile(renewedProfile).pipe(
+        Effect.flatMap((updated) =>
+          Option.isSome(updated) ? Ref.set(currentEntry, updated.value) : Effect.void,
+        ),
+        Effect.forkScoped,
+      );
     }
     yield* setState({
       desired: true,

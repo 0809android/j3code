@@ -134,18 +134,9 @@ export const makeK3RelayBroker = Effect.fn("clientRuntime.connection.broker.make
       entry: ConnectionCatalogEntry & { readonly target: K3RelayConnectionTarget },
     ): Effect.fn.Return<PreparedConnection, ConnectionAttemptError> {
       const target = entry.target;
-      const saved = yield* Effect.fromOption(entry.profile, () =>
+      const profile = yield* Effect.fromOption(entry.profile, () =>
         profileMissingError(target.connectionId),
       );
-      // A renewed grant is saved to the store; the registry keeps the profile it loaded.
-      const stored = Option.getOrUndefined(yield* profiles.get(target.connectionId));
-      const profile =
-        isK3RelayProfile(stored) &&
-        isK3RelayProfile(saved) &&
-        stored.hostIdentityKey === saved.hostIdentityKey &&
-        stored.grant.issuedAt > saved.grant.issuedAt
-          ? stored
-          : saved;
       if (!isK3RelayProfile(profile)) {
         return yield* profileMissingError(target.connectionId);
       }
@@ -177,16 +168,27 @@ export const makeK3RelayBroker = Effect.fn("clientRuntime.connection.broker.make
         signer: input.signer,
         transport: tunnel.transport,
       }).pipe(Effect.orElseSucceed(Option.none));
-      if (Option.isSome(renewed)) {
-        yield* profiles
-          .put(new K3RelayConnectionProfile({ ...profile, grant: renewed.value.grant }))
-          .pipe(
-            Effect.catch((error) =>
-              Effect.logWarning("Could not save the renewed relay pass.", { error }),
-            ),
-          );
+      if (Option.isNone(renewed)) {
+        return { ...authorized, target, transport: tunnel.transport } satisfies PreparedConnection;
       }
-      return { ...authorized, target, transport: tunnel.transport } satisfies PreparedConnection;
+      const renewedProfile = new K3RelayConnectionProfile({
+        ...profile,
+        grant: renewed.value.grant,
+      });
+      yield* profiles
+        .put(renewedProfile)
+        .pipe(
+          Effect.catch((error) =>
+            Effect.logWarning("Could not save the renewed relay pass.", { error }),
+          ),
+        );
+      // The registry adopts it too, so the next attempt presents the renewed grant.
+      return {
+        ...authorized,
+        target,
+        transport: tunnel.transport,
+        renewedK3RelayProfile: renewedProfile,
+      } satisfies PreparedConnection;
     });
   },
 );

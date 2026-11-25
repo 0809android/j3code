@@ -82,7 +82,10 @@ export function layerWithOptions(options: RpcSession.RpcSessionOptions) {
       ),
     ),
   );
-  const layerRegistry = EnvironmentRegistry.layer.pipe(Layer.provide(layerDriver));
+  // The same tunnels: removing a relay environment closes its tunnel at once.
+  const layerRegistry = EnvironmentRegistry.layer.pipe(
+    Layer.provide(Layer.mergeAll(layerDriver, K3RelayTunnels.layer)),
+  );
   const layerOnboarding = ConnectionOnboarding.layer.pipe(Layer.provide(layerRegistry));
   const layerK3RelayOnboarding = K3RelayOnboarding.layer.pipe(Layer.provide(layerRegistry));
   const layerConnectionServices = Layer.mergeAll(

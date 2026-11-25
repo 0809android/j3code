@@ -29,6 +29,7 @@ import {
   BearerConnectionProfile,
   BearerConnectionRegistration,
   type ConnectionCatalogEntry,
+  K3RelayConnectionProfile,
   type ConnectionRegistration,
   type ConnectionRoute,
   PrimaryConnectionRegistration,
@@ -47,6 +48,7 @@ import {
   ConnectionTransientError,
   ConnectionBlockedError,
   BearerConnectionTarget,
+  K3RelayConnectionTarget,
   PrimaryConnectionTarget,
   RelayConnectionTarget,
   SshConnectionTarget,
@@ -56,6 +58,7 @@ import {
 } from "./model.ts";
 import * as Persistence from "../platform/persistence.ts";
 import * as ConnectionProfileStore from "./profileStore.ts";
+import { K3RelayTunnels } from "../k3relay/tunnels.ts";
 import * as EnvironmentRegistry from "./registry.ts";
 import {
   PullRequestRoutingPermissions,
@@ -168,6 +171,9 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
     ) => Effect.Effect<ConnectionBlockedError | undefined>;
     readonly initialDisabled?: ReadonlyArray<EnvironmentId>;
     readonly directEndpoints?: ServerConfig["directEndpoints"];
+    readonly renewedK3RelayProfile?: (
+      target: ConnectionTarget,
+    ) => K3RelayConnectionProfile | undefined;
   },
 ) {
   const storedTargets = yield* Ref.make<ReadonlyArray<ConnectionTarget>>(initialTargets);
@@ -390,6 +396,7 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
         target._tag === "BearerConnectionTarget"
           ? yield* credentialStore.get(target.connectionId)
           : Option.none();
+      const renewedK3RelayProfile = options?.renewedK3RelayProfile?.(target);
       const prepared: PreparedConnection = {
         ...PREPARED,
         environmentId: target.environmentId,
@@ -399,6 +406,7 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
             ? { _tag: "Bearer", token: credential.value.token }
             : null,
         target,
+        ...(renewedK3RelayProfile === undefined ? {} : { renewedK3RelayProfile }),
       };
       if (options?.prepareError) return yield* options.prepareError;
       const heldError = options?.beforePrepareRoute
@@ -455,6 +463,7 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
   });
 
   const layerCache = Layer.succeed(Persistence.EnvironmentCacheStore, cacheStore);
+  const closedTunnels = yield* Ref.make<ReadonlyArray<string>>([]);
   const layer = EnvironmentRegistry.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
@@ -472,12 +481,21 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
         Layer.succeed(ConnectionDriver.ConnectionDriver, driver),
         layerCache,
         Layer.succeed(Persistence.EnvironmentOwnedDataCleanup, ownedDataCleanup),
+        Layer.succeed(
+          K3RelayTunnels,
+          K3RelayTunnels.of({
+            acquire: () => Effect.die(new Error("Registry tests open no relay tunnel.")),
+            close: (connectionId) =>
+              Ref.update(closedTunnels, (current) => [...current, connectionId]),
+          }),
+        ),
       ),
     ),
   );
 
   return {
     layer,
+    closedTunnels,
     storedTargets,
     shellCache,
     cacheClears,
@@ -2336,6 +2354,75 @@ describe("EnvironmentRegistry routes", () => {
         const entry = (yield* SubscriptionRef.get(registry.entries)).get(LAN_TARGET.environmentId);
         expect(entry?.target).toEqual(LAN_TARGET);
         expect(entry?.alternateRoutes ?? []).toEqual([]);
+      }).pipe(Effect.provide(harness.layer), Effect.scoped);
+    }),
+  );
+});
+
+describe("EnvironmentRegistry K3 relay profiles", () => {
+  const relayTarget = new K3RelayConnectionTarget({
+    environmentId: EnvironmentId.make("environment-k3relay"),
+    label: "Relay host",
+    connectionId: "k3relay:host:device",
+  });
+  const grant = (issuedAt: number) => ({
+    v: 1 as const,
+    hostId: "h".repeat(32),
+    deviceId: "d".repeat(32),
+    alg: "ed25519" as const,
+    issuedAt,
+    expiresAt: issuedAt + 90 * 86_400_000,
+    nonce: `nonce-${issuedAt}`,
+    sig: "signature",
+  });
+  const relayProfile = (issuedAt: number) =>
+    new K3RelayConnectionProfile({
+      connectionId: relayTarget.connectionId,
+      environmentId: relayTarget.environmentId,
+      label: relayTarget.label,
+      relayUrl: "https://relay.example.test",
+      hostId: "h".repeat(32),
+      hostIdentityKey: "k".repeat(43),
+      deviceKeyId: "k3relay:host:key",
+      deviceAlg: "ed25519",
+      devicePublicKey: "p".repeat(43),
+      grant: grant(issuedAt),
+    });
+
+  it.effect("keeps the profile with a grant the connection renewed, in memory", () =>
+    Effect.gen(function* () {
+      const renewed = relayProfile(2_000);
+      const harness = yield* makeHarness([relayTarget], [relayProfile(1_000)], [], {
+        renewedK3RelayProfile: (target) =>
+          target._tag === "K3RelayConnectionTarget" ? renewed : undefined,
+      });
+      yield* Effect.gen(function* () {
+        const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+        yield* registry.start;
+        const entry = yield* SubscriptionRef.changes(registry.entries).pipe(
+          Stream.map((entries) => entries.get(relayTarget.environmentId)),
+          Stream.filter(
+            (next) =>
+              next !== undefined &&
+              Option.isSome(next.profile) &&
+              next.profile.value._tag === "K3RelayConnectionProfile" &&
+              next.profile.value.grant.issuedAt === 2_000,
+          ),
+          Stream.runHead,
+          Effect.map(Option.getOrThrow),
+        );
+        expect(entry?.target).toEqual(relayTarget);
+      }).pipe(Effect.provide(harness.layer), Effect.scoped);
+    }),
+  );
+
+  it.effect("removing a relay environment closes its tunnel", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness([relayTarget], [relayProfile(1_000)]);
+      yield* Effect.gen(function* () {
+        const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+        yield* registry.remove(relayTarget.environmentId);
+        expect(yield* Ref.get(harness.closedTunnels)).toEqual([relayTarget.connectionId]);
       }).pipe(Effect.provide(harness.layer), Effect.scoped);
     }),
   );
