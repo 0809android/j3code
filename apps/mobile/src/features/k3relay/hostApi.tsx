@@ -51,6 +51,7 @@ export function useK3RelayHostActions(environmentId: EnvironmentId) {
   const approvePairing = useAtomCommand(k3RelayEnvironment.approvePairing, options);
   const rejectPairing = useAtomCommand(k3RelayEnvironment.rejectPairing, options);
   const revokeDevice = useAtomCommand(k3RelayEnvironment.revokeDevice, options);
+  const setDevicePermissions = useAtomCommand(k3RelayEnvironment.setDevicePermissions, options);
   return {
     setEnabled: (enabled: boolean) =>
       settle(updateSettings({ environmentId, input: { patch: { relay: { enabled } } } })),
@@ -68,5 +69,8 @@ export function useK3RelayHostActions(environmentId: EnvironmentId) {
       ),
     reject: () => settle(rejectPairing({ environmentId, input: {} })),
     revoke: (deviceId: string) => settle(revokeDevice({ environmentId, input: { deviceId } })),
+    /** Whether the device may introduce others (spec §18.2). */
+    setInvite: (deviceId: string, invite: boolean) =>
+      settle(setDevicePermissions({ environmentId, input: { deviceId, invite } })),
   };
 }

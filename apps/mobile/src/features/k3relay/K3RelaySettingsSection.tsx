@@ -15,7 +15,7 @@ import { type K3RelayHostCall, useK3RelayHostActions, useK3RelayHostState } from
 const QR_MARGIN = 2;
 
 /** The offer link as a QR code for the new device's camera; the secret stays on this screen. */
-function OfferQrCode(props: { readonly link: string; readonly title: string }) {
+export function OfferQrCode(props: { readonly link: string; readonly title: string }) {
   const qr = QrCode.encodeText(props.link, QrCode.Ecc.MEDIUM);
   const size = qr.size + QR_MARGIN * 2;
   let path = "";
@@ -82,6 +82,9 @@ export function K3RelaySettingsSection(props: {
       ? offer
       : null;
   const relayUrl = relayUrlDraft ?? state.relayUrl;
+  const nameOf = (deviceId: string | null) =>
+    state.devices.find((device) => device.deviceId === deviceId)?.name ?? null;
+  const introduction = state.introduction.phase === "idle" ? null : state.introduction;
 
   return (
     // oxlint-disable-next-line t3code/no-untranslated-copy -- product name
@@ -211,6 +214,58 @@ export function K3RelaySettingsSection(props: {
           onPress={() => run(gt("Could not create a pairing code"), host.createOffer(), setOffer)}
         />
       ) : null}
+      {introduction !== null ? (
+        <View className="gap-1 p-4">
+          <Text className="text-base text-foreground">
+            {introduction.deviceName === null
+              ? gt("{introducer} is introducing a new device", {
+                  introducer: nameOf(introduction.introducerDeviceId) ?? "?",
+                })
+              : gt("{introducer} is introducing {name}", {
+                  introducer: nameOf(introduction.introducerDeviceId) ?? "?",
+                  name: introduction.deviceName,
+                })}
+          </Text>
+          <Text className="text-sm leading-normal text-foreground-muted">
+            <T>
+              Devices that can introduce add new devices after comparing a code on both screens.
+              Revoke the device here if you did not expect this.
+            </T>
+          </Text>
+        </View>
+      ) : null}
+      {state.devices
+        .filter((device) => device.status === "active")
+        .map((device) =>
+          device.approvedVia === "introduction" ? (
+            <View key={`${device.deviceId}-introduced`} className="px-4 py-2">
+              <Text className="text-sm text-foreground-muted">
+                {nameOf(device.introducedBy) === null
+                  ? gt("{name}: added by introduction from another device", { name: device.name })
+                  : gt("{name}: added by introduction from {introducer}", {
+                      name: device.name,
+                      introducer: nameOf(device.introducedBy) ?? "",
+                    })}
+              </Text>
+            </View>
+          ) : (
+            <SettingsSwitchRow
+              key={`${device.deviceId}-invite`}
+              label={gt("Let {name} introduce devices", { name: device.name })}
+              subtitle={gt(
+                "Adds your other devices after one code comparison, and can revoke ordinary devices if one is lost.",
+              )}
+              value={device.permissions.includes("devices:invite")}
+              disabled={disabled}
+              onValueChange={(invite) =>
+                run(
+                  gt("Could not change what the device may do"),
+                  host.setInvite(device.deviceId, invite),
+                )
+              }
+            />
+          ),
+        )}
       {state.devices
         .filter((device) => device.status === "active")
         .map((device) => (

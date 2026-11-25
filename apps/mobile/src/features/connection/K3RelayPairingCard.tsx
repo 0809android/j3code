@@ -2,6 +2,7 @@ import {
   type K3RelayPairingFailureReason,
   type K3RelayPairingProgress,
   k3relayPairingFailureText,
+  previewK3RelayIntroductionLink,
   previewK3RelayOffer,
 } from "@t3tools/client-runtime/k3relay";
 import { errorDisplayMessage } from "@t3tools/client-runtime/errors";
@@ -15,7 +16,7 @@ import { useRef, useState } from "react";
 import { ActivityIndicator, Pressable, View } from "react-native";
 
 import { AppText as Text, AppTextInput } from "../../components/ui/AppText";
-import { connectK3RelayPairing } from "../../connection/onboarding";
+import { connectK3RelayIntroduction, connectK3RelayPairing } from "../../connection/onboarding";
 import { m } from "../../i18n/messages";
 import { cn } from "../../lib/cn";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -59,19 +60,78 @@ export function K3RelayPairingCard({
   const gt = useGT();
   const resolve = useMessages();
   const pair = useAtomCommand(connectK3RelayPairing, { reportFailure: false });
+  const introduce = useAtomCommand(connectK3RelayIntroduction, { reportFailure: false });
   const [deviceName, setDeviceName] = useState(defaultDeviceName);
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   // Read once: it only decides whether the scanned offer already expired.
   const [now] = useState(() => Date.now());
   const attemptRef = useRef(0);
-  const preview = previewK3RelayOffer(link, now);
+  const introductionPreview = previewK3RelayIntroductionLink(link.trim(), now);
+  const introduction =
+    typeof introductionPreview === "object" && introductionPreview.kind === "introduction"
+      ? introductionPreview
+      : null;
+  const preview =
+    typeof introductionPreview === "string"
+      ? introductionPreview
+      : introduction === null
+        ? previewK3RelayOffer(link, now)
+        : null;
   const offer = typeof preview === "object" ? preview : null;
+  const ready = offer !== null || introduction !== null;
   const busy =
     phase.kind === "connecting" || phase.kind === "awaiting-approval" || phase.kind === "redeeming";
+
+  const joinIntroduction = async (attempt: number) => {
+    const result = await introduce({
+      link: link.trim(),
+      deviceName: deviceName.trim(),
+      onProgress: (progress) => {
+        if (attempt !== attemptRef.current) return;
+        setPhase(
+          progress.phase === "awaiting-approval"
+            ? { kind: "awaiting-approval", confirmationCode: progress.confirmationCode }
+            : progress.phase === "redeeming"
+              ? { kind: "redeeming" }
+              : { kind: "connecting" },
+        );
+      },
+    });
+    if (attempt !== attemptRef.current) return;
+    if (result._tag === "Success") {
+      const joined = result.value.find((host) => host.ok);
+      const refused = result.value.find((host) => !host.ok);
+      if (joined?.ok) {
+        setPhase({ kind: "idle" });
+        onPaired(joined.environmentId);
+        return;
+      }
+      setPhase({
+        kind: "failed",
+        message: k3relayPairingFailureText(
+          refused !== undefined && !refused.ok ? refused.reason : "rejected",
+          resolve,
+        ),
+      });
+      return;
+    }
+    if (isAtomCommandInterrupted(result)) {
+      setPhase({ kind: "idle" });
+      return;
+    }
+    setPhase({
+      kind: "failed",
+      message: k3relayPairingFailureText(
+        pairingReason(squashAtomCommandFailure(result)) ?? "invalid-reply",
+        resolve,
+      ),
+    });
+  };
 
   const start = async () => {
     const attempt = ++attemptRef.current;
     setPhase({ kind: "connecting" });
+    if (introduction !== null) return joinIntroduction(attempt);
     const result = await pair({
       link: link.trim(),
       deviceName: deviceName.trim(),
@@ -118,7 +178,14 @@ export function K3RelayPairingCard({
             it.
           </T>
         </Text>
-        {offer !== null ? (
+        {introduction !== null ? (
+          <Text className="text-sm leading-normal text-foreground-muted">
+            {gt(
+              "An introduction from one of your devices, for {count, plural, =1 {one host} other {{count} hosts}}. Approve it on that device after comparing codes.",
+              { count: introduction.hosts },
+            )}
+          </Text>
+        ) : offer !== null ? (
           <Text className="text-sm leading-normal text-foreground-muted">
             {gt("Relay: {relayUrl}", { relayUrl: offer.relayUrl })}
           </Text>
@@ -146,10 +213,17 @@ export function K3RelayPairingCard({
               {phase.confirmationCode}
             </Text>
             <Text className="text-center text-sm leading-normal text-foreground-muted">
-              <T>
-                Check that the host shows exactly this code, then approve there. If the codes
-                differ, reject on the host: someone else may be pairing.
-              </T>
+              {introduction !== null ? (
+                <T>
+                  Check that the introducing device shows exactly this code, then approve there. If
+                  the codes differ, cancel there: someone else may have scanned the QR code.
+                </T>
+              ) : (
+                <T>
+                  Check that the host shows exactly this code, then approve there. If the codes
+                  differ, reject on the host: someone else may be pairing.
+                </T>
+              )}
             </Text>
             <View collapsable={false} className="flex-row items-center gap-2">
               <ActivityIndicator size="small" />
@@ -199,11 +273,11 @@ export function K3RelayPairingCard({
           {phase.kind !== "awaiting-approval" ? (
             <Pressable
               accessibilityRole="button"
-              disabled={busy || offer === null || deviceName.trim() === ""}
+              disabled={busy || !ready || deviceName.trim() === ""}
               onPress={() => void start()}
               className={cn(
                 "min-h-[44px] justify-center rounded-full bg-primary px-4",
-                (busy || offer === null || deviceName.trim() === "") && "opacity-50",
+                (busy || !ready || deviceName.trim() === "") && "opacity-50",
               )}
             >
               <Text className="text-base font-t3-medium text-primary-foreground">
