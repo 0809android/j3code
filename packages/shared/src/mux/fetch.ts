@@ -43,6 +43,36 @@ const pumpRequestBody = (body: ReadableStream<Uint8Array>, stream: MuxStream) =>
     Effect.catch(() => stream.reset(MuxResetCode.Cancel, "The request body failed.")),
   );
 
+const isReadableStream = (value: unknown): value is ReadableStream<Uint8Array> =>
+  typeof ReadableStream === "function" && value instanceof ReadableStream;
+
+/**
+ * The request's body as a stream. React Native's `Request` has no `body` stream, only the
+ * readers, so its body is read whole and sent in pieces.
+ */
+const requestBodyStream = async (request: Request): Promise<ReadableStream<Uint8Array> | null> => {
+  if (isReadableStream(request.body)) return request.body;
+  if (request.body === null || request.method === "GET" || request.method === "HEAD") return null;
+  const bytes = new Uint8Array(await request.arrayBuffer());
+  if (bytes.byteLength === 0) return null;
+  let offset = 0;
+  return {
+    getReader: () => ({
+      read: async () => {
+        if (offset >= bytes.byteLength) return { done: true, value: undefined };
+        const value = bytes.subarray(offset, offset + REQUEST_BODY_CHUNK_BYTES);
+        offset += value.byteLength;
+        return { done: false, value };
+      },
+      cancel: async () => undefined,
+      releaseLock: () => undefined,
+      closed: Promise.resolve(undefined),
+    }),
+  } as unknown as ReadableStream<Uint8Array>;
+};
+
+const REQUEST_BODY_CHUNK_BYTES = 64 * 1024;
+
 /**
  * `fetch` over the mux. Request and response bodies stream with backpressure; an abort resets the
  * stream, so the host stops work. Redirects are not followed (the host's answer is returned as is).
@@ -52,9 +82,11 @@ export const makeMuxFetch = (client: MuxClient, options: MuxFetchOptions = {}): 
   const baseUrl = options.baseUrl ?? MUX_DEFAULT_BASE_URL;
 
   return async (input, init) => {
+    // A stream body is taken as is: WebKit and React Native cannot build a `Request` around one.
+    const streamBody = isReadableStream(init?.body) ? init.body : undefined;
     const request = new Request(
       typeof input === "string" || input instanceof URL ? new URL(input, baseUrl) : input,
-      init,
+      streamBody === undefined ? init : { ...init, body: null },
     );
     const { signal } = request;
     if (signal.aborted) throw abortReason(signal);
@@ -67,6 +99,11 @@ export const makeMuxFetch = (client: MuxClient, options: MuxFetchOptions = {}): 
       }
     };
 
+    const requestBody =
+      streamBody ??
+      (await requestBodyStream(request).catch((error: unknown) => {
+        throw networkError(error);
+      }));
     const url = new URL(request.url);
     const headers: MuxHeaders = [...request.headers];
     // Not tied to the signal: once OPEN is queued the stream exists and must be reset if we abort.
@@ -93,8 +130,8 @@ export const makeMuxFetch = (client: MuxClient, options: MuxFetchOptions = {}): 
       throw abortReason(signal);
     }
 
-    if (request.body === null) client.runFork(Effect.ignore(stream.close()));
-    else client.runFork(pumpRequestBody(request.body, stream));
+    if (requestBody === null) client.runFork(Effect.ignore(stream.close()));
+    else client.runFork(pumpRequestBody(requestBody, stream));
 
     const head = await run(stream.awaitResponse).catch((error: unknown) => {
       detach();

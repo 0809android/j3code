@@ -1,5 +1,6 @@
 export * from "./client.ts";
 export * from "./errors.ts";
+export * from "./eventSource.ts";
 export * from "./fetch.ts";
 export * from "./frame.ts";
 export * from "./host.ts";
