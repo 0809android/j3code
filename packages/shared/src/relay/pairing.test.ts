@@ -151,6 +151,7 @@ it.layer(SecureRandom.layerWebCrypto)("pairing", (it) => {
         const approved = yield* approvePairing(submitted.state, {
           hostIdentitySeed: hostSeed,
           ledger,
+          bootstrapToken: "bootstrap-token",
           now: NOW + 2,
         });
         assert.deepStrictEqual(approved.state, { phase: "closed", reason: "approved" });
@@ -196,7 +197,12 @@ it.layer(SecureRandom.layerWebCrypto)("pairing", (it) => {
         assert.isTrue(
           Exit.isFailure(
             yield* Effect.exit(
-              approvePairing(state, { hostIdentitySeed: hostSeed, ledger, now: NOW }),
+              approvePairing(state, {
+                hostIdentitySeed: hostSeed,
+                ledger,
+                bootstrapToken: "bootstrap-token",
+                now: NOW,
+              }),
             ),
           ),
         );
@@ -406,7 +412,12 @@ it.layer(SecureRandom.layerWebCrypto)("pairing", (it) => {
         });
         const ledger = yield* makeDeviceLedger(makeMemoryLedgerStore());
         const exit = yield* Effect.exit(
-          approvePairing(pending.state, { hostIdentitySeed: hostSeed, ledger, now: deadline }),
+          approvePairing(pending.state, {
+            hostIdentitySeed: hostSeed,
+            ledger,
+            bootstrapToken: "bootstrap-token",
+            now: deadline,
+          }),
         );
         assert.isTrue(Exit.isFailure(exit));
       }),
@@ -423,7 +434,12 @@ it.layer(SecureRandom.layerWebCrypto)("pairing", (it) => {
         });
         const ledger = yield* makeDeviceLedger(makeMemoryLedgerStore());
         const exit = yield* Effect.exit(
-          approvePairing(pending.state, { hostIdentitySeed: seq(90), ledger, now: NOW }),
+          approvePairing(pending.state, {
+            hostIdentitySeed: seq(90),
+            ledger,
+            bootstrapToken: "bootstrap-token",
+            now: NOW,
+          }),
         );
         assert.isTrue(Exit.isFailure(exit));
       }),
@@ -448,6 +464,7 @@ it.layer(SecureRandom.layerWebCrypto)("pairing", (it) => {
         const approved = yield* approvePairing(pending.state, {
           hostIdentitySeed: hostSeed,
           ledger,
+          bootstrapToken: "bootstrap-token",
           now: NOW,
         });
         assert.strictEqual(approved.device.name, "Old name");
@@ -617,7 +634,11 @@ it.layer(SecureRandom.layerWebCrypto)("pairing", (it) => {
         ];
         for (const grant of forged) {
           assert.deepStrictEqual(
-            receivePairingReply(state, { type: "pairing-accepted", grant }, NOW),
+            receivePairingReply(
+              state,
+              { type: "pairing-accepted", grant, bootstrapToken: "bootstrap-token" },
+              NOW,
+            ),
             { phase: "failed", reason: "invalid-reply" },
           );
         }
@@ -639,7 +660,11 @@ it.layer(SecureRandom.layerWebCrypto)("pairing", (it) => {
           });
         }
         assert.strictEqual(
-          receivePairingReply(state, { type: "pairing-accepted", grant: genuine }, NOW).phase,
+          receivePairingReply(
+            state,
+            { type: "pairing-accepted", grant: genuine, bootstrapToken: "bootstrap-token" },
+            NOW,
+          ).phase,
           "paired",
         );
       }),

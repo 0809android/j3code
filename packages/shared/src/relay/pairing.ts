@@ -213,10 +213,16 @@ export type PairingRejectReason =
   | "invalid-claim"
   | "rejected";
 
+const MAX_BOOTSTRAP_TOKEN_CHARS = 1024;
+
+const isBootstrapToken = (value: unknown): value is string =>
+  typeof value === "string" && value.length > 0 && value.length <= MAX_BOOTSTRAP_TOKEN_CHARS;
+
 export type PairingReplyMessage =
   | {
       readonly type: "pairing-accepted";
       readonly grant: RelayGrant;
+      readonly bootstrapToken: string;
     }
   | { readonly type: "pairing-rejected"; readonly reason: PairingRejectReason };
 
@@ -429,12 +435,16 @@ export const approvePairing = Effect.fn("relay.approvePairing")(function* (
   input: {
     readonly hostIdentitySeed: Uint8Array;
     readonly ledger: Pick<DeviceLedger, "add" | "get">;
+    readonly bootstrapToken: string;
     readonly now: number;
   },
 ) {
   const state = tickPairing(current, input.now);
   if (state.phase !== "awaiting-approval") {
     return yield* new PairingError({ detail: "No verified pairing is waiting for approval." });
+  }
+  if (!isBootstrapToken(input.bootstrapToken)) {
+    return yield* new PairingError({ detail: "The bootstrap credential is empty or too long." });
   }
   if (
     input.hostIdentitySeed.length !== HOST_KEY_BYTES ||
@@ -463,7 +473,11 @@ export const approvePairing = Effect.fn("relay.approvePairing")(function* (
     state: close(state, "approved"),
     device: entry,
     grant,
-    reply: { type: "pairing-accepted", grant } satisfies PairingReplyMessage,
+    reply: {
+      type: "pairing-accepted",
+      grant,
+      bootstrapToken: input.bootstrapToken,
+    } satisfies PairingReplyMessage,
     relayFrame: grantRegisterFrame(grant, device.publicKey),
   };
 });
@@ -504,7 +518,11 @@ export type DevicePairingState =
       readonly publicKey: Uint8Array;
       readonly confirmationCode: string;
     }
-  | { readonly phase: "paired"; readonly record: DevicePairingRecord }
+  | {
+      readonly phase: "paired";
+      readonly record: DevicePairingRecord;
+      readonly bootstrapToken: string;
+    }
   | {
       readonly phase: "failed";
       readonly reason:
@@ -602,7 +620,11 @@ export const receivePairingReply = (
       ? { phase: "failed", reason: reason as PairingRejectReason }
       : { phase: "failed", reason: "invalid-reply" };
   }
-  if (!hasExactKeys(message, ["grant", "type"]) || message.type !== "pairing-accepted") {
+  if (
+    !hasExactKeys(message, ["bootstrapToken", "grant", "type"]) ||
+    message.type !== "pairing-accepted" ||
+    !isBootstrapToken(message.bootstrapToken)
+  ) {
     return { phase: "failed", reason: "invalid-reply" };
   }
   const verdict = verifyGrant(message.grant, {
@@ -620,6 +642,7 @@ export const receivePairingReply = (
       hostIdentityKey: encodeBase64url(state.hostIdentityKey),
       grant: verdict.grant,
     },
+    bootstrapToken: message.bootstrapToken,
   };
 };
 
