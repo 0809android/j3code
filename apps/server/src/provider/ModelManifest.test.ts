@@ -150,29 +150,6 @@ const REMOTE_MANIFEST: ModelManifest.ModelManifestData = {
   },
 };
 
-const REMOTE_CLAUDE_MANIFEST: ModelManifest.ModelManifestData = {
-  version: 1,
-  updatedAt: REMOTE_UPDATED_AT,
-  currentModels: {},
-  providers: {
-    claudeAgent: {
-      profiles: {
-        synthetic: {
-          adapter: { claudeCode: { effortMap: { extreme: "high" } } },
-        },
-      },
-      models: [
-        {
-          slug: "remote-only-model",
-          name: "Remote Only Model",
-          status: "current",
-          profile: "synthetic",
-        },
-      ],
-    },
-  },
-};
-
 const layerHttpClient = (handler: () => Response) =>
   Layer.succeed(
     HttpClient.HttpClient,
