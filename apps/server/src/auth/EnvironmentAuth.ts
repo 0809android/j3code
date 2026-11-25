@@ -56,11 +56,14 @@ import {
   PEER_LINK_PAIRING_SUBJECT_PREFIX,
 } from "../persistence/AuthPairingLinks.ts";
 import { requestUrl } from "../requestUrl.ts";
+import { isRelayRequest, RELAY_CLIENT_ADDRESS } from "./transportSecurity.ts";
 
 const DEFAULT_SESSION_SUBJECT = "cli-issued-session";
 export const INTERNAL_ADMINISTRATIVE_BOOTSTRAP_SUBJECT = "administrative-bootstrap";
 /** Sessions and pairing links T3 Connect minted for a device signed in to the linked account. */
 export const CLOUD_CONNECT_SUBJECT = "cloud-connect";
+/** Sessions a device gets through the K3 relay after its pairing is approved on this host. */
+export const RELAY_PAIRED_DEVICE_SUBJECT = "relay-paired-device";
 
 export interface IssuedPairingLink {
   readonly id: string;
@@ -867,7 +870,27 @@ export const make = Effect.gen(function* () {
     ...config.devAllowedOrigins,
   ]);
 
+  // The policy is read once at startup and revokes relay sessions then; this also stops a
+  // relayed request that arrives with a credential the policy never saw.
+  const rejectRelayRequestTheManagedPolicyDisallows = (
+    request: HttpServerRequest.HttpServerRequest,
+  ) =>
+    isRelayRequest(request) && !ManagedLimits.allowsRelay(managedPolicy)
+      ? Effect.fail(
+          new ServerAuthInvalidCredentialError({
+            diagnostic: ManagedLimits.refuseRelay(managedPolicy).message,
+          }),
+        )
+      : Effect.void;
+
   const authenticateRequest = (
+    request: HttpServerRequest.HttpServerRequest,
+  ): Effect.Effect<AuthenticatedSession, ServerAuthCredentialError | ServerAuthInternalError> =>
+    rejectRelayRequestTheManagedPolicyDisallows(request).pipe(
+      Effect.andThen(authenticateRequestUnchecked(request)),
+    );
+
+  const authenticateRequestUnchecked = (
     request: HttpServerRequest.HttpServerRequest,
   ): Effect.Effect<AuthenticatedSession, ServerAuthCredentialError | ServerAuthInternalError> => {
     const dpopToken = parseDpopToken(request);
@@ -1534,6 +1557,7 @@ export const make = Effect.gen(function* () {
 
   const authenticateWebSocketUpgrade: EnvironmentAuth["Service"]["authenticateWebSocketUpgrade"] =
     Effect.fn("EnvironmentAuth.authenticateWebSocketUpgrade")(function* (request, use) {
+      yield* rejectRelayRequestTheManagedPolicyDisallows(request);
       const url = requestUrl(request);
       if (Option.isSome(url)) {
         const query = yield* decodeWebSocketUpgradeQuery(
@@ -1760,7 +1784,11 @@ const mcpApprovalLevel = (subject: string): AuthMcpClientAccess | undefined => {
 };
 
 /** Subjects of sessions and links a pairing link created, keyed by how the client paired. */
-const LINK_PAIRED_SUBJECTS = { link: "one-time-token", connect: CLOUD_CONNECT_SUBJECT } as const;
+const LINK_PAIRED_SUBJECTS = {
+  link: "one-time-token",
+  connect: CLOUD_CONNECT_SUBJECT,
+  relay: RELAY_PAIRED_DEVICE_SUBJECT,
+} as const;
 
 /**
  * Revokes sessions and unused links from pairing the policy no longer allows, so a policy rolled
@@ -1779,10 +1807,14 @@ const revokePairedClientsThePolicyDisallows = Effect.fn(
   const disallowed = new Set<string>();
   if (!remoteAllowed) disallowed.add(LINK_PAIRED_SUBJECTS.link);
   if (!ManagedLimits.allowsConnect(policy)) disallowed.add(LINK_PAIRED_SUBJECTS.connect);
+  const relayAllowed = ManagedLimits.allowsRelay(policy);
+  if (!relayAllowed) disallowed.add(LINK_PAIRED_SUBJECTS.relay);
   if (disallowed.size === 0) return;
   const sessions = (yield* stores.sessions.listActive()).filter(
     (session) =>
       disallowed.has(session.subject) ||
+      // Whatever subject a session has, one that came through the relay goes with it.
+      (!relayAllowed && session.client.ipAddress === RELAY_CLIENT_ADDRESS) ||
       // The startup link also pairs browsers on this machine; only a device elsewhere goes.
       (!remoteAllowed &&
         session.subject === INTERNAL_ADMINISTRATIVE_BOOTSTRAP_SUBJECT &&

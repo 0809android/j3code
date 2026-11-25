@@ -12,6 +12,8 @@ import * as Mac from "effect/crypto/Mac";
 import * as Base64Url from "effect/encoding/Base64Url";
 import * as Result from "effect/Result";
 
+import { isRelayRequest, RELAY_CLIENT_ADDRESS } from "./transportSecurity.ts";
+
 const SESSION_COOKIE_NAME = "t3_session";
 
 /** Cookies span ports; use separate names for servers sharing a hostname. */
@@ -171,6 +173,8 @@ const isLoopbackIpAddress = (address: string): boolean =>
 
 // A loopback peer is a local reverse proxy (Tailscale Serve); trust only the entry it appended.
 function resolveClientIpAddress(request: HttpServerRequest.HttpServerRequest): string | undefined {
+  // A relayed device is neither on this machine nor at the address its headers claim.
+  if (isRelayRequest(request)) return RELAY_CLIENT_ADDRESS;
   const peer = readRemoteAddressFromSource(request.source);
   if (!peer || !isLoopbackIpAddress(peer)) {
     return peer;
