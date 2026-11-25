@@ -61,10 +61,25 @@ describe("RelayStore", () => {
     store.insertHost("idle".padEnd(32, "a"), Buffer.alloc(32), today - 400);
     store.insertHost("live".padEnd(32, "a"), Buffer.alloc(32), today - 400);
     store.touchHost("live".padEnd(32, "a"), today - 10);
-    store.upsertGrant({ ...grantRow("1".repeat(32), NOW, NOW - 31 * DAY), hostId: "live".padEnd(32, "a") });
-    store.upsertGrant({ ...grantRow("2".repeat(32), NOW, NOW - 29 * DAY), hostId: "live".padEnd(32, "a") });
-    store.upsertGrant({ ...grantRow("3".repeat(32), NOW, NOW + 60 * DAY), hostId: "live".padEnd(32, "a") });
-    store.upsertRevocation("live".padEnd(32, "a"), "3".repeat(32), NOW - 40 * DAY, "s", NOW - 40 * DAY);
+    store.upsertGrant({
+      ...grantRow("1".repeat(32), NOW, NOW - 31 * DAY),
+      hostId: "live".padEnd(32, "a"),
+    });
+    store.upsertGrant({
+      ...grantRow("2".repeat(32), NOW, NOW - 29 * DAY),
+      hostId: "live".padEnd(32, "a"),
+    });
+    store.upsertGrant({
+      ...grantRow("3".repeat(32), NOW, NOW + 60 * DAY),
+      hostId: "live".padEnd(32, "a"),
+    });
+    store.upsertRevocation(
+      "live".padEnd(32, "a"),
+      "3".repeat(32),
+      NOW - 40 * DAY,
+      "s",
+      NOW - 40 * DAY,
+    );
     store.upsertRevocation("live".padEnd(32, "a"), "4".repeat(32), NOW, "s", NOW - 10 * DAY);
     store.setUsage("live".padEnd(32, "a"), monthKey(NOW - 200 * DAY), 5);
     store.setUsage("live".padEnd(32, "a"), monthKey(NOW), 7);

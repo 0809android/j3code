@@ -36,9 +36,9 @@ describe("proof of work", () => {
     expect(
       checkSolution(secret, hk, { ...challenge, ts: now + 1 }, solution, now, TTL),
     ).toMatchObject({ reason: "forged" });
-    expect(
-      checkSolution(Buffer.alloc(32, 3), hk, challenge, solution, now, TTL),
-    ).toMatchObject({ reason: "forged" });
+    expect(checkSolution(Buffer.alloc(32, 3), hk, challenge, solution, now, TTL)).toMatchObject({
+      reason: "forged",
+    });
   });
 
   it("expires old challenges and rejects work that is too small", () => {
@@ -56,10 +56,16 @@ describe("proof of work", () => {
   it("rejects malformed input without throwing", () => {
     const challenge = issueChallenge(secret, hk, now, 4);
     expect(checkSolution(secret, hk, null, "AA", now, TTL)).toMatchObject({ reason: "malformed" });
-    expect(checkSolution(secret, hk, { ...challenge, difficulty: 99 }, "AA", now, TTL)).toMatchObject({
+    expect(
+      checkSolution(secret, hk, { ...challenge, difficulty: 99 }, "AA", now, TTL),
+    ).toMatchObject({
       reason: "malformed",
     });
-    expect(checkSolution(secret, hk, challenge, 5, now, TTL)).toMatchObject({ reason: "malformed" });
-    expect(checkSolution(secret, hk, challenge, "", now, TTL)).toMatchObject({ reason: "malformed" });
+    expect(checkSolution(secret, hk, challenge, 5, now, TTL)).toMatchObject({
+      reason: "malformed",
+    });
+    expect(checkSolution(secret, hk, challenge, "", now, TTL)).toMatchObject({
+      reason: "malformed",
+    });
   });
 });

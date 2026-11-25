@@ -44,12 +44,16 @@ describe("signatures interoperate with the client libraries", () => {
     const secret = ed25519.utils.randomPrivateKey();
     const signature = ed25519.sign(message, secret);
     expect(verifySignature("ed25519", ed25519.getPublicKey(secret), message, signature)).toBe(true);
-    expect(verifySignature("ed25519", ed25519.getPublicKey(secret), Buffer.from("x"), signature)).toBe(false);
+    expect(
+      verifySignature("ed25519", ed25519.getPublicKey(secret), Buffer.from("x"), signature),
+    ).toBe(false);
   });
 
   it("verifies P-256 from @noble/curves (X9.63 key, r||s signature)", () => {
     const secret = p256.utils.randomPrivateKey();
-    const signature = p256.sign(message, secret, { prehash: true, lowS: false }).toCompactRawBytes();
+    const signature = p256
+      .sign(message, secret, { prehash: true, lowS: false })
+      .toCompactRawBytes();
     const publicKey = p256.getPublicKey(secret, false);
     expect(publicKey).toHaveLength(65);
     expect(verifySignature("p256", publicKey, message, signature)).toBe(true);

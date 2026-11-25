@@ -48,6 +48,7 @@ export interface RelayConfig {
   readonly backpressureHighWaterBytes: number;
   readonly backpressureCloseMs: number;
   readonly bufferBudgetBytes: number;
+  readonly budgetPauseFloorBytes: number;
   readonly globalBandwidthBytesPerSec: number;
   readonly globalBurstBytes: number;
   readonly fairQuantumBytes: number;
@@ -110,6 +111,7 @@ export const DEFAULT_CONFIG: RelayConfig = {
   backpressureHighWaterBytes: MIB,
   backpressureCloseMs: 10_000,
   bufferBudgetBytes: 200 * MIB,
+  budgetPauseFloorBytes: 64 * 1024,
   globalBandwidthBytesPerSec: (45 * 1_000_000) / 8,
   globalBurstBytes: 256 * 1024,
   fairQuantumBytes: 32 * 1024,
@@ -155,6 +157,7 @@ const NUMERIC_ENV: ReadonlyArray<readonly [NumericKey, string]> = [
   ["backpressureHighWaterBytes", "BACKPRESSURE_HIGH_WATER_BYTES"],
   ["backpressureCloseMs", "BACKPRESSURE_CLOSE_MS"],
   ["bufferBudgetBytes", "BUFFER_BUDGET_BYTES"],
+  ["budgetPauseFloorBytes", "BUDGET_PAUSE_FLOOR_BYTES"],
   ["monthlyQuotaBytes", "MONTHLY_QUOTA_BYTES"],
   ["newHostAgeDays", "NEW_HOST_AGE_DAYS"],
   ["newHostWeight", "NEW_HOST_WEIGHT"],
