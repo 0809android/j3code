@@ -1,3 +1,4 @@
+import * as Clock from "effect/Clock";
 import * as Aead from "effect/crypto/Aead";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
@@ -8,6 +9,7 @@ import { ed25519, x25519 } from "@noble/curves/ed25519.js";
 import { hkdf } from "@noble/hashes/hkdf.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 
+import { type RelayGrant, deserializeGrant, serializeGrant, verifyGrant } from "./relay/grant.ts";
 import {
   type E2eeDeviceIdentity,
   type E2eeDeviceSigner,
@@ -90,6 +92,8 @@ export interface E2eeV2ClientOptions {
   readonly expectedServerIdentityKey: Uint8Array;
   /** Omit only on direct connections that predate device keys, and for pairing. */
   readonly device?: E2eeDeviceSigner | undefined;
+  /** The host's relay grant for `device` (spec §6.1); direct connections leave it out. */
+  readonly grant?: RelayGrant | undefined;
   readonly maxFrameBytes?: number | undefined;
 }
 
@@ -103,6 +107,11 @@ export interface E2eeV2ServerOptions {
    * anonymous sessions the caller must route to pairing only (see `requireAuthenticatedDevice`).
    */
   readonly requireDeviceAuth?: boolean | undefined;
+  /**
+   * Defaults to false. When on, an authenticating device must present a grant from this host;
+   * relay connections turn it on. A grant that is presented is always verified.
+   */
+  readonly requireGrant?: boolean | undefined;
   /** Defaults to false. Never honoured while device authentication is required. */
   readonly acceptV1?: boolean | undefined;
   readonly maxFrameBytes?: number | undefined;
@@ -372,29 +381,53 @@ type ClientAuth =
       readonly alg: string;
       readonly publicKey: Uint8Array;
       readonly signature: Uint8Array;
+      readonly grant: RelayGrant | undefined;
     };
 
-const encodeClientAuth = (signer: E2eeDeviceSigner, signature: Uint8Array): Uint8Array =>
+/** `lp(alg) ‖ lp(Dk) ‖ lp(sig) [‖ lp(grant JSON)]`: spec §6.1's `{ alg, Dk, sig, grant? }`. */
+const encodeClientAuth = (
+  signer: E2eeDeviceSigner,
+  signature: Uint8Array,
+  grant: RelayGrant | undefined,
+): Uint8Array =>
   concatBytes(
     lengthPrefixedBytes(utf8(signer.alg)),
     lengthPrefixedBytes(signer.publicKey),
     lengthPrefixedBytes(signature),
+    ...(grant === undefined ? [] : [lengthPrefixedBytes(utf8(serializeGrant(grant)))]),
   );
 
 const decodeClientAuth = (body: Uint8Array): ClientAuth | undefined => {
   if (body.length === 0) return { _tag: "anonymous" };
   const fields: Array<Uint8Array> = [];
   let offset = 0;
-  while (fields.length < 3) {
+  while (offset < body.length && fields.length < 4) {
     if (offset + 2 > body.length) return undefined;
     const length = ((body[offset] ?? 0) << 8) | (body[offset + 1] ?? 0);
     offset += 2;
     if (offset + length > body.length) return undefined;
     fields.push(body.slice(offset, (offset += length)));
   }
-  if (offset !== body.length) return undefined;
-  const [alg, publicKey, signature] = fields as [Uint8Array, Uint8Array, Uint8Array];
-  return { _tag: "device", alg: new TextDecoder().decode(alg), publicKey, signature };
+  if (offset !== body.length || fields.length < 3) return undefined;
+  const [alg, publicKey, signature, grantField] = fields as [
+    Uint8Array,
+    Uint8Array,
+    Uint8Array,
+    Uint8Array | undefined,
+  ];
+  let grant: RelayGrant | undefined;
+  if (grantField !== undefined) {
+    let text: string;
+    try {
+      text = strictUtf8.decode(grantField);
+    } catch {
+      return undefined;
+    }
+    const parsed = deserializeGrant(text);
+    if (parsed === null || serializeGrant(parsed) !== text) return undefined;
+    grant = parsed;
+  }
+  return { _tag: "device", alg: new TextDecoder().decode(alg), publicKey, signature, grant };
 };
 
 const clientHandshake = Effect.fn("socketE2ee.clientHandshakeV2")(function* (
@@ -403,6 +436,9 @@ const clientHandshake = Effect.fn("socketE2ee.clientHandshakeV2")(function* (
   aead: AeadService,
   options: E2eeV2ClientOptions,
 ) {
+  if (options.grant !== undefined && options.device === undefined) {
+    return yield* protocolError("A relay grant needs a device key.");
+  }
   const random = yield* SecureRandom.SecureRandom;
   const ephemeralPriv = Uint8Array.from(yield* random.randomBytes(KEY_LENGTH));
   const ephemeralPub = x25519.getPublicKey(ephemeralPriv);
@@ -446,6 +482,7 @@ const clientHandshake = Effect.fn("socketE2ee.clientHandshakeV2")(function* (
       : encodeClientAuth(
           device,
           yield* device.sign(clientAuthMessage(transcript, hello.identityPub)),
+          options.grant,
         );
   const confirmKey = yield* aeadKey(sharedSecret, transcript, labeledMessage(LABEL_CLIENT_CONFIRM));
   const confirmRecord = yield* sealInner(
@@ -490,6 +527,7 @@ const clientHandshake = Effect.fn("socketE2ee.clientHandshakeV2")(function* (
     info: sessionInfoFor(
       transcript,
       device === undefined ? undefined : deviceIdentity(device.alg, device.publicKey),
+      options.grant,
     ),
   } satisfies E2eeHandshakeResult;
 });
@@ -497,14 +535,24 @@ const clientHandshake = Effect.fn("socketE2ee.clientHandshakeV2")(function* (
 const sessionInfoFor = (
   transcript: Uint8Array,
   device: E2eeDeviceIdentity | undefined,
+  grant: RelayGrant | undefined,
 ): E2eeSessionInfo =>
   device === undefined
-    ? { version: 2, transcriptHash: transcript, deviceAuthenticated: false, device: undefined }
-    : { version: 2, transcriptHash: transcript, deviceAuthenticated: true, device };
+    ? {
+        version: 2,
+        transcriptHash: transcript,
+        deviceAuthenticated: false,
+        device: undefined,
+        grant: undefined,
+      }
+    : { version: 2, transcriptHash: transcript, deviceAuthenticated: true, device, grant };
 
 type Verdict = { readonly accepted: E2eeSessionInfo } | { readonly rejected: E2eeRejectionReason };
 
-/** Decides the verdict for a decrypted confirm record. */
+/**
+ * Decides the verdict for a decrypted confirm record. The ledger runs before the grant, so a
+ * revoked device learns `revoked` rather than `grant-expired`.
+ */
 const authenticate = Effect.fnUntraced(function* (
   auth: ClientAuth,
   transcript: Uint8Array,
@@ -513,7 +561,7 @@ const authenticate = Effect.fnUntraced(function* (
 ) {
   if (auth._tag === "anonymous") {
     return options.requireDeviceAuth === false
-      ? ({ accepted: sessionInfoFor(transcript, undefined) } satisfies Verdict)
+      ? ({ accepted: sessionInfoFor(transcript, undefined, undefined) } satisfies Verdict)
       : ({ rejected: "host-policy" } satisfies Verdict);
   }
   if (!isDeviceAlgorithm(auth.alg) || !isCanonicalDevicePublicKey(auth.alg, auth.publicKey)) {
@@ -532,7 +580,26 @@ const authenticate = Effect.fnUntraced(function* (
   const device = deviceIdentity(auth.alg, auth.publicKey);
   const ledger = yield* Effect.result(options.verifyDevice(device));
   if (Result.isFailure(ledger)) return { rejected: ledger.failure.reason } satisfies Verdict;
-  return { accepted: sessionInfoFor(transcript, device) } satisfies Verdict;
+  if (auth.grant === undefined) {
+    return options.requireGrant === true
+      ? ({ rejected: "host-policy" } satisfies Verdict)
+      : ({ accepted: sessionInfoFor(transcript, device, undefined) } satisfies Verdict);
+  }
+  const grant = verifyGrant(auth.grant, {
+    hostIdentityKey: identityPub,
+    alg: auth.alg,
+    devicePublicKey: auth.publicKey,
+    now: yield* Clock.currentTimeMillis,
+  });
+  if (!grant.ok) {
+    return {
+      rejected:
+        grant.reason === "expired" || grant.reason === "not-yet-valid"
+          ? "grant-expired"
+          : "host-policy",
+    } satisfies Verdict;
+  }
+  return { accepted: sessionInfoFor(transcript, device, grant.grant) } satisfies Verdict;
 });
 
 const serverHandshake = Effect.fn("socketE2ee.serverHandshakeV2")(function* (

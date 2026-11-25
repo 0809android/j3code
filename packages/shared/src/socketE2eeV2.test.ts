@@ -7,7 +7,9 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
+import * as Result from "effect/Result";
 import * as Socket from "effect/socket/Socket";
+import * as TestClock from "effect/testing/TestClock";
 import { p256 } from "@noble/curves/nist.js";
 
 import {
@@ -33,6 +35,7 @@ import {
   wrapServerSocketWithE2eeV2,
 } from "./socketE2ee.ts";
 import { relayDeviceId } from "./relay/encoding.ts";
+import { type RelayGrant, signGrant } from "./relay/grant.ts";
 import {
   type HostPairingState,
   type PairingClaimMessage,
@@ -895,6 +898,7 @@ describe("socketE2ee v2 sessions", () => {
         assert.isTrue(deviceInfo.deviceAuthenticated);
         assert.equal(hostInfo.device?.deviceId, relayDeviceId("p256", key.publicKey));
         assert.equal(deviceInfo.device?.deviceId, hostInfo.device?.deviceId);
+        assert.isUndefined(hostInfo.grant);
       }
       assert.notDeepEqual(
         Array.from(first.host.transcriptHash),
@@ -1180,4 +1184,183 @@ describe("socketE2ee v2 sessions", () => {
       }).pipe(Effect.provide(layerE2eeCrypto)),
     );
   });
+});
+
+describe("socketE2ee v2 relay grants", () => {
+  const DAY = 86_400_000;
+
+  /** Runs one handshake at `PAIRING_NOW`; returns the host's session or its rejection. */
+  const connect = (input: {
+    readonly hostSeed: Uint8Array;
+    readonly hostKey: Uint8Array;
+    readonly approved: ReadonlyArray<E2eeDeviceKeypair>;
+    readonly key: E2eeDeviceKeypair;
+    readonly grant: RelayGrant | undefined;
+    readonly requireGrant?: boolean;
+  }) =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(PAIRING_NOW);
+      const pair = yield* makePair;
+      const hostFiber = yield* Effect.forkScoped(
+        Effect.result(
+          hostWith(
+            pair.server,
+            hostOptions(input.hostSeed, makeLedger(input.approved).verifyDevice, {
+              requireGrant: input.requireGrant ?? true,
+            }),
+            (wrapped) => Effect.andThen(wrapped.reader, wrapped.sessionInfo),
+          ),
+        ),
+      );
+      const deviceResult = yield* Effect.result(
+        deviceWith(
+          pair.client,
+          clientOptions(input.hostKey, deviceSignerFromKeypair(input.key), { grant: input.grant }),
+          (wrapped) => wrapped.sessionInfo,
+        ),
+      );
+      return { host: yield* Fiber.join(hostFiber), device: deviceResult };
+    });
+
+  const grantFor = (hostSeed: Uint8Array, key: E2eeDeviceKeypair, now = PAIRING_NOW) =>
+    signGrant({
+      hostIdentitySeed: hostSeed,
+      alg: key.alg,
+      devicePublicKey: key.publicKey,
+      now,
+      nonce: "AAECAwQFBgcICQoLDA0ODw",
+    });
+
+  const assertRefused = (
+    outcome: Effect.Success<ReturnType<typeof connect>>,
+    reason: E2eeRejectionReason,
+  ) => {
+    assert.isTrue(Result.isFailure(outcome.host), "the host accepted");
+    assert.isTrue(Result.isFailure(outcome.device), "the device was accepted");
+    if (Result.isFailure(outcome.host)) assertRejected(outcome.host.failure, reason);
+    if (Result.isFailure(outcome.device)) assertRejected(outcome.device.failure, reason);
+  };
+
+  it.effect.each(["ed25519", "p256"] satisfies ReadonlyArray<E2eeDeviceAlgorithm>)(
+    "%s: a valid grant is accepted and handed to the host for renewal decisions",
+    (alg) =>
+      Effect.gen(function* () {
+        const identity = yield* generateIdentityKeypair();
+        const key = yield* generateDeviceKeypair(alg);
+        const grant = yield* grantFor(identity.seed, key);
+        const outcome = yield* connect({
+          hostSeed: identity.seed,
+          hostKey: identity.publicKey,
+          approved: [key],
+          key,
+          grant,
+        });
+        assert.isTrue(Result.isSuccess(outcome.host));
+        assert.isTrue(Result.isSuccess(outcome.device));
+        if (Result.isSuccess(outcome.host)) {
+          assert.deepEqual(outcome.host.success.grant, grant);
+          assert.equal(outcome.host.success.device?.deviceId, grant.deviceId);
+        }
+        if (Result.isSuccess(outcome.device)) assert.deepEqual(outcome.device.success.grant, grant);
+      }).pipe(Effect.provide(layerE2eeCrypto)),
+  );
+
+  it.effect("a relay host refuses an approved device that presents no grant", () =>
+    Effect.gen(function* () {
+      const identity = yield* generateIdentityKeypair();
+      const key = yield* generateDeviceKeypair("ed25519");
+      assertRefused(
+        yield* connect({
+          hostSeed: identity.seed,
+          hostKey: identity.publicKey,
+          approved: [key],
+          key,
+          grant: undefined,
+        }),
+        "host-policy",
+      );
+    }).pipe(Effect.provide(layerE2eeCrypto)),
+  );
+
+  it.effect("an expired grant is refused as grant-expired, even where grants are optional", () =>
+    Effect.gen(function* () {
+      const identity = yield* generateIdentityKeypair();
+      const key = yield* generateDeviceKeypair("ed25519");
+      const expired = yield* grantFor(identity.seed, key, PAIRING_NOW - 91 * DAY);
+      for (const requireGrant of [true, false]) {
+        assertRefused(
+          yield* connect({
+            hostSeed: identity.seed,
+            hostKey: identity.publicKey,
+            approved: [key],
+            key,
+            grant: expired,
+            requireGrant,
+          }),
+          "grant-expired",
+        );
+      }
+    }).pipe(Effect.provide(layerE2eeCrypto)),
+  );
+
+  it.effect("a grant from another host, or for another device, is refused", () =>
+    Effect.gen(function* () {
+      const identity = yield* generateIdentityKeypair();
+      const otherHost = yield* generateIdentityKeypair();
+      const key = yield* generateDeviceKeypair("ed25519");
+      const other = yield* generateDeviceKeypair("ed25519");
+      for (const grant of [
+        yield* grantFor(otherHost.seed, key),
+        yield* grantFor(identity.seed, other),
+        { ...(yield* grantFor(identity.seed, key)), expiresAt: PAIRING_NOW + 89 * DAY },
+      ]) {
+        assertRefused(
+          yield* connect({
+            hostSeed: identity.seed,
+            hostKey: identity.publicKey,
+            approved: [key, other],
+            key,
+            grant,
+          }),
+          "host-policy",
+        );
+      }
+    }).pipe(Effect.provide(layerE2eeCrypto)),
+  );
+
+  it.effect(
+    "the ledger decides first: an unknown device with a valid grant is unknown-device",
+    () =>
+      Effect.gen(function* () {
+        const identity = yield* generateIdentityKeypair();
+        const key = yield* generateDeviceKeypair("p256");
+        assertRefused(
+          yield* connect({
+            hostSeed: identity.seed,
+            hostKey: identity.publicKey,
+            approved: [],
+            key,
+            grant: yield* grantFor(identity.seed, key),
+          }),
+          "unknown-device",
+        );
+      }).pipe(Effect.provide(layerE2eeCrypto)),
+  );
+
+  it.effect("a client refuses to send a grant without a device key", () =>
+    Effect.gen(function* () {
+      const identity = yield* generateIdentityKeypair();
+      const key = yield* generateDeviceKeypair("ed25519");
+      const pair = yield* makePair;
+      const failure = yield* Effect.flip(
+        device(
+          pair.client,
+          clientOptions(identity.publicKey, undefined, {
+            grant: yield* grantFor(identity.seed, key),
+          }),
+        ),
+      );
+      assertProtocolError(failure, "needs a device key");
+    }).pipe(Effect.provide(layerE2eeCrypto)),
+  );
 });

@@ -8,6 +8,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Socket from "effect/socket/Socket";
 import type { NonEmptyReadonlyArray } from "effect/Array";
 
+import type { RelayGrant } from "./relay/grant.ts";
 import type { E2eeDeviceIdentity } from "./socketE2eeDevice.ts";
 
 import {
@@ -53,8 +54,17 @@ export type E2eeSessionInfo = {
   readonly version: 1 | 2;
   readonly transcriptHash: Uint8Array;
 } & (
-  | { readonly deviceAuthenticated: false; readonly device: undefined }
-  | { readonly deviceAuthenticated: true; readonly device: E2eeDeviceIdentity }
+  | {
+      readonly deviceAuthenticated: false;
+      readonly device: undefined;
+      readonly grant: undefined;
+    }
+  | {
+      readonly deviceAuthenticated: true;
+      readonly device: E2eeDeviceIdentity;
+      /** The relay grant the device presented, already verified by the host when required. */
+      readonly grant: RelayGrant | undefined;
+    }
 );
 
 export interface E2eeHandshakeResult {

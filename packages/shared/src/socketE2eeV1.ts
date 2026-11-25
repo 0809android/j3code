@@ -305,6 +305,7 @@ const anonymousV1Info = (transcript: Uint8Array) =>
     transcriptHash: transcript,
     deviceAuthenticated: false,
     device: undefined,
+    grant: undefined,
   }) as const;
 
 /** The server half of v1, given the client hello the caller already pulled. */
