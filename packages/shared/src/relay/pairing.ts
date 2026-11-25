@@ -22,7 +22,12 @@ import {
   relayHostId,
 } from "./encoding.ts";
 import { type RelayGrant, grantRegisterFrame, issueGrant, verifyGrant } from "./grant.ts";
-import { type DeviceLedger, type LedgerDevice, isValidDeviceName } from "./ledger.ts";
+import {
+  type DeviceLedger,
+  type LedgerApprovalRoute,
+  type LedgerDevice,
+  isValidDeviceName,
+} from "./ledger.ts";
 
 /**
  * Pairing (spec §8) as pure state machines and messages; the transport supplies the pairing
@@ -71,7 +76,7 @@ const isLoopback = (hostname: string) =>
   hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
 
 /** `https:` relays only (plain `http:` just for loopback development), no credentials. */
-const normalizeRelayUrl = (value: string): string | null => {
+export const normalizeRelayUrl = (value: string): string | null => {
   let url: URL;
   try {
     url = new URL(value);
@@ -180,6 +185,11 @@ export const confirmationCode = (
   hostIdentityKey: Uint8Array,
 ): string => {
   const digest = sha256(labeledMessage(LABEL_CONFIRMATION, transcriptHash, hostIdentityKey));
+  return formatConfirmationCode(digest);
+};
+
+/** `K7QM-2XFD` from the first 40 bits of a digest. */
+export const formatConfirmationCode = (digest: Uint8Array): string => {
   let bits = 0;
   let buffer = 0;
   let code = "";
@@ -437,6 +447,8 @@ export const approvePairing = Effect.fn("relay.approvePairing")(function* (
     readonly ledger: Pick<DeviceLedger, "add" | "get">;
     readonly bootstrapToken: string;
     readonly now: number;
+    /** Recorded in the ledger for a device it did not hold yet. */
+    readonly approvedVia?: Exclude<LedgerApprovalRoute, "introduction"> | undefined;
   },
 ) {
   const state = tickPairing(current, input.now);
@@ -468,6 +480,7 @@ export const approvePairing = Effect.fn("relay.approvePairing")(function* (
           publicKey: device.publicKey,
           name: device.name,
           now: input.now,
+          approvedVia: input.approvedVia,
         });
   return {
     state: close(state, "approved"),

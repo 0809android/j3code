@@ -23,6 +23,17 @@ import { decodeBase64url, encodeBase64url, isRelayId, relayDeviceId } from "./en
 export const LedgerDeviceStatus = Schema.Literals(["active", "revoked"]);
 export type LedgerDeviceStatus = typeof LedgerDeviceStatus.Type;
 
+/** Lets an approved device introduce new devices and revoke ordinary ones (spec §18.2). */
+export const LedgerDevicePermission = Schema.Literals(["devices:invite"]);
+export type LedgerDevicePermission = typeof LedgerDevicePermission.Type;
+
+/**
+ * How the host's ledger came to hold the device. Every route is an approval recorded here; an
+ * introduction also names the introducing device.
+ */
+export const LedgerApprovalRoute = Schema.Literals(["host", "qr", "account", "introduction"]);
+export type LedgerApprovalRoute = typeof LedgerApprovalRoute.Type;
+
 export const LedgerDevice = Schema.Struct({
   /** The relay device id, `base32(sha256(lp32(alg) ‖ lp32(Dk)))`, as grants carry it. */
   deviceId: Schema.String,
@@ -34,8 +45,20 @@ export const LedgerDevice = Schema.Struct({
   lastSeenAt: Schema.NullOr(Schema.Number),
   status: LedgerDeviceStatus,
   revokedAt: Schema.NullOr(Schema.Number),
+  /** Absent in ledgers written before introductions: no permissions. */
+  permissions: Schema.optionalKey(Schema.Array(LedgerDevicePermission)),
+  /** Absent in ledgers written before introductions. */
+  approvedVia: Schema.optionalKey(LedgerApprovalRoute),
+  /** The introducing device's id, present exactly when `approvedVia` is `introduction`. */
+  introducedBy: Schema.optionalKey(Schema.String),
 });
 export type LedgerDevice = typeof LedgerDevice.Type;
+
+/** An introduced device never invites, even if a hand-edited ledger says otherwise. */
+export const deviceCanInvite = (device: LedgerDevice | undefined): boolean =>
+  device?.status === "active" &&
+  device.approvedVia !== "introduction" &&
+  (device.permissions ?? []).includes("devices:invite");
 
 const LedgerFile = Schema.Struct({
   version: Schema.Literal(1),
@@ -57,6 +80,8 @@ export const DeviceLedgerErrorReason = Schema.Literals([
   "already-registered",
   "invalid-name",
   "invalid-key",
+  "invalid-route",
+  "introduced-device",
 ]);
 export type DeviceLedgerErrorReason = typeof DeviceLedgerErrorReason.Type;
 
@@ -100,7 +125,9 @@ const isConsistent = (device: LedgerDevice): boolean => {
     isRelayId(device.deviceId) &&
     isCanonicalDevicePublicKey(device.alg, key) &&
     relayDeviceId(device.alg, key) === device.deviceId &&
-    (device.status === "revoked") === (device.revokedAt !== null)
+    (device.status === "revoked") === (device.revokedAt !== null) &&
+    (device.approvedVia === "introduction") === (device.introducedBy !== undefined) &&
+    (device.introducedBy === undefined || isRelayId(device.introducedBy))
   );
 };
 
@@ -166,12 +193,19 @@ export interface AddDeviceInput {
   readonly publicKey: Uint8Array;
   readonly name: string;
   readonly now: number;
+  readonly approvedVia?: LedgerApprovalRoute | undefined;
+  /** Required for, and only for, `approvedVia: "introduction"`. */
+  readonly introducedBy?: string | undefined;
 }
 
 export interface DeviceLedger {
   readonly list: Effect.Effect<ReadonlyArray<LedgerDevice>, LedgerStoreError>;
   readonly get: (deviceId: string) => Effect.Effect<LedgerDevice | undefined, LedgerStoreError>;
-  /** Registers an approved device. A revoked device comes back only through a new approval. */
+  /**
+   * Registers an approved device, always without permissions: only the host's user grants them
+   * (`setPermissions`), so an introduced device can never introduce another. A revoked device
+   * comes back only through a new approval.
+   */
   readonly add: (
     input: AddDeviceInput,
   ) => Effect.Effect<LedgerDevice, DeviceLedgerError | LedgerStoreError>;
@@ -182,6 +216,14 @@ export interface DeviceLedger {
   readonly rename: (
     deviceId: string,
     name: string,
+  ) => Effect.Effect<LedgerDevice, DeviceLedgerError | LedgerStoreError>;
+  /**
+   * The host's user grants or withdraws permissions of an active device. An introduced device
+   * never gets any.
+   */
+  readonly setPermissions: (
+    deviceId: string,
+    permissions: ReadonlyArray<LedgerDevicePermission>,
   ) => Effect.Effect<LedgerDevice, DeviceLedgerError | LedgerStoreError>;
   /** Records a successful connection of an active device. */
   readonly markSeen: (
@@ -221,6 +263,13 @@ export const makeDeviceLedger = Effect.fn("relay.makeDeviceLedger")(function* (s
         if (!isValidDeviceName(input.name)) {
           return yield* new DeviceLedgerError({ reason: "invalid-name" });
         }
+        const introduced = input.approvedVia === "introduction";
+        if (
+          introduced !== (input.introducedBy !== undefined) ||
+          (input.introducedBy !== undefined && !isRelayId(input.introducedBy))
+        ) {
+          return yield* new DeviceLedgerError({ reason: "invalid-route" });
+        }
         const deviceId = relayDeviceId(input.alg, input.publicKey);
         const devices = yield* store.load;
         const existing = devices.find((device) => device.deviceId === deviceId);
@@ -236,6 +285,9 @@ export const makeDeviceLedger = Effect.fn("relay.makeDeviceLedger")(function* (s
           lastSeenAt: null,
           status: "active",
           revokedAt: null,
+          permissions: [],
+          ...(input.approvedVia === undefined ? {} : { approvedVia: input.approvedVia }),
+          ...(input.introducedBy === undefined ? {} : { introducedBy: input.introducedBy }),
         };
         yield* store.save([...devices.filter((entry) => entry.deviceId !== deviceId), device]);
         return device;
@@ -257,6 +309,15 @@ export const makeDeviceLedger = Effect.fn("relay.makeDeviceLedger")(function* (s
           ? { ...device, name }
           : new DeviceLedgerError({ reason: "invalid-name" }),
       ),
+    setPermissions: (deviceId, permissions) =>
+      update(deviceId, (device) => {
+        if (device.status !== "active") return new DeviceLedgerError({ reason: "unknown-device" });
+        // Introductions do not chain, whoever asks (spec §18.2).
+        if (device.approvedVia === "introduction" && permissions.length > 0) {
+          return new DeviceLedgerError({ reason: "introduced-device" });
+        }
+        return { ...device, permissions: [...new Set(permissions)] };
+      }),
     markSeen: (deviceId, now) =>
       update(deviceId, (device) =>
         device.status === "active"
