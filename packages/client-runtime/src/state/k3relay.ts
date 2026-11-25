@@ -100,6 +100,13 @@ export function createK3RelayEnvironmentAtoms<R, E>(
       scheduler,
       concurrency,
     }),
+    /** Whether a device may introduce others (§18.2); the owner's call only. */
+    setDevicePermissions: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:k3relay:set-device-permissions",
+      tag: WS_METHODS.k3RelaySetDevicePermissions,
+      scheduler,
+      concurrency,
+    }),
     /** The host's account at the relay and the approval policy for account devices (§20). */
     accountState: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:k3relay:account-state",

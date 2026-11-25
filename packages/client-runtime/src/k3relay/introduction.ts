@@ -20,22 +20,30 @@ import {
   encodeBase64url,
   encodeIntroductionLink,
   introductionCode,
+  isIntroductionLink,
   parseIntroductionLink,
   receivePairingReply,
   signIntroductionApproval,
 } from "@t3tools/shared/relay";
 import { type E2eeDeviceSigner, layerE2eeCrypto } from "@t3tools/shared/socketE2ee";
 import * as Clock from "effect/Clock";
+import * as Context from "effect/Context";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as SubscriptionRef from "effect/SubscriptionRef";
 import { mFallback, msg } from "gt-i18n";
 import type { MFunctionType } from "gt-i18n/types";
 
+import { K3RelayConnectionProfile } from "../connection/catalog.ts";
 import type { ConnectionTransport } from "../connection/model.ts";
+import * as EnvironmentRegistry from "../connection/registry.ts";
+import { k3relayTunnelInput } from "./broker.ts";
+import { K3RelayTunnels } from "./tunnels.ts";
 import { DeviceKeyStore } from "./deviceKeyStore.ts";
 import {
   type K3RelayPairedDevice,
@@ -512,3 +520,99 @@ export function k3relayIntroductionFailureText(
       return resolve(msg("The introduction could not be completed. Start again."));
   }
 }
+
+// ── The app's introducer ────────────────────────────────────────────────────
+
+const isK3RelayProfile = Schema.is(K3RelayConnectionProfile);
+
+/** What a pasted or scanned `k3relay://` link is, before anything is sent. */
+export type K3RelayLinkPreview =
+  | { readonly kind: "introduction"; readonly hosts: number; readonly expiresAt: number }
+  | { readonly kind: "other" };
+
+export const previewK3RelayIntroductionLink = (link: string, now: number) => {
+  if (!isIntroductionLink(link)) return { kind: "other" } as const satisfies K3RelayLinkPreview;
+  const parsed = parseIntroductionLink(link, now);
+  return parsed.ok
+    ? ({
+        kind: "introduction",
+        hosts: parsed.offer.hosts.length,
+        expiresAt: parsed.offer.expiresAt,
+      } as const satisfies K3RelayLinkPreview)
+    : parsed.reason;
+};
+
+/**
+ * This device as an introducer: every host it is paired with through the relay, reached through
+ * the tunnels its connections already use. A host that is offline is left out of the QR code.
+ */
+export class K3RelayIntroducer extends Context.Service<
+  K3RelayIntroducer,
+  {
+    readonly open: Effect.Effect<K3RelayIntroductionSession, K3RelayIntroductionError>;
+    readonly collect: (
+      session: K3RelayIntroductionSession,
+      options?: { readonly settleMs?: number },
+    ) => Effect.Effect<K3RelayIntroductionClaims, K3RelayIntroductionError>;
+    readonly approve: (
+      claims: K3RelayIntroductionClaims,
+      confirmationCode: string,
+    ) => Effect.Effect<ReadonlyArray<K3RelayIntroductionApproval>>;
+    readonly cancel: (session: K3RelayIntroductionSession) => Effect.Effect<void>;
+  }
+>()("@t3tools/client-runtime/k3relay/introduction/K3RelayIntroducer") {}
+
+/** @public */
+export const make = Effect.gen(function* () {
+  const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+  const tunnels = yield* Effect.serviceOption(K3RelayTunnels);
+  const keys = yield* Effect.serviceOption(DeviceKeyStore);
+
+  const hosts = Effect.gen(function* () {
+    if (Option.isNone(tunnels) || Option.isNone(keys)) return [];
+    const profiles = new Map<string, K3RelayConnectionProfile>();
+    for (const entry of (yield* SubscriptionRef.get(registry.entries)).values()) {
+      if (!entry.enabled) continue;
+      for (const route of [entry, ...(entry.alternateRoutes ?? [])]) {
+        const profile = Option.getOrUndefined(route.profile);
+        if (isK3RelayProfile(profile) && !profiles.has(profile.hostId)) {
+          profiles.set(profile.hostId, profile);
+        }
+      }
+    }
+    const reached = yield* Effect.forEach(
+      [...profiles.values()],
+      (profile) =>
+        Effect.gen(function* () {
+          const input = yield* k3relayTunnelInput(profile);
+          const tunnel = yield* tunnels.value.acquire(profile.connectionId, input);
+          return Option.some({
+            label: profile.label,
+            relayUrl: profile.relayUrl,
+            hostId: profile.hostId,
+            hostIdentityKey: input.hostIdentityKey,
+            signer: input.signer,
+            transport: tunnel.transport,
+          } satisfies K3RelayIntroducerHost);
+        }).pipe(
+          Effect.provideService(DeviceKeyStore, keys.value),
+          Effect.orElseSucceed(() => Option.none<K3RelayIntroducerHost>()),
+        ),
+      { concurrency: "unbounded" },
+    );
+    return reached.flatMap((host) => (Option.isSome(host) ? [host.value] : []));
+  });
+
+  return K3RelayIntroducer.of({
+    open: hosts.pipe(
+      Effect.flatMap(openK3RelayIntroduction),
+      Effect.provide(SecureRandom.layerWebCrypto),
+      Effect.withSpan("K3RelayIntroducer.open"),
+    ),
+    collect: collectK3RelayIntroductionClaims,
+    approve: approveK3RelayIntroduction,
+    cancel: cancelK3RelayIntroduction,
+  });
+});
+
+export const layer = Layer.effect(K3RelayIntroducer, make);
