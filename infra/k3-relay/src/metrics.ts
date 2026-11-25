@@ -1,3 +1,5 @@
+import type { TrafficStatus } from "./traffic.ts";
+
 export type DisconnectReason =
   | "normal"
   | "peer-closed"
@@ -7,6 +9,7 @@ export type DisconnectReason =
   | "host-offline"
   | "backpressure"
   | "limit"
+  | "degraded"
   | "replaced"
   | "revoked"
   | "ping-timeout"
@@ -22,6 +25,7 @@ export interface MetricsGauges {
   readonly controls: () => number;
   readonly sockets: () => number;
   readonly bufferedBytes: () => number;
+  readonly traffic: () => TrafficStatus;
 }
 
 function percentile(values: ReadonlyArray<number>, fraction: number): number {
@@ -98,6 +102,11 @@ export class Metrics {
     if (series.length > SAMPLE_CAPACITY) series.shift();
   }
 
+  #traffic() {
+    const { month, usedBytes, budgetBytes, fraction, level } = this.gauges.traffic();
+    return { month, usedBytes, budgetBytes, percent: Math.round(fraction * 1000) / 10, level };
+  }
+
   snapshot() {
     const memory = process.memoryUsage();
     return {
@@ -120,6 +129,7 @@ export class Metrics {
       backpressurePauses: this.backpressurePauses,
       backpressureCloses: this.backpressureCloses,
       rejections: this.rejections,
+      traffic: this.#traffic(),
       disconnects: Object.fromEntries(this.disconnects),
     };
   }

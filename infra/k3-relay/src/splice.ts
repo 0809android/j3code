@@ -4,6 +4,7 @@ import type { WebSocket } from "ws";
 import type { RelayConfig } from "./config.ts";
 import type { FairScheduler } from "./fair.ts";
 import type { DisconnectReason, Metrics } from "./metrics.ts";
+import type { HostThrottle } from "./throttle.ts";
 import type { UsageMeter } from "./usage.ts";
 
 const OPEN = 1;
@@ -40,6 +41,7 @@ export class BufferBudget {
 export interface SpliceDeps {
   readonly config: RelayConfig;
   readonly scheduler: FairScheduler;
+  readonly throttle: HostThrottle;
   readonly budget: BufferBudget;
   readonly usage: UsageMeter;
   readonly metrics: Metrics;
@@ -97,13 +99,16 @@ class Pipe {
     deps.budget.add(size);
     deps.usage.add(this.splice.hostId, size);
     deps.metrics.recordRelayed(size);
-    deps.scheduler.submit({
-      hostId: this.splice.hostId,
-      sessionKey: this.splice.id,
-      size,
-      weight: deps.hostWeight(this.splice.hostId),
-      run: () => this.#send(data, isBinary, size),
-    });
+    // A host with a ceiling (degraded mode) waits in the throttle; any other host goes straight on.
+    deps.throttle.submit(this.splice.hostId, this.splice.id, size, () =>
+      deps.scheduler.submit({
+        hostId: this.splice.hostId,
+        sessionKey: this.splice.id,
+        size,
+        weight: deps.hostWeight(this.splice.hostId),
+        run: () => this.#send(data, isBinary, size),
+      }),
+    );
     this.evaluate();
   }
 
@@ -248,6 +253,7 @@ export class Splice {
     this.#toHost.dispose();
     this.#toClient.dispose();
     this.deps.scheduler.removeSession(this.id);
+    this.deps.throttle.removeSession(this.id);
     const safeText = truncateReason(text);
     for (const socket of [this.client, this.host]) {
       if (socket === drop) {

@@ -25,6 +25,7 @@ import {
   type DeviceAlg,
   type Grant,
 } from "./crypto.ts";
+import { createAlertNotifier } from "./alerts.ts";
 import { FairScheduler } from "./fair.ts";
 import { ExpiringSet, PreAuthLimiter, SlidingWindow, ipKey } from "./limits.ts";
 import { Metrics, type DisconnectReason } from "./metrics.ts";
@@ -36,6 +37,8 @@ import {
 } from "./pow.ts";
 import { BufferBudget, Splice, type EarlyMessage } from "./splice.ts";
 import { RelayStore, SCHEMA_HASH } from "./store.ts";
+import { HostThrottle } from "./throttle.ts";
+import { TrafficGuard, type HostPolicy } from "./traffic.ts";
 import { UsageMeter } from "./usage.ts";
 
 const DAY_MS = 86_400_000;
@@ -87,6 +90,8 @@ export interface RelayOptions {
   readonly config: RelayConfig;
   readonly logger?: Logger;
   readonly now?: () => number;
+  /** For the alarm webhook. Tests pass their own. */
+  readonly fetch?: typeof fetch;
 }
 
 export interface Relay {
@@ -228,7 +233,9 @@ class RelayServer implements Relay {
   readonly #powUsed: ExpiringSet;
   readonly #powSecret: Buffer;
   readonly #blocked: ReadonlySet<string>;
-  readonly #weights = new Map<string, { weight: number; until: number }>();
+  readonly #policies = new Map<string, HostPolicy & { baseWeight: number; until: number }>();
+  readonly #traffic: TrafficGuard;
+  readonly #throttle: HostThrottle;
   readonly #usage: UsageMeter;
   readonly #scheduler: FairScheduler;
   readonly #budget: BufferBudget;
@@ -258,6 +265,30 @@ class RelayServer implements Relay {
         return () => clearTimeout(timer);
       },
     });
+    this.#traffic = new TrafficGuard({
+      totalBytes: () => this.#usage.totalBytes(),
+      now,
+      budgetBytes: config.egressBudgetBytes,
+      warnFraction: config.egressWarnFraction,
+      degradedFraction: config.egressDegradedFraction,
+      degradedHostBytesPerSec: config.degradedHostBytesPerSec,
+      pressureWeightFactor: config.pressureWeightFactor,
+      onAlert: createAlertNotifier({
+        logger: this.#logger,
+        webhookUrl: config.alertWebhookUrl,
+        fetch: options.fetch ?? fetch,
+      }),
+      onLevelChange: () => this.#policies.clear(),
+    });
+    this.#throttle = new HostThrottle({
+      capFor: (hostId) => this.#policy(hostId).capBytesPerSec,
+      now: () => performance.now(),
+      schedule: (callback, delayMs) => {
+        const timer = setTimeout(callback, delayMs);
+        timer.unref();
+        return () => clearTimeout(timer);
+      },
+    });
     this.metrics = new Metrics(
       {
         sessions: () => this.#sessions.size,
@@ -265,6 +296,7 @@ class RelayServer implements Relay {
         controls: () => this.#controls.size,
         sockets: () => this.#webSockets.size,
         bufferedBytes: () => this.#budget.used,
+        traffic: () => this.#traffic.status(),
       },
       now,
     );
@@ -326,7 +358,9 @@ class RelayServer implements Relay {
     this.#every(30_000, () => this.#usage.flush());
     this.#every(HOUR_MS, () => this.#purge());
     this.#every(1_000, () => this.metrics.sample());
+    this.#every(config.trafficCheckMs, () => this.#traffic.evaluate());
     this.#purge();
+    this.#traffic.evaluate();
     const address = this.#http.address();
     this.#logger.info("listening", {
       port: typeof address === "object" && address ? address.port : 0,
@@ -339,6 +373,7 @@ class RelayServer implements Relay {
     this.#closing = true;
     for (const timer of this.#timers) clearInterval(timer);
     this.#scheduler.close();
+    this.#throttle.close();
     for (const session of this.#sessions.values()) {
       this.#endSession(session, "shutdown", 1001, "shutdown");
     }
@@ -399,6 +434,7 @@ class RelayServer implements Relay {
     this.#recentRegistrations.sweep();
     this.#statusNonces.sweep();
     this.#powUsed.sweep();
+    this.#throttle.sweep();
     const now = this.#now();
     for (const [hostId, state] of this.#pairing) {
       state.attempts = state.attempts.filter((at) => at > now - HOUR_MS);
@@ -406,8 +442,8 @@ class RelayServer implements Relay {
         this.#pairing.delete(hostId);
       }
     }
-    for (const [hostId, entry] of this.#weights)
-      if (entry.until <= now) this.#weights.delete(hostId);
+    for (const [hostId, entry] of this.#policies)
+      if (entry.until <= now) this.#policies.delete(hostId);
   }
 
   #purge(): void {
@@ -444,19 +480,30 @@ class RelayServer implements Relay {
     ws.once("close", () => this.#liveness.delete(ws));
   }
 
-  #hostWeight(hostId: string): number {
+  /**
+   * How the relay treats a host right now: its weight (age and monthly quota, then squeezed
+   * further when the relay as a whole is short of egress) and its ceiling in degraded mode.
+   * Kept for 30 seconds, and dropped whenever the traffic level changes.
+   */
+  #policy(hostId: string): HostPolicy & { baseWeight: number } {
     const now = this.#now();
-    const cached = this.#weights.get(hostId);
-    if (cached && cached.until > now) return cached.weight;
+    const cached = this.#policies.get(hostId);
+    if (cached && cached.until > now) return cached;
     const config = this.#config;
     const host = this.store.getHost(hostId);
-    let weight = 1;
+    let baseWeight = 1;
     if (host && Math.floor(now / DAY_MS) - host.registeredDay < config.newHostAgeDays) {
-      weight = config.newHostWeight;
+      baseWeight = config.newHostWeight;
     }
-    if (this.#usage.monthBytes(hostId) > config.monthlyQuotaBytes) weight *= config.overQuotaWeight;
-    this.#weights.set(hostId, { weight, until: now + 30_000 });
-    return weight;
+    const overQuota = this.#usage.monthBytes(hostId) > config.monthlyQuotaBytes;
+    if (overQuota) baseWeight *= config.overQuotaWeight;
+    const policy = {
+      ...this.#traffic.policyFor(baseWeight, overQuota),
+      baseWeight,
+      until: now + 30_000,
+    };
+    this.#policies.set(hostId, policy);
+    return policy;
   }
 
   #onRequest(req: NodeHttp.IncomingMessage, res: NodeHttp.ServerResponse): void {
@@ -719,12 +766,18 @@ class RelayServer implements Relay {
       200,
       JSON.stringify({
         online: this.#controls.has(hostId),
+        state: this.#hostState(hostId),
         month: {
           bytes: this.#usage.monthBytes(hostId),
           limit: this.#config.monthlyQuotaBytes,
         },
       }),
     );
+  }
+
+  /** What a device may tell its user about why the relay is slow for them, if it is. */
+  #hostState(hostId: string): "ok" | "squeezed" {
+    return this.#policy(hostId).squeezed ? "squeezed" : "ok";
   }
 
   /**
@@ -1124,6 +1177,11 @@ class RelayServer implements Relay {
       this.metrics.rejections += 1;
       return this.#closeEarly(ws, CLOSE.limit, "limit", "limit");
     }
+    // Degraded mode (spec section 9): the lowest-priority hosts wait until the month turns.
+    if (!this.#traffic.admitsNewSession(this.#policy(hostId).baseWeight)) {
+      this.metrics.rejections += 1;
+      return this.#closeEarly(ws, CLOSE.limit, "degraded", "degraded");
+    }
 
     const token = NodeCrypto.randomBytes(16);
     const session: Session = {
@@ -1215,11 +1273,12 @@ class RelayServer implements Relay {
       {
         config: this.#config,
         scheduler: this.#scheduler,
+        throttle: this.#throttle,
         budget: this.#budget,
         usage: this.#usage,
         metrics: this.metrics,
         events: this.events,
-        hostWeight: (hostId) => this.#hostWeight(hostId),
+        hostWeight: (hostId) => this.#policy(hostId).weight,
       },
       session.id,
       session.hostId,

@@ -57,6 +57,26 @@ export interface RelayConfig {
   readonly newHostWeight: number;
   readonly overQuotaWeight: number;
 
+  /** Monthly egress the free tier allows (spec section 9). Relayed bytes are counted against it. */
+  readonly egressBudgetBytes: number;
+  /** Fraction of the budget that raises the first alarm and squeezes low-priority hosts. */
+  readonly egressWarnFraction: number;
+  /** Fraction of the budget that starts degraded operation. */
+  readonly egressDegradedFraction: number;
+  /** Per-host ceiling for a host over its monthly quota while the relay is degraded. */
+  readonly degradedHostBytesPerSec: number;
+  /** Multiplier on the weight of hosts that already have a reduced weight, from the first alarm on. */
+  readonly pressureWeightFactor: number;
+  readonly trafficCheckMs: number;
+  /** How often the blocklist in the database is re-read, so `cli block` reaches a running relay. */
+  readonly blockedPollMs: number;
+  /** Optional. Receives a subject and numbers when the egress alarms fire. Never ids or addresses. */
+  readonly alertWebhookUrl: string | null;
+  /** Optional. A light request to the relay's own public URL, for the idle-reclaim risk. */
+  readonly selfPingUrl: string | null;
+  /** 0 turns the self-ping off. */
+  readonly selfPingIntervalMs: number;
+
   readonly hostIdleRetentionDays: number;
   readonly grantRetentionAfterExpiryDays: number;
   readonly revocationRetentionDays: number;
@@ -120,6 +140,17 @@ export const DEFAULT_CONFIG: RelayConfig = {
   newHostWeight: 0.5,
   overQuotaWeight: 0.25,
 
+  egressBudgetBytes: 10 * 1_000_000_000_000,
+  egressWarnFraction: 0.7,
+  egressDegradedFraction: 0.9,
+  degradedHostBytesPerSec: 1_000_000 / 8,
+  pressureWeightFactor: 0.5,
+  trafficCheckMs: 5_000,
+  blockedPollMs: 5_000,
+  alertWebhookUrl: null,
+  selfPingUrl: null,
+  selfPingIntervalMs: 0,
+
   hostIdleRetentionDays: 365,
   grantRetentionAfterExpiryDays: 30,
   revocationRetentionDays: 30,
@@ -162,6 +193,12 @@ const NUMERIC_ENV: ReadonlyArray<readonly [NumericKey, string]> = [
   ["newHostAgeDays", "NEW_HOST_AGE_DAYS"],
   ["newHostWeight", "NEW_HOST_WEIGHT"],
   ["overQuotaWeight", "OVER_QUOTA_WEIGHT"],
+  ["egressBudgetBytes", "EGRESS_BUDGET_BYTES"],
+  ["egressWarnFraction", "EGRESS_WARN_FRACTION"],
+  ["egressDegradedFraction", "EGRESS_DEGRADED_FRACTION"],
+  ["pressureWeightFactor", "PRESSURE_WEIGHT_FACTOR"],
+  ["trafficCheckMs", "TRAFFIC_CHECK_MS"],
+  ["blockedPollMs", "BLOCKED_POLL_MS"],
 ];
 
 export type RelayEnv = Readonly<Record<string, string | undefined>>;
@@ -184,6 +221,26 @@ export function loadConfig(env: RelayEnv): RelayConfig {
     if (!Number.isFinite(value) || value <= 0) throw new Error("GLOBAL_BANDWIDTH_MBPS must be > 0");
     overrides.globalBandwidthBytesPerSec = (value * 1_000_000) / 8;
   }
+  const degradedMbps = env.DEGRADED_HOST_MBPS;
+  if (degradedMbps !== undefined && degradedMbps !== "") {
+    const value = Number(degradedMbps);
+    if (!Number.isFinite(value) || value <= 0) throw new Error("DEGRADED_HOST_MBPS must be > 0");
+    overrides.degradedHostBytesPerSec = (value * 1_000_000) / 8;
+  }
+  const pingSeconds = env.K3_SELF_PING_INTERVAL_SEC;
+  if (pingSeconds !== undefined && pingSeconds !== "") {
+    const value = Number(pingSeconds);
+    if (!Number.isFinite(value) || value < 0) {
+      throw new Error("K3_SELF_PING_INTERVAL_SEC must be a number >= 0");
+    }
+    overrides.selfPingIntervalMs = value * 1000;
+  }
+  if (env.K3_ALERT_WEBHOOK_URL) {
+    overrides.alertWebhookUrl = checkedUrl("K3_ALERT_WEBHOOK_URL", env.K3_ALERT_WEBHOOK_URL);
+  }
+  if (env.K3_SELF_PING_URL) {
+    overrides.selfPingUrl = checkedUrl("K3_SELF_PING_URL", env.K3_SELF_PING_URL);
+  }
   if (env.HOST) overrides.host = env.HOST;
   if (env.DB_PATH) overrides.dbPath = env.DB_PATH;
   if (env.POW_SECRET) overrides.powSecret = env.POW_SECRET;
@@ -195,7 +252,37 @@ export function loadConfig(env: RelayEnv): RelayConfig {
     .split(",")
     .map((entry) => entry.trim())
     .filter((entry) => entry !== "");
-  return { ...DEFAULT_CONFIG, ...overrides };
+  const config = { ...DEFAULT_CONFIG, ...overrides };
+  if (
+    !(config.egressWarnFraction > 0) ||
+    !(config.egressWarnFraction < config.egressDegradedFraction) ||
+    config.egressDegradedFraction > 1
+  ) {
+    throw new Error(
+      "EGRESS_WARN_FRACTION must be above 0 and below EGRESS_DEGRADED_FRACTION (<= 1)",
+    );
+  }
+  if (!(config.egressBudgetBytes > 0)) throw new Error("EGRESS_BUDGET_BYTES must be > 0");
+  return config;
+}
+
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+/** https only, so an alert is never sent in the clear. Plain http is for a loopback receiver. */
+function checkedUrl(name: string, raw: string): string {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error(`${name} must be a URL`);
+  }
+  if (
+    url.protocol !== "https:" &&
+    !(url.protocol === "http:" && LOOPBACK_HOSTS.has(url.hostname))
+  ) {
+    throw new Error(`${name} must be an https:// URL`);
+  }
+  return url.toString();
 }
 
 /** The limits published at `/.well-known/k3-relay`. Nothing secret or per-operator. */
@@ -217,6 +304,8 @@ export function publicLimits(config: RelayConfig) {
     bufferBudgetBytes: config.bufferBudgetBytes,
     globalBandwidthBytesPerSec: config.globalBandwidthBytesPerSec,
     monthlyQuotaBytes: config.monthlyQuotaBytes,
+    egressBudgetBytes: config.egressBudgetBytes,
+    degradedHostBytesPerSec: config.degradedHostBytesPerSec,
     powBaseDifficulty: config.powBaseDifficulty,
     requireInvite: config.requireInvite,
   };

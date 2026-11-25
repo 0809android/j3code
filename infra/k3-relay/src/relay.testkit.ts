@@ -15,7 +15,7 @@ import {
   type Grant,
 } from "./crypto.ts";
 import { registrationSigningInput, solveChallenge, type PowChallenge } from "./pow.ts";
-import { createRelay, type Logger, type Relay } from "./server.ts";
+import { createRelay, type Logger, type Relay, type RelayOptions } from "./server.ts";
 
 export const EPOCH = 1_800_000_000_000;
 
@@ -185,12 +185,16 @@ export const TEST_CONFIG: RelayConfig = {
   sessionSetupMs: 2_000,
   backpressureCloseMs: 2_000,
   globalBandwidthBytesPerSec: 1_000_000_000,
+  // Timers that tests do not need run once an hour; tests that do need them set their own.
+  trafficCheckMs: 3_600_000,
+  blockedPollMs: 3_600_000,
 };
 
 /** Starts a relay on an ephemeral port, runs `work`, and always shuts the relay down. */
 export async function withRelay<T>(
   overrides: Partial<RelayConfig>,
   work: (relay: TestRelay) => Promise<T>,
+  extra: Pick<RelayOptions, "fetch"> = {},
 ): Promise<T> {
   const clock = { now: EPOCH };
   const logs: string[] = [];
@@ -199,7 +203,7 @@ export async function withRelay<T>(
     error: (event, fields) => logs.push(JSON.stringify({ event, ...fields })),
   };
   const config = { ...TEST_CONFIG, ...overrides };
-  const relay = createRelay({ config, logger, now: () => clock.now });
+  const relay = createRelay({ config, logger, now: () => clock.now, ...extra });
   const port = await relay.listen();
   const testRelay: TestRelay = {
     relay,

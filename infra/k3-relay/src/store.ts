@@ -226,6 +226,14 @@ export class RelayStore {
     return row ? Number(row.bytes) : 0;
   }
 
+  /** Everything the relay carried in a month, over all hosts. Survives a restart. */
+  sumUsage(month: string): number {
+    const row = this.#stmt("SELECT COALESCE(SUM(bytes), 0) AS n FROM usage WHERE month = ?").get(
+      month,
+    );
+    return Number(row?.n ?? 0);
+  }
+
   setUsage(hostId: string, month: string, bytes: number): void {
     this.#stmt(
       `INSERT INTO usage (host_id, month, bytes) VALUES (?, ?, ?)
