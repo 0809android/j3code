@@ -600,6 +600,20 @@
   "91768dcb5c48322b": "Kontrollera på {host} att reläet är påslaget under Inställningar > Relä.",
   "6588afedb2eff653": "Kontakta reläoperatören eller sätt upp ett eget relä.",
   "850398508322b70c": "En VPN, brandvägg eller annonsblockerare på enheten kan blockera reläet.",
+  "bbb13a8a8a63f2e8": "Den här enheten får inte introducera enheter för den här värden. Tillåt det på värden.",
+  "988911f52669a5b6": "Den här värden har redan lagt till tre enheter via introduktion i dag.",
+  "698970c1d9ad91e4": "En annan enhet introducerar just nu en enhet för den här värden.",
+  "bbef857127b6e957": "Någon annan än den nya enheten svarade på QR-koden. Inget godkändes. Börja om.",
+  "9f2e0b1332119314": "Den nya enheten svarade inte. Börja om.",
+  "9d8fd2557ad47016": "Introduktionen har gått ut. Börja om.",
+  "e2d60769e8849364": "Värden godtog inte godkännandet. Börja om.",
+  "9bdfc19a30bdf45d": "Reläet är avstängt på den här värden.",
+  "8794059e56c3dd28": "K3 Code på den här värden är för gammal för introduktioner.",
+  "0acbf3d5d8a6232a": "Den här enheten når inte värden.",
+  "42dcfd6e31266419": "Enheter som får introducera enheter kan bara tas bort på värden.",
+  "6d7dae28834a1f49": "Den enheten finns inte på den här värden.",
+  "e1ffa286fdd203e2": "Den här enheten är inte parkopplad med någon värd via reläet.",
+  "745e0834607691d2": "Introduktionen kunde inte slutföras. Börja om.",
   "9f673abf948b3aa1": "Det här är ingen ihopparningslänk för K3 Relay.",
   "9d9063f78c5d5bb2": "Ihopparningslänken anger ett relä utan HTTPS. Den användes inte.",
   "da4666eb67df84d1": "Ihopparningslänken har ändrats: dess värdnyckel stämmer inte med värden. Den användes inte.",
@@ -8896,10 +8910,96 @@
   "7c35e58f3ebc3a67": "Enheter som parats ihop med QR-kod påverkas inte. De jämför alltid koder.",
   "c810a1f7f7469c82": "Behåll godkännandet på",
   "31e43ec2575c4bab": "Jag förstår, stäng av",
+  "a932359e788c56b7": "Introducera en enhet",
+  "9dd136f2d9d04042": "Lägg till en ny enhet på alla dina relävärdar på en gång",
+  "83b74e9c8365574c": "Den nya enheten skannar en QR-kod från den här, och du jämför en kod på båda skärmarna. Varje värd måste först tillåta den här enheten att introducera, i sina reläinställningar.",
+  "483274b4c4700961": "Introduktionskod. Skanna den med den nya enheten",
+  "75e509bf75dec0df": "Introducera en enhet",
+  "6a33b3b66c6e7b3a": "Börja om",
+  "be02c4685aafcda9": "Frågar dina värdar…",
+  "b1421d847a072b72": "Godkänner på dina värdar…",
+  "4889af677c2869fb": "Skanna med den nya enheten",
+  "38990c49af1ff6e2": [
+    "För ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    ". Giltig till ",
+    {
+      "i": 2,
+      "k": "_gt_value_2",
+      "v": "v"
+    },
+    ". Visa den bara personligen."
+  ],
+  "a84f226908748eca": [
+    "Inte med: ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    ". ",
+    {
+      "i": 2,
+      "k": "_gt_value_2",
+      "v": "v"
+    }
+  ],
+  "1245a05e9fef279e": "Väntar på den nya enheten…",
+  "f009d349a516a6ec": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " vill ansluta till ",
+    {
+      "i": 2,
+      "k": "_gt_value_2",
+      "v": "v"
+    }
+  ],
+  "16df08ccf3bc3809": "Godkänn bara om den nya enheten är i dina händer och visar exakt den här koden. En annan kod betyder att någon annan skannade QR-koden: avbryt.",
+  "6b16bdd1b03b1bfb": [
+    "Den nya enheten nådde inte ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    ". Introducera den igen senare för dem."
+  ],
+  "f1e5c1be1ac92361": "Godkänn",
+  "49583245a63e0c7d": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    ": tillagd"
+  ],
+  "0eab0c5bfdfd4afd": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    ": ",
+    {
+      "i": 2,
+      "k": "_gt_value_2",
+      "v": "v"
+    }
+  ],
+  "ddb43a2129a62330": "En introduktion från en av dina enheter, för {count, plural, =1 {en värd} other {{count} värdar}}. Godkänn den på den enheten efter att ha jämfört koderna.",
   "6729d1b990f464b3": "Ansluter till reläet…",
   "1f81bd4fbe1359ed": "Para ihop via reläet",
   "f928d7f8b54708d4": "Använd detta när enheten inte når värden direkt. Allt är end-to-end-krypterat: reläet skickar bara vidare chiffertext som det inte kan läsa.",
   "d52c3d1f6d930f49": "Enheten sparar värdens nyckel, ett reläpass och sin egen nyckel, som aldrig lämnar den. Reläet lagrar inga enhetsnamn, projektnamn eller meddelanden.",
+  "5030ef9e99611be8": "Kontrollera att den introducerande enheten visar exakt den här koden och godkänn där. Om koderna skiljer sig, avbryt där: någon annan kan ha skannat QR-koden.",
   "840e06ffdd3fa9cf": "Ihopparningslänk",
   "f5c4f89cfb236bb7": [
     "Relä: ",
@@ -8916,6 +9016,7 @@
   ],
   "0bc57334ac7b4589": "Öppna Inställningar › Relä på värden och välj Lägg till enhet för att få en länk eller QR-kod.",
   "e4b228abbc8849ee": "Enhetsnamn",
+  "e4162ae7b276fbd9": "Låt {name} introducera enheter",
   "eddb1a528e4179aa": "Nå den här datorn via reläet",
   "f1520729f15632f1": "Ihopparade enheter ansluter från vilket nätverk som helst, end-to-end-krypterat. Reläet skickar bara vidare chiffertext som det inte kan läsa.",
   "f6b0678a20493b58": "Online",
@@ -8925,6 +9026,9 @@
   "7df48ed9aecdc54b": "Av",
   "64ce22f54953b0c6": "Slå på eller av reläet",
   "09b4396773ea2312": "Avstängt av din organisation",
+  "e28e72a08ef671f4": "Aviseringar via reläet",
+  "43d21ea5d95279c9": "Parkopplade telefoner som slår på reläaviseringar får veta om godkännanden, begäranden om svar och avslutade eller misslyckade körningar. Varje avisering är krypterad hela vägen till sin enhet; reläet, Apple och Google kan inte läsa den, och den innehåller aldrig trådrubriker eller filinnehåll.",
+  "ea59b6afbc856df4": "Slå på eller av reläaviseringar",
   "ae6cd09b6d85ee45": "Nätverksåtkomst är av",
   "edf237fde1015136": "Enheter som parats ihop via reläet når fortfarande den här datorn. Återkalla dem nedan för att stoppa det.",
   "4402486cbce7d0b0": "Reläet rapporterade ett problem",
@@ -8941,11 +9045,23 @@
   "f7f8f978ca8711fa": "Relä",
   "921ab85f6968a026": "Det gick inte att läsa in reläinställningarna",
   "748e550691b0ad76": "Det gick inte att ändra reläet",
+  "28ec637365a62040": "Det gick inte att ändra reläaviseringarna",
   "14d6c8115655a370": "Det gick inte att spara reläadressen",
   "34ec09960b8e2127": "Det gick inte att skapa en ihopparningskod",
   "c6c3db71537dfa3f": "Det gick inte att avbryta ihopparningen",
   "48752c065f029b43": "Det gick inte att avvisa enheten",
   "96d3f1b19d18bebc": "Det gick inte att byta namn på enheten",
+  "8089fc4f6545a095": "Det gick inte att ändra vad enheten får göra",
+  "3503b42732fde55c": "Tillagd via introduktion från en annan enhet",
+  "f13cb0380ed59ba4": [
+    "Tillagd via introduktion från ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    }
+  ],
+  "edd5ea9481ebd306": "Aviseringar på ·",
   "95dfb93411a003bf": [
     "Återkallad ",
     {
@@ -8976,6 +9092,7 @@
       "v": "v"
     }
   ],
+  "42bd3604cf9859ad": "Får introducera",
   "9b20df3e21a3d401": "Byt namn",
   "4b64b31164d99b2a": [
     {
@@ -8988,8 +9105,6 @@
   "99f0d8b46be2e12b": "Den kom medan Lägg till enhet var öppet, så ett tryck godkänner den. Godkänn bara om den nya enheten finns i din hand.",
   "84f968865049f697": "Godkänn bara om den nya enheten finns i din hand och visar exakt den här koden. En annan kod betyder att någon annan parar ihop: avvisa.",
   "b8cdfff5c128f754": "Avvisa",
-  "f1e5c1be1ac92361": "Godkänn",
-  "4889af677c2869fb": "Skanna med den nya enheten",
   "e484914f933c8a8d": [
     "Giltig till ",
     {
@@ -9003,6 +9118,29 @@
   "a137d38e89d7983b": "Visa som länk i stället",
   "221a355e3ab11642": "Para ihop en telefon eller en annan dator. Du jämför en kod på båda skärmarna.",
   "da544f4e9f22555d": "Lägg till enhet",
+  "fdea21d436d373e1": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " introducerar en ny enhet"
+  ],
+  "f608245c3f0a0eac": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " introducerar ",
+    {
+      "i": 2,
+      "k": "_gt_value_2",
+      "v": "v"
+    }
+  ],
+  "1b4b19d8d162f615": "Enheter som får introducera lägger till nya enheter efter att en kod jämförts på båda skärmarna. Återkalla enheten här om du inte väntade dig detta.",
+  "3cb144313299fae3": "En enhet som får introducera lägger till dina andra enheter med en kodjämförelse och kan återkalla vanliga enheter om en tappas bort. Enheter den lägger till får inte introducera.",
   "13ef526271b0f5d4": "Rensa alla villkor",
   "d1938a629f039515": "Ta bort villkor",
   "84a605b241ce65b7": "Ta bort gruppen och dess villkor",
@@ -13031,10 +13169,5 @@
   "27d76249d09eb69f": "Granskningsguiden är klar",
   "faa3bb26abb39c93": "Granskningsguiden misslyckades",
   "b7df38b7d8792d78": "Öppna guiden",
-  "9e91e9a77b664e4e": "Kunde inte starta en granskningsguide",
-  "e28e72a08ef671f4": "Aviseringar via reläet",
-  "43d21ea5d95279c9": "Parkopplade telefoner som slår på reläaviseringar får veta om godkännanden, begäranden om svar och avslutade eller misslyckade körningar. Varje avisering är krypterad hela vägen till sin enhet; reläet, Apple och Google kan inte läsa den, och den innehåller aldrig trådrubriker eller filinnehåll.",
-  "ea59b6afbc856df4": "Slå på eller av reläaviseringar",
-  "28ec637365a62040": "Det gick inte att ändra reläaviseringarna",
-  "edd5ea9481ebd306": "Aviseringar på ·"
+  "9e91e9a77b664e4e": "Kunde inte starta en granskningsguide"
 }

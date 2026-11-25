@@ -2,6 +2,7 @@ import {
   type K3RelayPairingFailureReason,
   type K3RelayPairingProgress,
   k3relayPairingFailureText,
+  previewK3RelayIntroductionLink,
   previewK3RelayOffer,
 } from "@t3tools/client-runtime/k3relay";
 import { thrownErrorMessage } from "@t3tools/client-runtime/errors";
@@ -14,7 +15,7 @@ import { LockKeyholeIcon, RadioTowerIcon } from "lucide-react";
 import { T, useGT, useMessages, Var } from "gt-react";
 import { useRef, useState } from "react";
 
-import { connectK3RelayPairing } from "~/connection/onboarding";
+import { connectK3RelayIntroduction, connectK3RelayPairing } from "~/connection/onboarding";
 import { m } from "~/i18n/messages";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Alert, AlertDescription } from "../ui/alert";
@@ -64,7 +65,20 @@ export function K3RelayPairingView({
   const resolve = useMessages();
   const busy =
     phase.kind === "connecting" || phase.kind === "awaiting-approval" || phase.kind === "redeeming";
-  const preview = link.trim() === "" ? null : previewK3RelayOffer(link, now);
+  const introductionPreview =
+    link.trim() === "" ? null : previewK3RelayIntroductionLink(link.trim(), now);
+  const introduction =
+    typeof introductionPreview === "object" && introductionPreview?.kind === "introduction"
+      ? introductionPreview
+      : null;
+  const preview =
+    link.trim() === ""
+      ? null
+      : typeof introductionPreview === "string"
+        ? introductionPreview
+        : introduction === null
+          ? previewK3RelayOffer(link, now)
+          : null;
   const offer = typeof preview === "object" ? preview : null;
   const linkProblem =
     typeof preview === "string" ? k3relayPairingFailureText(preview, resolve) : null;
@@ -101,10 +115,17 @@ export function K3RelayPairingView({
             {phase.confirmationCode}
           </p>
           <p className="text-xs leading-relaxed text-muted-foreground">
-            <T>
-              Check that the host shows exactly this code, then approve there. If the codes differ,
-              reject on the host: someone else may be pairing.
-            </T>
+            {introduction !== null ? (
+              <T>
+                Check that the introducing device shows exactly this code, then approve there. If
+                the codes differ, cancel there: someone else may have scanned the QR code.
+              </T>
+            ) : (
+              <T>
+                Check that the host shows exactly this code, then approve there. If the codes
+                differ, reject on the host: someone else may be pairing.
+              </T>
+            )}
           </p>
           <p
             className="flex items-center justify-center gap-2 text-xs text-muted-foreground"
@@ -129,7 +150,14 @@ export function K3RelayPairingView({
               autoComplete="off"
             />
           </label>
-          {offer !== null ? (
+          {introduction !== null ? (
+            <p className="text-2xs text-muted-foreground" data-testid="k3relay-introduction-link">
+              {gt(
+                "An introduction from one of your devices, for {count, plural, =1 {one host} other {{count} hosts}}. Approve it on that device after comparing codes.",
+                { count: introduction.hosts },
+              )}
+            </p>
+          ) : offer !== null ? (
             <p className="flex items-start gap-2 text-2xs text-muted-foreground">
               <RadioTowerIcon aria-hidden className="mt-px size-3 shrink-0" />
               <span>
@@ -179,7 +207,7 @@ export function K3RelayPairingView({
         <Button
           variant="outline"
           className="w-full"
-          disabled={busy || offer === null || deviceName.trim() === ""}
+          disabled={busy || (offer === null && introduction === null) || deviceName.trim() === ""}
           onClick={onPair}
         >
           {phase.kind === "connecting"
@@ -211,6 +239,7 @@ export function K3RelayPairingPanel({
 }) {
   const resolve = useMessages();
   const pair = useAtomCommand(connectK3RelayPairing, { reportFailure: false });
+  const introduce = useAtomCommand(connectK3RelayIntroduction, { reportFailure: false });
   const [link, setLink] = useState(initialLink);
   const [deviceName, setDeviceName] = useState(defaultDeviceName);
   const [phase, setPhase] = useState<K3RelayPairingPhase>({ kind: "idle" });
@@ -219,9 +248,60 @@ export function K3RelayPairingPanel({
   // A result for an attempt the user moved on from (a new link) must not land.
   const attemptRef = useRef(0);
 
+  const joinIntroduction = async (attempt: number) => {
+    const result = await introduce({
+      link: link.trim(),
+      deviceName: deviceName.trim(),
+      onProgress: (progress) => {
+        if (attempt !== attemptRef.current) return;
+        setPhase(
+          progress.phase === "awaiting-approval"
+            ? { kind: "awaiting-approval", confirmationCode: progress.confirmationCode }
+            : progress.phase === "redeeming"
+              ? { kind: "redeeming" }
+              : { kind: "connecting" },
+        );
+      },
+    });
+    if (attempt !== attemptRef.current) return;
+    if (result._tag === "Success") {
+      const joined = result.value.find((host) => host.ok);
+      const refused = result.value.find((host) => !host.ok);
+      if (joined?.ok) {
+        setPhase({ kind: "idle" });
+        onPaired(joined.environmentId);
+      } else {
+        setPhase({
+          kind: "failed",
+          message: k3relayPairingFailureText(
+            refused !== undefined && !refused.ok ? refused.reason : "rejected",
+            resolve,
+          ),
+        });
+      }
+      return;
+    }
+    if (isAtomCommandInterrupted(result)) {
+      setPhase({ kind: "idle" });
+      return;
+    }
+    const error = squashAtomCommandFailure(result);
+    setPhase({
+      kind: "failed",
+      message: k3relayPairingFailureText(
+        isK3RelayPairingError(error) ? error.reason : "invalid-reply",
+        resolve,
+      ),
+    });
+  };
+
   const start = async () => {
     const attempt = ++attemptRef.current;
     setPhase({ kind: "connecting" });
+    const introductionLink = previewK3RelayIntroductionLink(link.trim(), Date.now());
+    if (typeof introductionLink === "object" && introductionLink.kind === "introduction") {
+      return joinIntroduction(attempt);
+    }
     const result = await pair({
       link: link.trim(),
       deviceName: deviceName.trim(),

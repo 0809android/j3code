@@ -23,6 +23,7 @@ const baseState: K3RelayHostState = {
   requireApproval: true,
   notifications: true,
   pairing: { phase: "idle" },
+  introduction: { phase: "idle" },
   devices: [],
 };
 
@@ -37,6 +38,7 @@ const makeActions = () =>
     reject: vi.fn(),
     revoke: vi.fn(),
     rename: vi.fn(),
+    setInvite: vi.fn(),
   }) satisfies K3RelaySettingsActions;
 
 describe("K3RelaySettingsView", () => {
@@ -154,6 +156,9 @@ describe("K3RelaySettingsView", () => {
               revokedAt: NOW,
               connectedSessions: 0,
               notifications: false,
+              permissions: [],
+              approvedVia: "qr",
+              introducedBy: null,
             },
             {
               deviceId: "b".repeat(32),
@@ -165,6 +170,9 @@ describe("K3RelaySettingsView", () => {
               revokedAt: null,
               connectedSessions: 0,
               notifications: false,
+              permissions: [],
+              approvedVia: "qr",
+              introducedBy: null,
             },
           ],
         }}
@@ -239,6 +247,9 @@ describe("K3RelaySettingsView", () => {
               revokedAt: null,
               connectedSessions: 0,
               notifications: true,
+              permissions: [],
+              approvedVia: null,
+              introducedBy: null,
             },
           ],
         }}
@@ -248,5 +259,64 @@ describe("K3RelaySettingsView", () => {
     await expect.element(screen.getByText(/end-to-end encrypted to its device/)).toBeVisible();
     await screen.getByRole("switch", { name: "Turn relay notifications on or off" }).click();
     expect(actions.setNotifications).toHaveBeenCalledWith(false);
+  });
+
+  it("lets the owner allow introductions per device, and shows who introduced whom", async () => {
+    const actions = makeActions();
+    const device = {
+      alg: "ed25519",
+      createdAt: NOW,
+      lastSeenAt: null,
+      status: "active",
+      revokedAt: null,
+      connectedSessions: 0,
+      notifications: false,
+    } as const;
+    await using screen = await render(
+      <K3RelaySettingsView
+        canWrite
+        busy={false}
+        offer={null}
+        networkAccessEnabled
+        actions={actions}
+        state={{
+          ...baseState,
+          introduction: {
+            phase: "claimed",
+            introducerDeviceId: "e".repeat(32),
+            expiresAt: NOW + 300_000,
+            deviceName: "New tablet",
+          },
+          devices: [
+            {
+              ...device,
+              deviceId: "e".repeat(32),
+              name: "Phone",
+              permissions: ["devices:invite"],
+              approvedVia: "qr",
+              introducedBy: null,
+            },
+            {
+              ...device,
+              deviceId: "f".repeat(32),
+              name: "Tablet",
+              permissions: [],
+              approvedVia: "introduction",
+              introducedBy: "e".repeat(32),
+            },
+          ],
+        }}
+      />,
+    );
+    await expect
+      .element(screen.getByTestId("k3relay-introduction"))
+      .toHaveTextContent("Phone is introducing New tablet");
+    await expect
+      .element(screen.getByTestId("k3relay-device-introduced"))
+      .toHaveTextContent("Added by introduction from Phone");
+    // Only devices that were not introduced can be allowed to introduce.
+    expect(screen.getByRole("switch", { name: "Let Tablet introduce devices" }).query()).toBeNull();
+    await screen.getByRole("switch", { name: "Let Phone introduce devices" }).click();
+    expect(actions.setInvite).toHaveBeenCalledWith("e".repeat(32), false);
   });
 });

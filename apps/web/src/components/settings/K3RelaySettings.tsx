@@ -84,6 +84,7 @@ export interface K3RelaySettingsActions {
   readonly reject: () => void;
   readonly revoke: (deviceId: string) => void;
   readonly rename: (deviceId: string, name: string) => void;
+  readonly setInvite: (deviceId: string, invite: boolean) => void;
 }
 
 /** Stateless, so each state (pending approval, revoked, off) renders directly in tests. */
@@ -111,6 +112,9 @@ export function K3RelaySettingsView({
   const activeDevices = state.devices.filter((device) => device.status === "active");
   const revokedDevices = state.devices.filter((device) => device.status === "revoked");
   const pending = state.pairing.phase === "awaiting-approval" ? state.pairing : null;
+  const nameOf = (deviceId: string | null) =>
+    state.devices.find((device) => device.deviceId === deviceId)?.name ?? null;
+  const introduction = state.introduction.phase === "idle" ? null : state.introduction;
   const openOffer =
     state.pairing.phase === "open" && offer !== null && offer.expiresAt === state.pairing.expiresAt
       ? offer
@@ -143,6 +147,17 @@ export function K3RelaySettingsView({
           ) : (
             <p className="truncate text-sm font-medium text-foreground">{device.name}</p>
           )}
+          {device.approvedVia === "introduction" ? (
+            <p className="text-xs text-muted-foreground" data-testid="k3relay-device-introduced">
+              {nameOf(device.introducedBy) === null ? (
+                <T>Added by introduction from another device</T>
+              ) : (
+                <T>
+                  Added by introduction from <Var>{nameOf(device.introducedBy)}</Var>
+                </T>
+              )}
+            </p>
+          ) : null}
           <p className="text-xs text-muted-foreground">
             {device.status === "active" && device.notifications ? (
               <span className="me-1" data-testid="k3relay-device-notifications">
@@ -167,6 +182,17 @@ export function K3RelaySettingsView({
         </div>
         {device.status === "active" && renaming?.deviceId !== device.deviceId ? (
           <div className="flex shrink-0 items-center gap-2">
+            {device.approvedVia === "introduction" ? null : (
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Switch
+                  checked={device.permissions.includes("devices:invite")}
+                  disabled={disabled}
+                  onCheckedChange={(checked) => actions.setInvite(device.deviceId, checked)}
+                  aria-label={gt("Let {name} introduce devices", { name: device.name })}
+                />
+                <T>Can introduce</T>
+              </label>
+            )}
             <Button
               size="xs"
               variant="ghost-muted"
@@ -404,6 +430,37 @@ export function K3RelaySettingsView({
         </div>
       ) : null}
 
+      {introduction !== null ? (
+        <div className={ITEM_ROW_CLASSNAME} data-testid="k3relay-introduction">
+          <p className="text-sm text-foreground">
+            {introduction.deviceName === null ? (
+              <T>
+                <Var>{nameOf(introduction.introducerDeviceId) ?? "?"}</Var> is introducing a new
+                device
+              </T>
+            ) : (
+              <T>
+                <Var>{nameOf(introduction.introducerDeviceId) ?? "?"}</Var> is introducing{" "}
+                <Var>{introduction.deviceName}</Var>
+              </T>
+            )}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            <T>
+              Devices that can introduce add new devices after comparing a code on both screens.
+              Revoke the device here if you did not expect this.
+            </T>
+          </p>
+        </div>
+      ) : null}
+      {activeDevices.length > 0 ? (
+        <p className="px-4 pt-2 text-xs text-muted-foreground">
+          <T>
+            A device that can introduce adds your other devices with one code comparison, and can
+            revoke ordinary devices if one is lost. Devices it adds cannot introduce.
+          </T>
+        </p>
+      ) : null}
       {activeDevices.map(renderDevice)}
       {revokedDevices.map(renderDevice)}
     </SettingsSection>
@@ -461,6 +518,7 @@ export function K3RelaySettings({
     reject: run(gt("Could not reject the device"), host.reject),
     revoke: run(gt("Could not revoke the device"), host.revoke),
     rename: run(gt("Could not rename the device"), host.rename),
+    setInvite: run(gt("Could not change what the device may do"), host.setInvite),
   } satisfies K3RelaySettingsActions;
   return (
     <K3RelaySettingsView

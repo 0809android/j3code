@@ -600,6 +600,20 @@
   "91768dcb5c48322b": "En {host}, comprueba que el relé esté activado en Ajustes > Relé.",
   "6588afedb2eff653": "Contacta con el operador del relé o configura tu propio relé.",
   "850398508322b70c": "Una VPN, un cortafuegos o un bloqueador de anuncios en este dispositivo puede bloquear el relé.",
+  "bbb13a8a8a63f2e8": "Este dispositivo no puede presentar dispositivos a este host. Permítelo en el host.",
+  "988911f52669a5b6": "Este host ya añadió tres dispositivos por presentación hoy.",
+  "698970c1d9ad91e4": "Otro dispositivo está presentando un dispositivo a este host ahora mismo.",
+  "bbef857127b6e957": "Alguien distinto del nuevo dispositivo respondió al código QR. No se aprobó nada. Empieza de nuevo.",
+  "9f2e0b1332119314": "El nuevo dispositivo no respondió. Empieza de nuevo.",
+  "9d8fd2557ad47016": "La presentación caducó. Empieza de nuevo.",
+  "e2d60769e8849364": "El host no aceptó la aprobación. Empieza de nuevo.",
+  "9bdfc19a30bdf45d": "El relay está desactivado en este host.",
+  "8794059e56c3dd28": "El K3 Code de este host es demasiado antiguo para las presentaciones.",
+  "0acbf3d5d8a6232a": "Este dispositivo no puede llegar al host.",
+  "42dcfd6e31266419": "Los dispositivos que pueden presentar dispositivos solo se pueden quitar en el host.",
+  "6d7dae28834a1f49": "Ese dispositivo no está en este host.",
+  "e1ffa286fdd203e2": "Este dispositivo no está emparejado con ningún host a través del relay.",
+  "745e0834607691d2": "No se pudo completar la presentación. Empieza de nuevo.",
   "9f673abf948b3aa1": "Este no es un enlace de emparejamiento de K3 Relay.",
   "9d9063f78c5d5bb2": "El enlace de emparejamiento indica un relé sin HTTPS. No se usó.",
   "da4666eb67df84d1": "El enlace de emparejamiento fue alterado: su clave de host no coincide con su host. No se usó.",
@@ -8888,10 +8902,96 @@
   "7c35e58f3ebc3a67": "Los dispositivos emparejados con un código QR no se ven afectados. Siempre comparan códigos.",
   "c810a1f7f7469c82": "Mantener la aprobación activada",
   "31e43ec2575c4bab": "Lo entiendo, desactivarla",
+  "a932359e788c56b7": "Presentar un dispositivo",
+  "9dd136f2d9d04042": "Añade un dispositivo nuevo a todos tus hosts del relay a la vez",
+  "83b74e9c8365574c": "El nuevo dispositivo escanea un código QR de este y comparas un código en ambas pantallas. Cada host debe permitir antes que este dispositivo presente, en sus ajustes del relay.",
+  "483274b4c4700961": "Código de presentación. Escanéalo con el nuevo dispositivo",
+  "75e509bf75dec0df": "Presentar un dispositivo",
+  "6a33b3b66c6e7b3a": "Empezar de nuevo",
+  "be02c4685aafcda9": "Consultando a tus hosts…",
+  "b1421d847a072b72": "Aprobando en tus hosts…",
+  "4889af677c2869fb": "Escanea con el dispositivo nuevo",
+  "38990c49af1ff6e2": [
+    "Para ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    ". Válido hasta ",
+    {
+      "i": 2,
+      "k": "_gt_value_2",
+      "v": "v"
+    },
+    ". Muéstralo solo en persona."
+  ],
+  "a84f226908748eca": [
+    "No incluido: ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    ". ",
+    {
+      "i": 2,
+      "k": "_gt_value_2",
+      "v": "v"
+    }
+  ],
+  "1245a05e9fef279e": "Esperando al nuevo dispositivo…",
+  "f009d349a516a6ec": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " quiere unirse a ",
+    {
+      "i": 2,
+      "k": "_gt_value_2",
+      "v": "v"
+    }
+  ],
+  "16df08ccf3bc3809": "Aprueba solo si tienes el nuevo dispositivo en tus manos y muestra exactamente este código. Un código distinto significa que otra persona escaneó el código QR: cancela.",
+  "6b16bdd1b03b1bfb": [
+    "El nuevo dispositivo no llegó a ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    ". Preséntalo de nuevo más tarde para esos."
+  ],
+  "f1e5c1be1ac92361": "Aprobar",
+  "49583245a63e0c7d": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    ": añadido"
+  ],
+  "0eab0c5bfdfd4afd": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    ": ",
+    {
+      "i": 2,
+      "k": "_gt_value_2",
+      "v": "v"
+    }
+  ],
+  "ddb43a2129a62330": "Una presentación de uno de tus dispositivos, para {count, plural, =1 {un host} other {{count} hosts}}. Apruébala en ese dispositivo tras comparar los códigos.",
   "6729d1b990f464b3": "Conectando con el relé…",
   "1f81bd4fbe1359ed": "Emparejar a través del relé",
   "f928d7f8b54708d4": "Úsalo cuando este dispositivo no pueda llegar al host directamente. Todo va cifrado de extremo a extremo: el relé solo transmite texto cifrado que no puede leer.",
   "d52c3d1f6d930f49": "Este dispositivo guarda la clave del host, un pase de relé y su propia clave, que nunca sale de él. El relé no guarda nombres de dispositivos, de proyectos ni mensajes.",
+  "5030ef9e99611be8": "Comprueba que el dispositivo que presenta muestra exactamente este código y apruébalo allí. Si los códigos difieren, cancela allí: puede que otra persona haya escaneado el código QR.",
   "840e06ffdd3fa9cf": "Enlace de emparejamiento",
   "f5c4f89cfb236bb7": [
     "Relé: ",
@@ -8908,6 +9008,7 @@
   ],
   "0bc57334ac7b4589": "En el host, abre Ajustes › Relé y elige Añadir dispositivo para obtener un enlace o código QR.",
   "e4b228abbc8849ee": "Nombre del dispositivo",
+  "e4162ae7b276fbd9": "Permitir que {name} presente dispositivos",
   "eddb1a528e4179aa": "Acceder a este equipo a través del relé",
   "f1520729f15632f1": "Los dispositivos que emparejes se conectan desde cualquier red, con cifrado de extremo a extremo. El relé solo transmite texto cifrado que no puede leer.",
   "f6b0678a20493b58": "En línea",
@@ -8917,6 +9018,9 @@
   "7df48ed9aecdc54b": "Desactivado",
   "64ce22f54953b0c6": "Activar o desactivar el relé",
   "09b4396773ea2312": "Desactivado por tu organización",
+  "e28e72a08ef671f4": "Notificaciones a través del relay",
+  "43d21ea5d95279c9": "Los teléfonos vinculados que activan las notificaciones del relay se enteran de aprobaciones, solicitudes de respuesta y ejecuciones terminadas o fallidas. Cada notificación está cifrada de extremo a extremo para su dispositivo; ni el relay, ni Apple, ni Google pueden leerla, y nunca incluye títulos de hilos ni contenido de archivos.",
+  "ea59b6afbc856df4": "Activar o desactivar las notificaciones del relay",
   "ae6cd09b6d85ee45": "El acceso de red está desactivado",
   "edf237fde1015136": "Los dispositivos emparejados por el relé aún pueden acceder a este equipo. Revócalos abajo para impedirlo.",
   "4402486cbce7d0b0": "El relé informó de un problema",
@@ -8933,11 +9037,23 @@
   "f7f8f978ca8711fa": "Relé",
   "921ab85f6968a026": "No se pudieron cargar los ajustes del relé",
   "748e550691b0ad76": "No se pudo cambiar el relé",
+  "28ec637365a62040": "No se pudieron cambiar las notificaciones del relay",
   "14d6c8115655a370": "No se pudo guardar la dirección del relé",
   "34ec09960b8e2127": "No se pudo crear un código de emparejamiento",
   "c6c3db71537dfa3f": "No se pudo cancelar el emparejamiento",
   "48752c065f029b43": "No se pudo rechazar el dispositivo",
   "96d3f1b19d18bebc": "No se pudo cambiar el nombre del dispositivo",
+  "8089fc4f6545a095": "No se pudo cambiar lo que puede hacer el dispositivo",
+  "3503b42732fde55c": "Añadido por presentación desde otro dispositivo",
+  "f13cb0380ed59ba4": [
+    "Añadido por presentación desde ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    }
+  ],
+  "edd5ea9481ebd306": "Notificaciones activadas ·",
   "95dfb93411a003bf": [
     "Revocado el ",
     {
@@ -8968,6 +9084,7 @@
       "v": "v"
     }
   ],
+  "42bd3604cf9859ad": "Puede presentar",
   "9b20df3e21a3d401": "Cambiar nombre",
   "4b64b31164d99b2a": [
     {
@@ -8980,8 +9097,6 @@
   "99f0d8b46be2e12b": "Llegó mientras «Añadir dispositivo» estaba abierto, así que un toque lo aprueba. Apruébalo solo si tienes el dispositivo nuevo en tus manos.",
   "84f968865049f697": "Aprueba solo si tienes el dispositivo nuevo en la mano y muestra exactamente este código. Un código distinto significa que otra persona se está emparejando: recházalo.",
   "b8cdfff5c128f754": "Rechazar",
-  "f1e5c1be1ac92361": "Aprobar",
-  "4889af677c2869fb": "Escanea con el dispositivo nuevo",
   "e484914f933c8a8d": [
     "Válido hasta ",
     {
@@ -8995,6 +9110,29 @@
   "a137d38e89d7983b": "Mostrar como enlace",
   "221a355e3ab11642": "Empareja un teléfono u otro ordenador. Compararás un código en ambas pantallas.",
   "da544f4e9f22555d": "Añadir dispositivo",
+  "fdea21d436d373e1": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " está presentando un dispositivo nuevo"
+  ],
+  "f608245c3f0a0eac": [
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " está presentando ",
+    {
+      "i": 2,
+      "k": "_gt_value_2",
+      "v": "v"
+    }
+  ],
+  "1b4b19d8d162f615": "Los dispositivos que pueden presentar añaden dispositivos nuevos tras comparar un código en ambas pantallas. Revoca el dispositivo aquí si no lo esperabas.",
+  "3cb144313299fae3": "Un dispositivo que puede presentar añade tus otros dispositivos con una sola comparación de código, y puede revocar dispositivos normales si pierdes uno. Los dispositivos que añade no pueden presentar.",
   "13ef526271b0f5d4": "Borrar todas las condiciones",
   "d1938a629f039515": "Quitar condición",
   "84a605b241ce65b7": "Quitar grupo y sus condiciones",
@@ -13019,10 +13157,5 @@
   "27d76249d09eb69f": "Guía de revisión lista",
   "faa3bb26abb39c93": "Falló la guía de revisión",
   "b7df38b7d8792d78": "Abrir guía",
-  "9e91e9a77b664e4e": "No se pudo iniciar una guía de revisión",
-  "e28e72a08ef671f4": "Notificaciones a través del relay",
-  "43d21ea5d95279c9": "Los teléfonos vinculados que activan las notificaciones del relay se enteran de aprobaciones, solicitudes de respuesta y ejecuciones terminadas o fallidas. Cada notificación está cifrada de extremo a extremo para su dispositivo; ni el relay, ni Apple, ni Google pueden leerla, y nunca incluye títulos de hilos ni contenido de archivos.",
-  "ea59b6afbc856df4": "Activar o desactivar las notificaciones del relay",
-  "28ec637365a62040": "No se pudieron cambiar las notificaciones del relay",
-  "edd5ea9481ebd306": "Notificaciones activadas ·"
+  "9e91e9a77b664e4e": "No se pudo iniciar una guía de revisión"
 }

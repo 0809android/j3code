@@ -67,6 +67,8 @@ export interface K3RelayHostActions {
   readonly reject: () => K3RelayHostCall;
   readonly revoke: (deviceId: string) => K3RelayHostCall;
   readonly rename: (deviceId: string, name: string) => K3RelayHostCall;
+  /** Whether the device may introduce others and revoke ordinary devices (spec §18.2). */
+  readonly setInvite: (deviceId: string, invite: boolean) => K3RelayHostCall;
 }
 
 export function useK3RelayHostActions(environmentId: EnvironmentId): K3RelayHostActions {
@@ -78,6 +80,7 @@ export function useK3RelayHostActions(environmentId: EnvironmentId): K3RelayHost
   const rejectPairing = useAtomCommand(k3RelayEnvironment.rejectPairing, options);
   const revokeDevice = useAtomCommand(k3RelayEnvironment.revokeDevice, options);
   const renameDevice = useAtomCommand(k3RelayEnvironment.renameDevice, options);
+  const setDevicePermissions = useAtomCommand(k3RelayEnvironment.setDevicePermissions, options);
   return {
     setEnabled: (enabled) =>
       settle(updateSettings({ environmentId, input: { patch: { relay: { enabled } } } })),
@@ -97,6 +100,8 @@ export function useK3RelayHostActions(environmentId: EnvironmentId): K3RelayHost
     reject: () => settle(rejectPairing({ environmentId, input: {} })),
     revoke: (deviceId) => settle(revokeDevice({ environmentId, input: { deviceId } })),
     rename: (deviceId, name) => settle(renameDevice({ environmentId, input: { deviceId, name } })),
+    setInvite: (deviceId, invite) =>
+      settle(setDevicePermissions({ environmentId, input: { deviceId, invite } })),
   };
 }
 
