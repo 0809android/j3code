@@ -272,6 +272,7 @@ export class RelayStore {
    * and removed again when the check fails.
    */
   snapshotTo(destPath: string): SnapshotInfo {
+    if (NodeFS.existsSync(destPath)) throw new Error("the destination already exists");
     this.#db.prepare("VACUUM INTO ?").run(destPath);
     try {
       NodeFS.chmodSync(destPath, 0o600);

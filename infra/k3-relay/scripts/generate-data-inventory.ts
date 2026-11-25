@@ -82,6 +82,11 @@ const TABLE_NOTES: Readonly<Record<string, TableNote>> = {
     purpose: "ホストごとの、月ごとの中継バイト数（公平配分のための数）。通信の中身は含みません。",
     retention: "2 か月（62 日）。",
   },
+  blocked_hosts: {
+    purpose:
+      "運営が遮断したホストの ID と遮断した時刻。悪質なホストの接続を拒否するためだけに使います。",
+    retention: "運営が解除するまで。",
+  },
 };
 
 const COLUMN_NOTES: Readonly<Record<string, string>> = {
@@ -107,6 +112,8 @@ const COLUMN_NOTES: Readonly<Record<string, string>> = {
   "invites.used_at": "使用された時刻（ミリ秒）。未使用なら空",
   "usage.host_id": "ホストの ID",
   "usage.month": "月（`YYYY-MM`）",
+  "blocked_hosts.host_id": "遮断したホストの ID",
+  "blocked_hosts.blocked_at": "遮断した時刻（ミリ秒）",
   "usage.bytes": "その月に中継した合計バイト数（両方向、1 バイトにつき 1 回）",
 };
 

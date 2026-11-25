@@ -54,7 +54,7 @@ describe("measurements for the move-up decision", () => {
       maxBufferedAmountRecent: 700,
     });
 
-    for (let second = 0; second < 300; second += 1) metrics.sample();
+    for (let second = 0; second < 302; second += 1) metrics.sample();
     expect(metrics.snapshot()).toMatchObject({
       maxBufferedAmount: 700,
       maxBufferedAmountRecent: 0,

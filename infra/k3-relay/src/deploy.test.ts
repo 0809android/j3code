@@ -89,9 +89,9 @@ describe("oci-provision.sh", () => {
 
   it("fills exactly the placeholders the cloud-init template has", () => {
     const template = new Set(
-      [...read("cloud-init.yaml").matchAll(/@@([A-Z_]+)@@/gu)].map((match) => match[1]),
+      [...read("cloud-init.yaml").matchAll(/@@([A-Z0-9_]+)@@/gu)].map((match) => match[1]),
     );
-    const listed = /split\("([A-Z_ ]+)", keys/u.exec(read("oci-provision.sh"))?.[1] ?? "";
+    const listed = /split\("([A-Z0-9_ ]+)", keys/u.exec(read("oci-provision.sh"))?.[1] ?? "";
     expect(new Set(listed.split(" "))).toEqual(template);
   });
 });

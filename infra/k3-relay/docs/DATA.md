@@ -8,7 +8,7 @@
 
 動いているリレーの `/.well-known/k3-relay` が返す `schemaHash` は、次の値と同じになります（同じスキーマで動いていることの目安）。
 
-`c19334243b41ddadbb46a557e256e38029d90f9bc848a3980b175f1001b7d528`
+`ddcc4f87b9bf3aebd81f1f09fc4b033cf13c6367528fd0bee643eea5f4a9f4bb`
 
 ## 保存するもの
 
@@ -78,6 +78,17 @@
 - `host_id`（TEXT、主キー）: ホストの ID
 - `month`（TEXT、主キー）: 月（`YYYY-MM`）
 - `bytes`（INTEGER、必須）: その月に中継した合計バイト数（両方向、1 バイトにつき 1 回）
+
+### `blocked_hosts`
+
+運営が遮断したホストの ID と遮断した時刻。悪質なホストの接続を拒否するためだけに使います。
+
+保持: 運営が解除するまで。
+
+列:
+
+- `host_id`（TEXT、主キー）: 遮断したホストの ID
+- `blocked_at`（INTEGER、必須）: 遮断した時刻（ミリ秒）
 
 ## 保存しないもの
 
