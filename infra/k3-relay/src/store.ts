@@ -4,6 +4,7 @@ import * as NodeFS from "node:fs";
 import * as NodeSqlite from "node:sqlite";
 
 import type { DeviceAlg } from "./crypto.ts";
+import type { PushPlatform } from "./push.ts";
 
 const DAY_MS = 86_400_000;
 
@@ -68,6 +69,14 @@ CREATE TABLE IF NOT EXISTS account_hosts (
   added_day INTEGER NOT NULL,
   PRIMARY KEY (owner_id, host_id)
 ) STRICT;
+CREATE TABLE IF NOT EXISTS push_targets (
+  host_id TEXT NOT NULL,
+  device_id TEXT NOT NULL,
+  platform TEXT NOT NULL,
+  token TEXT NOT NULL,
+  last_used_day INTEGER NOT NULL,
+  PRIMARY KEY (host_id, device_id)
+) STRICT;
 `;
 
 export const SCHEMA_HASH = NodeCrypto.createHash("sha256").update(SCHEMA_SQL).digest("hex");
@@ -89,6 +98,12 @@ export interface GrantRow {
   readonly expiresAt: number;
 }
 
+export interface PushTargetRow {
+  readonly platform: PushPlatform;
+  readonly token: string;
+  readonly lastUsedDay: number;
+}
+
 export interface PurgeResult {
   readonly hosts: number;
   readonly grants: number;
@@ -96,6 +111,7 @@ export interface PurgeResult {
   readonly invites: number;
   readonly usage: number;
   readonly accountHosts: number;
+  readonly pushTargets: number;
 }
 
 type Row = Record<string, NodeSqlite.SQLOutputValue>;
@@ -337,6 +353,63 @@ export class RelayStore {
     return Number(result.changes) > 0;
   }
 
+  // ── Push targets (spec section 13): which push token reaches a host's device. No content,
+  // and no link from a device to a person. ──
+
+  getPushTarget(hostId: string, deviceId: string): PushTargetRow | undefined {
+    const row = this.#stmt(
+      "SELECT platform, token, last_used_day FROM push_targets WHERE host_id = ? AND device_id = ?",
+    ).get(hostId, deviceId) as Row | undefined;
+    if (!row) return undefined;
+    return {
+      platform: String(row.platform) as PushPlatform,
+      token: String(row.token),
+      lastUsedDay: Number(row.last_used_day),
+    };
+  }
+
+  pushTargetCount(hostId: string): number {
+    return Number(
+      this.#stmt("SELECT COUNT(*) AS n FROM push_targets WHERE host_id = ?").get(hostId)?.n ?? 0,
+    );
+  }
+
+  upsertPushTarget(
+    hostId: string,
+    deviceId: string,
+    platform: PushPlatform,
+    token: string,
+    day: number,
+  ): void {
+    this.#stmt(
+      `INSERT INTO push_targets (host_id, device_id, platform, token, last_used_day)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT (host_id, device_id) DO UPDATE SET
+         platform = excluded.platform, token = excluded.token,
+         last_used_day = excluded.last_used_day`,
+    ).run(hostId, deviceId, platform, token, day);
+  }
+
+  touchPushTarget(hostId: string, deviceId: string, day: number): void {
+    this.#stmt(
+      "UPDATE push_targets SET last_used_day = ? WHERE host_id = ? AND device_id = ? AND last_used_day <> ?",
+    ).run(day, hostId, deviceId, day);
+  }
+
+  /** Only the row that still holds `token`, so a token the device replaced meanwhile survives. */
+  deletePushTarget(hostId: string, deviceId: string, token?: string): boolean {
+    const result =
+      token === undefined
+        ? this.#stmt("DELETE FROM push_targets WHERE host_id = ? AND device_id = ?").run(
+            hostId,
+            deviceId,
+          )
+        : this.#stmt(
+            "DELETE FROM push_targets WHERE host_id = ? AND device_id = ? AND token = ?",
+          ).run(hostId, deviceId, token);
+    return Number(result.changes) > 0;
+  }
+
   getUsage(hostId: string, month: string): number {
     const row = this.#stmt("SELECT bytes FROM usage WHERE host_id = ? AND month = ?").get(
       hostId,
@@ -396,6 +469,7 @@ export class RelayStore {
       readonly grantAfterExpiryDays: number;
       readonly revocationDays: number;
       readonly inviteAfterUseDays: number;
+      readonly pushTargetIdleDays: number;
     },
   ): PurgeResult {
     const count = (result: NodeSqlite.StatementResultingChanges) => Number(result.changes);
@@ -406,6 +480,7 @@ export class RelayStore {
       invites: 0,
       usage: 0,
       accountHosts: 0,
+      pushTargets: 0,
     };
     this.transaction(() => {
       const idleBefore = Math.floor(now / DAY_MS) - retention.hostIdleDays;
@@ -413,6 +488,7 @@ export class RelayStore {
       this.#stmt(`DELETE FROM grants WHERE host_id IN (${idleHosts})`).run(idleBefore);
       this.#stmt(`DELETE FROM revocations WHERE host_id IN (${idleHosts})`).run(idleBefore);
       this.#stmt(`DELETE FROM usage WHERE host_id IN (${idleHosts})`).run(idleBefore);
+      this.#stmt(`DELETE FROM push_targets WHERE host_id IN (${idleHosts})`).run(idleBefore);
       const accountHosts = count(
         this.#stmt(`DELETE FROM account_hosts WHERE host_id IN (${idleHosts})`).run(idleBefore),
       );
@@ -444,7 +520,12 @@ export class RelayStore {
       const usage = count(
         this.#stmt("DELETE FROM usage WHERE month < ?").run(monthKey(now - 62 * DAY_MS)),
       );
-      result = { hosts, grants, revocations, invites, usage, accountHosts };
+      const pushTargets = count(
+        this.#stmt("DELETE FROM push_targets WHERE last_used_day < ?").run(
+          Math.floor(now / DAY_MS) - retention.pushTargetIdleDays,
+        ),
+      );
+      result = { hosts, grants, revocations, invites, usage, accountHosts, pushTargets };
     });
     return result;
   }

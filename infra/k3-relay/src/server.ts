@@ -37,6 +37,7 @@ import {
   registrationSigningInput,
   type ChallengeCheck,
 } from "./pow.ts";
+import { PushGateway, createPushGateway, isPushPlatform, isPushToken } from "./push.ts";
 import { BufferBudget, Splice, type EarlyMessage } from "./splice.ts";
 import { RelayStore, SCHEMA_HASH } from "./store.ts";
 import { HostThrottle } from "./throttle.ts";
@@ -53,6 +54,7 @@ const REVOKE_SKEW_MS = 5 * MINUTE_MS;
 const NONCE_BYTES = 32;
 const HOST_ID_PATH = /^\/v1\/client\/([a-z2-7]{32})$/u;
 const STATUS_PATH = /^\/v1\/client\/([a-z2-7]{32})\/status$/u;
+const PUSH_PATH = /^\/v1\/client\/([a-z2-7]{32})\/push(\/remove)?$/u;
 const DATA_PATH = /^\/v1\/host\/data\/([0-9a-f]{32})$/u;
 const ACCOUNT_OAUTH_PATH = /^\/v1\/account\/oauth\/([a-z]{1,16})\/(start|callback)$/u;
 const ACCOUNT_API_PATHS: Readonly<Record<string, ReadonlyArray<string>>> = {
@@ -258,6 +260,11 @@ class RelayServer implements Relay {
   /** Null when no sign-in provider is configured: every account route answers 404 then. */
   readonly #accounts: AccountService | null;
   readonly #accountAdmissions: SlidingWindow;
+  readonly #push: PushGateway;
+  readonly #pushPerHost: SlidingWindow;
+  readonly #pushPerDevice: SlidingWindow;
+  readonly #pushRegistrations: SlidingWindow;
+  readonly #pushNonces: ExpiringSet;
   #closing = false;
 
   constructor(options: RelayOptions) {
@@ -359,6 +366,20 @@ class RelayServer implements Relay {
       config.accountAdmissionsPerHostPerHour,
       now,
     );
+    this.#push = createPushGateway(config, {
+      now,
+      fetch: options.fetch ?? fetch,
+      onUpstreamError: (platform, status) =>
+        this.#logger.error("push-upstream-failed", { platform, status }),
+    });
+    this.#pushPerHost = new SlidingWindow(MINUTE_MS, config.pushPerMinutePerHost, now);
+    this.#pushPerDevice = new SlidingWindow(MINUTE_MS, config.pushPerMinutePerDevice, now);
+    this.#pushRegistrations = new SlidingWindow(
+      MINUTE_MS,
+      config.pushRegistrationsPerMinutePerDevice,
+      now,
+    );
+    this.#pushNonces = new ExpiringSet(now);
 
     this.#wss = new WebSocketServer({
       noServer: true,
@@ -422,6 +443,7 @@ class RelayServer implements Relay {
     this.#scheduler.close();
     this.#throttle.close();
     this.#selfPing?.stop();
+    this.#push.close();
     for (const session of this.#sessions.values()) {
       this.#endSession(session, "shutdown", 1001, "shutdown");
     }
@@ -509,6 +531,10 @@ class RelayServer implements Relay {
     this.#throttle.sweep();
     this.#accounts?.sweep();
     this.#accountAdmissions.sweep();
+    this.#pushPerHost.sweep();
+    this.#pushPerDevice.sweep();
+    this.#pushRegistrations.sweep();
+    this.#pushNonces.sweep();
     const now = this.#now();
     for (const [hostId, state] of this.#pairing) {
       state.attempts = state.attempts.filter((at) => at > now - HOUR_MS);
@@ -526,6 +552,7 @@ class RelayServer implements Relay {
       grantAfterExpiryDays: this.#config.grantRetentionAfterExpiryDays,
       revocationDays: this.#config.revocationRetentionDays,
       inviteAfterUseDays: this.#config.inviteRetentionAfterUseDays,
+      pushTargetIdleDays: this.#config.pushTargetIdleDays,
     });
     this.#logger.info("purged", { ...result });
   }
@@ -621,6 +648,7 @@ class RelayServer implements Relay {
                 },
               }
             : {}),
+          ...(this.#push.enabled ? { push: { platforms: this.#push.platforms() } } : {}),
         }),
       );
       return;
@@ -647,6 +675,17 @@ class RelayServer implements Relay {
     if (method === "POST" && status?.[1]) {
       this.#admitRequest(key);
       await this.#status(req, res, status[1]);
+      return;
+    }
+    const push = PUSH_PATH.exec(path);
+    if (method === "POST" && push?.[1] && this.#push.enabled) {
+      this.#admitRequest(key);
+      await this.#pushRegister(req, res, push[1], push[2] !== undefined);
+      return;
+    }
+    if (method === "POST" && path === "/v1/push/send" && this.#push.enabled) {
+      this.#admitRequest(key);
+      await this.#pushSend(req, res);
       return;
     }
     if (path.startsWith("/v1/account/") && this.#accounts) {
@@ -941,6 +980,7 @@ class RelayServer implements Relay {
       parsed.signature.toString("base64url"),
       now,
     );
+    this.store.deletePushTarget(hostId, parsed.deviceId);
     for (const session of this.#hostSessions.get(hostId) ?? []) {
       if (session.deviceId === parsed.deviceId) {
         this.#endSession(session, "revoked", CLOSE.revoked, "revoked");
@@ -1003,6 +1043,188 @@ class RelayServer implements Relay {
         },
       }),
     );
+  }
+
+  /**
+   * A device registers (or removes) the push token that reaches it for one host. Signed with its
+   * `Dk` over the token, with a live grant; removal works for a device that is revoked or expired
+   * too. The token is the only thing stored, next to the ids the relay already knows.
+   */
+  async #pushRegister(
+    req: NodeHttp.IncomingMessage,
+    res: NodeHttp.ServerResponse,
+    hostId: string,
+    remove: boolean,
+  ): Promise<void> {
+    const body = await this.#readJson(req);
+    const fail = () => {
+      throw new HttpError(401, UNAUTHORIZED_BODY);
+    };
+    const keys = remove
+      ? ["alg", "dk", "grant", "ts", "nonce", "sig"]
+      : ["alg", "dk", "grant", "ts", "nonce", "platform", "token", "sig"];
+    if (!hasExactKeys(body, keys)) return fail();
+    const { alg, ts, nonce, platform, token } = body;
+    if (!isDeviceAlg(alg)) return fail();
+    const dk = decodeBase64url(body.dk, keyLength(alg));
+    const sig = decodeBase64url(body.sig, signatureLength);
+    if (!dk || !sig || typeof ts !== "number" || !Number.isSafeInteger(ts)) return fail();
+    if (typeof nonce !== "string" || !CLIENT_NONCE.test(nonce)) return fail();
+    if (!remove && (!isPushPlatform(platform) || !isPushToken(platform, token))) {
+      throw new HttpError(400, JSON.stringify({ error: "bad-request" }));
+    }
+    if (!this.#pushRegistrations.tryHit(deviceIdOf(alg, dk))) {
+      this.metrics.rejections += 1;
+      throw new HttpError(429, JSON.stringify({ error: "rate-limited" }));
+    }
+    const check = this.#checkDevice(
+      hostId,
+      alg,
+      dk,
+      body.grant,
+      (deviceId) =>
+        remove
+          ? signingInput(LABELS.pushRemove, hostId, deviceId, String(ts), nonce)
+          : signingInput(
+              LABELS.pushRegister,
+              hostId,
+              deviceId,
+              String(ts),
+              nonce,
+              String(platform),
+              String(token),
+            ),
+      sig,
+    );
+    const fresh = Math.abs(this.#now() - ts) <= this.#config.statusMaxSkewMs;
+    if (check.kind === "unauthorized" || !fresh) return fail();
+    if (
+      !this.#pushNonces.add(
+        `device:${check.deviceId}:${nonce}`,
+        this.#config.statusMaxSkewMs * 2 + 1000,
+      )
+    ) {
+      return fail();
+    }
+    if (remove) {
+      this.store.deletePushTarget(hostId, check.deviceId);
+      sendJson(res, 200, JSON.stringify({ ok: true }));
+      return;
+    }
+    if (check.kind === "revoked") throw new HttpError(403, JSON.stringify({ error: "revoked" }));
+    if (check.kind === "expired") {
+      throw new HttpError(403, JSON.stringify({ error: "grant-expired" }));
+    }
+    if (this.#blocked.has(hostId)) throw new HttpError(403, JSON.stringify({ error: "blocked" }));
+    if (!isPushPlatform(platform) || typeof token !== "string") return fail();
+    if (!this.#push.supports(platform)) {
+      throw new HttpError(503, JSON.stringify({ error: "push-unavailable" }));
+    }
+    if (
+      !this.store.getPushTarget(hostId, check.deviceId) &&
+      this.store.pushTargetCount(hostId) >= this.#config.maxPushTargetsPerHost
+    ) {
+      throw new HttpError(429, JSON.stringify({ error: "limit" }));
+    }
+    this.store.upsertPushTarget(
+      hostId,
+      check.deviceId,
+      platform,
+      token,
+      Math.floor(this.#now() / DAY_MS),
+    );
+    sendJson(res, 200, JSON.stringify({ ok: true }));
+  }
+
+  /**
+   * The host hands over one sealed notification for one of its own devices: signed with `Hk`
+   * over the envelope, fresh, never twice. The target is looked up under the signing host's id,
+   * so no host can reach another host's devices. The envelope is passed on and then forgotten.
+   */
+  async #pushSend(req: NodeHttp.IncomingMessage, res: NodeHttp.ServerResponse): Promise<void> {
+    const body = await this.#readJson(req);
+    const fail = () => {
+      throw new HttpError(401, UNAUTHORIZED_BODY);
+    };
+    if (!hasExactKeys(body, ["hostId", "deviceId", "ts", "nonce", "envelope", "sig"])) {
+      return fail();
+    }
+    const envelope = decodeBase64url(body.envelope);
+    if (!envelope || envelope.length === 0) {
+      throw new HttpError(400, JSON.stringify({ error: "bad-request" }));
+    }
+    if (envelope.length > this.#config.pushMaxEnvelopeBytes) {
+      throw new HttpError(413, JSON.stringify({ error: "too-large" }));
+    }
+    const { hostId, deviceId, ts, nonce } = body;
+    const sig = decodeBase64url(body.sig, signatureLength);
+    const parsed =
+      isId(hostId) &&
+      isId(deviceId) &&
+      typeof ts === "number" &&
+      Number.isSafeInteger(ts) &&
+      typeof nonce === "string" &&
+      CLIENT_NONCE.test(nonce) &&
+      sig
+        ? { hostId, deviceId, ts, nonce, sig }
+        : null;
+    const host = parsed ? this.store.getHost(parsed.hostId) : undefined;
+    const verified = verifySignature(
+      "ed25519",
+      host?.hk ?? DUMMY_HK,
+      signingInput(
+        LABELS.pushSend,
+        parsed?.hostId ?? "",
+        parsed?.deviceId ?? "",
+        String(parsed?.ts ?? 0),
+        parsed?.nonce ?? "",
+        envelope,
+      ),
+      parsed?.sig ?? Buffer.alloc(signatureLength),
+    );
+    if (!parsed || !host || !verified) return fail();
+    if (Math.abs(this.#now() - parsed.ts) > this.#config.statusMaxSkewMs) return fail();
+    if (
+      !this.#pushNonces.add(
+        `host:${parsed.hostId}:${parsed.nonce}`,
+        this.#config.statusMaxSkewMs * 2 + 1000,
+      )
+    ) {
+      return fail();
+    }
+    if (this.#blocked.has(parsed.hostId)) {
+      throw new HttpError(403, JSON.stringify({ error: "blocked" }));
+    }
+    // The device's own limit first, so a busy device does not spend its host's budget.
+    const deviceKey = `${parsed.hostId}:${parsed.deviceId}`;
+    if (
+      this.#pushPerDevice.count(deviceKey) >= this.#config.pushPerMinutePerDevice ||
+      !this.#pushPerHost.tryHit(parsed.hostId) ||
+      !this.#pushPerDevice.tryHit(deviceKey)
+    ) {
+      this.metrics.rejections += 1;
+      throw new HttpError(429, JSON.stringify({ error: "rate-limited" }));
+    }
+    const target = this.store.getPushTarget(parsed.hostId, parsed.deviceId);
+    if (!target) throw new HttpError(404, JSON.stringify({ error: "no-target" }));
+    const result = await this.#push.send(target.platform, target.token, String(body.envelope));
+    switch (result) {
+      case "ok":
+        this.store.touchPushTarget(
+          parsed.hostId,
+          parsed.deviceId,
+          Math.floor(this.#now() / DAY_MS),
+        );
+        sendJson(res, 200, JSON.stringify({ ok: true }));
+        return;
+      case "gone":
+        this.store.deletePushTarget(parsed.hostId, parsed.deviceId, target.token);
+        throw new HttpError(410, JSON.stringify({ error: "gone" }));
+      case "unavailable":
+        throw new HttpError(503, JSON.stringify({ error: "push-unavailable" }));
+      case "failed":
+        throw new HttpError(502, JSON.stringify({ error: "upstream" }));
+    }
   }
 
   /** What a device may tell its user about why the relay is slow for them, if it is. */

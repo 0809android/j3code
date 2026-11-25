@@ -95,6 +95,12 @@ const TABLE_NOTES: Readonly<Record<string, TableNote>> = {
     retention:
       "ホストが一覧から外されたとき、アカウントの削除、またはホストが 365 日接続しなかったときまで。",
   },
+  push_targets: {
+    purpose:
+      "通知（P4）を届けるための、ホストの端末とプッシュのトークン（APNs / FCM）の対応表。端末が自分の鍵で署名して登録します。通知の中身、端末名、端末と人（ユーザー）の対応は持ちません。",
+    retention:
+      "90 日、通知に使われず登録し直されもしなければ削除。端末が失効されたとき、APNs / FCM がトークンを無効と答えたとき（410、UNREGISTERED）、端末が自分で外したとき、ホストが削除されたときも、すぐに削除します。",
+  },
 };
 
 const COLUMN_NOTES: Readonly<Record<string, string>> = {
@@ -134,6 +140,12 @@ const COLUMN_NOTES: Readonly<Record<string, string>> = {
   "account_hosts.owner_id": "アカウント ID",
   "account_hosts.host_id": "ホストの ID（公開鍵のハッシュ）",
   "account_hosts.added_day": "一覧に加えた日（日数）",
+  "push_targets.host_id": "通知を送るホストの ID",
+  "push_targets.device_id": "通知を受ける端末の ID（端末の公開鍵のハッシュ。端末名ではありません）",
+  "push_targets.platform": "届け先（`ios`、`ios-sandbox`、`android`）",
+  "push_targets.token":
+    "APNs / FCM のプッシュのトークン。通知を届けるためだけに使い、ログには出しません",
+  "push_targets.last_used_day": "最後に登録された日か、通知を届けた日（日数。時刻は持たない）",
 };
 
 /** What the relay never writes to disk (spec section 10). Fixed text, not derived from the schema. */
@@ -148,7 +160,7 @@ const NEVER_STORED: readonly (readonly [string, string])[] = [
   ],
   [
     "通知の中身",
-    "通知（P4）を足すときも、リレーは暗号文を APNs / FCM に渡すだけで、保存しません。",
+    "通知（P4）は、ホストが端末の通知用の鍵 `Nk` に暗号化したもので、リレーは開けません。リレーは暗号文を APNs / FCM に渡すだけで、DB にもログにも書きません（docs/NOTIFICATIONS.md）。",
   ],
   ["端末名", "grant には名前の欄がなく、名前の付いた grant は受け取りません。"],
   ["ホスト名", "ホストは、公開鍵のハッシュ（hostId）としてだけ見えます。"],
