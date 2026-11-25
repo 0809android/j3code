@@ -5,7 +5,8 @@ import * as Layer from "effect/Layer";
 /**
  * Application-layer E2EE for the WebSocket RPC channel: an Ed25519 host identity pinned by the
  * client, an ephemeral X25519 handshake, HKDF-SHA256, and counter-ordered XChaCha20-Poly1305
- * records (pure TypeScript, so it runs where `crypto.subtle` does not).
+ * records (pure TypeScript, so it runs where `crypto.subtle` does not). v1 carries text for
+ * direct connections; v2 adds device authentication and binary frames for the relay.
  */
 
 /** Query parameter that asks for an E2EE session, mirroring `frameParts`. */
@@ -19,6 +20,8 @@ export {
   E2eeIdentityMismatchError,
   type E2eeHandshakeError,
   E2eeProtocolError,
+  E2eeRejectedError,
+  E2eeRejectionReason,
 } from "./socketE2eeRecord.ts";
 export {
   type E2eeIdentityKeypair,
@@ -41,6 +44,13 @@ export {
   generateDeviceKeypair,
   hostIdFromIdentityKey,
 } from "./socketE2eeDevice.ts";
+export {
+  E2EE_FRAGMENT_BYTES,
+  type E2eeV2ClientOptions,
+  type E2eeV2ServerOptions,
+  wrapClientSocketWithE2eeV2,
+  wrapServerSocketWithE2eeV2,
+} from "./socketE2eeV2.ts";
 
 /** Layers the wrappers need. XChaCha20-Poly1305 never touches `crypto.subtle`. */
 export const layerE2eeCrypto = Aead.layerWebCrypto.pipe(
