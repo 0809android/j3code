@@ -112,6 +112,9 @@ jobs:
         with:
           ref: ${{ steps.provenance.outputs.commit }}
           persist-credentials: false
+          sparse-checkout: |
+            /infra/k3-relay/
+          sparse-checkout-cone-mode: false
 
       - name: Prepare SSH
         env:
