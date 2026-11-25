@@ -2841,6 +2841,10 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
           schemes: ["k3code", "k3code-dev"],
         },
         {
+          name: "K3 Relay pairing",
+          schemes: ["k3relay"],
+        },
+        {
           name: "Web site URL",
           schemes: ["http", "https"],
           role: "Viewer",
@@ -2892,6 +2896,10 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
         {
           name: "K3 Code",
           schemes: ["k3code", "k3code-dev"],
+        },
+        {
+          name: "K3 Relay pairing",
+          schemes: ["k3relay"],
         },
       ],
       desktop: {
