@@ -50,8 +50,8 @@ import {
   approvalRequired,
   cancelPairing,
   consumeAddDeviceWindow,
+  decideAccountApproval,
   decodeBase64url,
-  defaultApprovalPolicy,
   encodeBase64url,
   grantNeedsRenewal,
   grantRegisterFrame,
@@ -67,6 +67,7 @@ import {
   relayHostId,
   relaySigningInput,
   signRevocation,
+  submitAccountClaim,
   submitPairingClaim,
   tickPairing,
 } from "@t3tools/shared/relay";
@@ -96,6 +97,7 @@ import {
   signWithHostSeed,
 } from "./hostRegistration.ts";
 import { captureRelayRouter, makeRelayMuxHandler, type RelayLocalRoute } from "./RelayBridge.ts";
+import * as RelayAccount from "./RelayAccount.ts";
 import * as RelayDeviceLedger from "./RelayDeviceLedger.ts";
 import { relayStateDirectory } from "./RelayDeviceLedger.ts";
 import { openRelayWebSocket } from "./relaySockets.ts";
@@ -254,6 +256,7 @@ const make = Effect.gen(function* () {
   const identity = yield* ServerE2eeIdentity.ServerE2eeIdentity;
   const auth = yield* EnvironmentAuth.EnvironmentAuth;
   const ledger = yield* RelayDeviceLedger.RelayDeviceLedger;
+  const account = yield* RelayAccount.RelayAccount;
   const http = yield* HttpClient.HttpClient;
   const services = yield* Effect.context<
     Aead.Aead | SecureRandom.SecureRandom | FileSystem.FileSystem | Path.Path
@@ -307,7 +310,7 @@ const make = Effect.gen(function* () {
       connectedDevices: new Set(live.map((session) => session.deviceId)).size,
       maxSessions: settings.relay.maxSessions,
       reachableWhenNetworkAccessOff: policyAllowed && settings.relay.enabled,
-      requireApproval: approvalRequired(defaultApprovalPolicy),
+      requireApproval: approvalRequired(yield* account.approvalPolicy),
       pairing: pairingView(pairing),
       devices: devices.map((device) => toDevice(device, live)),
     } satisfies K3RelayHostState;
@@ -315,8 +318,19 @@ const make = Effect.gen(function* () {
 
   const output = yield* SubscriptionRef.make(yield* buildState);
   const publishLock = yield* Semaphore.make(1);
+  /** The account device waiting for approval, shown on the account's state while it waits. */
+  let accountPending: string | undefined;
   const publish = publishLock.withPermit(
-    Effect.flatMap(buildState, (state) => SubscriptionRef.set(output, state)),
+    Effect.gen(function* () {
+      if (
+        accountPending !== undefined &&
+        (pairing.phase !== "awaiting-approval" || pairing.device.deviceId !== accountPending)
+      ) {
+        accountPending = undefined;
+        yield* account.setPendingDevice(null);
+      }
+      yield* SubscriptionRef.set(output, yield* buildState);
+    }),
   );
   const setConnection = (patch: Partial<ConnectionView>) =>
     Ref.update(connection, (view) => ({ ...view, ...patch })).pipe(Effect.andThen(publish));
@@ -437,42 +451,110 @@ const make = Effect.gen(function* () {
     )
     .pipe(Effect.withSpan("RelayConnector.rejectPairing"));
 
-  const approveDevice = Effect.fn("RelayConnector.approvePairing")(function* (deviceId: string) {
-    return yield* pairingLock.withPermit(
-      Effect.gen(function* () {
-        if (!policyAllowed) return yield* relayError("policy-disallowed");
-        const now = yield* Clock.currentTimeMillis;
-        pairing = tickPairing(pairing, now);
-        if (pairing.phase !== "awaiting-approval" || pairing.device.deviceId !== deviceId) {
-          yield* publish;
-          return yield* relayError("no-pending-pairing");
-        }
-        const waiting = pairing;
-        const keys = yield* hostKeys.pipe(Effect.mapError(() => relayError("internal")));
-        const credential = yield* auth
-          .issueRelayDeviceBootstrapCredential({ deviceId, label: waiting.device.name })
-          .pipe(Effect.mapError(() => relayError("internal")));
-        const approved = yield* withServices(
-          approvePairing(waiting, {
-            hostIdentitySeed: keys.seed,
-            ledger,
-            bootstrapToken: credential.credential,
-            now,
-          }),
-        ).pipe(
-          Effect.tapError(() => auth.revokeRelayDevice(deviceId).pipe(Effect.ignore)),
-          Effect.mapError(() => relayError("internal")),
-        );
-        pairing = approved.state;
-        if (addDeviceWindow !== null) addDeviceWindow = consumeAddDeviceWindow(addDeviceWindow);
-        yield* sendControl(approved.relayFrame);
-        yield* settlePending(approved.reply);
-        yield* stopPairingTimer;
+  /** Approves the device waiting in the pairing state. The caller holds `pairingLock`. */
+  const approveLocked = Effect.fn("RelayConnector.approveLocked")(function* (deviceId: string) {
+    return yield* Effect.gen(function* () {
+      if (!policyAllowed) return yield* relayError("policy-disallowed");
+      const now = yield* Clock.currentTimeMillis;
+      pairing = tickPairing(pairing, now);
+      if (pairing.phase !== "awaiting-approval" || pairing.device.deviceId !== deviceId) {
         yield* publish;
-        return toDevice(approved.device, sessions.values());
+        return yield* relayError("no-pending-pairing");
+      }
+      const waiting = pairing;
+      const keys = yield* hostKeys.pipe(Effect.mapError(() => relayError("internal")));
+      const credential = yield* auth
+        .issueRelayDeviceBootstrapCredential({ deviceId, label: waiting.device.name })
+        .pipe(Effect.mapError(() => relayError("internal")));
+      const approved = yield* withServices(
+        approvePairing(waiting, {
+          hostIdentitySeed: keys.seed,
+          ledger,
+          bootstrapToken: credential.credential,
+          now,
+        }),
+      ).pipe(
+        Effect.tapError(() => auth.revokeRelayDevice(deviceId).pipe(Effect.ignore)),
+        Effect.mapError(() => relayError("internal")),
+      );
+      pairing = approved.state;
+      if (addDeviceWindow !== null) addDeviceWindow = consumeAddDeviceWindow(addDeviceWindow);
+      yield* sendControl(approved.relayFrame);
+      yield* settlePending(approved.reply);
+      yield* stopPairingTimer;
+      yield* publish;
+      return toDevice(approved.device, sessions.values());
+    });
+  });
+
+  const approveDevice = Effect.fn("RelayConnector.approvePairing")(function* (deviceId: string) {
+    return yield* pairingLock.withPermit(approveLocked(deviceId));
+  });
+
+  /**
+   * A claim inside an anonymous session opened through an account (`?account=1`, spec §20.3).
+   * Unlike QR pairing it needs no open window: it waits for the user with codes to compare. The
+   * relay's ticket is checked against the account this host signed in to; only a recorded
+   * opt-out approves without the user.
+   */
+  const receiveAccountClaim = (transcriptHash: Uint8Array, message: unknown) =>
+    pairingLock.withPermit(
+      Effect.gen(function* () {
+        const now = yield* Clock.currentTimeMillis;
+        const relayUrl = endpoints?.http;
+        const keys = yield* Effect.option(hostKeys);
+        const binding = relayUrl === undefined ? null : yield* account.binding(relayUrl);
+        if (relayUrl === undefined || keys._tag === "None") {
+          return { reply: { type: "pairing-rejected", reason: "rejected" } } as const satisfies {
+            reply: PairingReplyMessage;
+          };
+        }
+        const wasOpen = pairing.phase === "open";
+        const result = submitAccountClaim(pairing, {
+          transcriptHash,
+          message,
+          now,
+          relayUrl,
+          hostIdentityKey: keys.value.publicKey,
+          binding,
+        });
+        if (result.outcome.kind === "rejected") {
+          const reason =
+            result.outcome.reason === "not-on-account" ? "invalid-claim" : result.outcome.reason;
+          return { reply: { type: "pairing-rejected", reason } } as const satisfies {
+            reply: PairingReplyMessage;
+          };
+        }
+        pairing = result.state;
+        if (wasOpen) yield* sendControl(pairingCloseFrame());
+        const deviceId = result.outcome.state.device.deviceId;
+        const decision = decideAccountApproval({
+          policy: yield* account.approvalPolicy,
+          window: addDeviceWindow,
+          now,
+        });
+        const pending = yield* Deferred.make<PairingReplyMessage>();
+        pendingDecision = pending;
+        if (decision.kind === "auto-approve") {
+          // `approveLocked` answers through `pendingDecision`, as a user's approval does.
+          const approved = yield* Effect.result(approveLocked(deviceId));
+          if (approved._tag === "Failure") {
+            if (pendingDecision === pending) pendingDecision = undefined;
+            pairing = cancelPairing(pairing);
+            yield* publish;
+            return { reply: { type: "pairing-rejected", reason: "rejected" } } as const satisfies {
+              reply: PairingReplyMessage;
+            };
+          }
+          return { decision: pending } as const;
+        }
+        accountPending = deviceId;
+        yield* account.setPendingDevice({ deviceId, oneTap: decision.kind === "one-tap" });
+        yield* schedulePairingTimer(result.outcome.state.approvalDeadline);
+        yield* publish;
+        return { decision: pending } as const;
       }),
     );
-  });
 
   /**
    * A claim that arrived inside an anonymous pairing session. Only claims made while the host's
@@ -526,6 +608,7 @@ const make = Effect.gen(function* () {
     socket: Socket.Socket,
     seed: Uint8Array,
     hostId: string,
+    route: "qr" | "account",
   ) {
     const e2ee = yield* wrapServerSocketWithE2eeV2(socket, {
       environmentId: k3RelayE2eeEnvironmentId(hostId),
@@ -546,6 +629,22 @@ const make = Effect.gen(function* () {
     const frames = yield* reader.pull.pipe(Effect.timeout(PAIRING_CLAIM_TIMEOUT));
     const first = frames[0];
     const message = typeof first === "string" ? parseJson(first) : undefined;
+    if (route === "account") {
+      const received = yield* receiveAccountClaim(info.transcriptHash, message);
+      let reply: PairingReplyMessage;
+      if ("reply" in received) {
+        reply = received.reply;
+      } else {
+        const answered = yield* Effect.raceFirst(
+          Deferred.await(received.decision).pipe(Effect.asSome),
+          reader.pull.pipe(Effect.ignore, Effect.as(Option.none<PairingReplyMessage>())),
+        );
+        if (Option.isNone(answered)) return yield* abandonClaim(received.decision);
+        reply = answered.value;
+      }
+      yield* writer.write(encodeFrame(reply));
+      return yield* writer.write(new Socket.CloseEvent(1000));
+    }
     const received = yield* receiveClaim(info.transcriptHash, message);
     let reply: PairingReplyMessage;
     if ("reply" in received) {
@@ -721,7 +820,8 @@ const make = Effect.gen(function* () {
           `${endpoint.ws}/v1/host/data/${frame.sessionId}?t=${frame.token}`,
           { maxPayload: RELAY_MAX_PAYLOAD },
         );
-        if (frame.kind === "pairing") return yield* servePairing(socket, seed, hostId);
+        if (frame.kind === "pairing") return yield* servePairing(socket, seed, hostId, "qr");
+        if (frame.kind === "account") return yield* servePairing(socket, seed, hostId, "account");
         return yield* serveDevice(frame.sessionId, socket, seed, hostId, relaySettings);
       }),
     ).pipe(
@@ -794,7 +894,7 @@ const make = Effect.gen(function* () {
           if (
             typeof sessionId !== "string" ||
             typeof token !== "string" ||
-            (kind !== "client" && kind !== "pairing") ||
+            (kind !== "client" && kind !== "pairing" && kind !== "account") ||
             !SESSION_ID_PATTERN.test(sessionId) ||
             !DATA_TOKEN_PATTERN.test(token)
           ) {
@@ -888,6 +988,12 @@ const make = Effect.gen(function* () {
     running = yield* Effect.forkIn(superviseConnection(settings.relay), layerScope);
   });
 
+  // The approval policy lives with the account; the relay state shows it too.
+  yield* account.changes.pipe(
+    Stream.drop(1),
+    Stream.runForEach(() => publish),
+    Effect.forkIn(layerScope),
+  );
   const settingsChanges = yield* settingsService.subscribeChanges;
   // A standby server (during an update) shares this host key; connecting would evict the
   // active server's control socket, so the relay waits for activation.
@@ -970,6 +1076,8 @@ const make = Effect.gen(function* () {
 });
 
 export const layer = Layer.effect(RelayConnector, make).pipe(
+  // One account service, shared with the RPC handlers that sign the host in.
+  Layer.provideMerge(RelayAccount.layer),
   Layer.provide(RelayDeviceLedger.layer),
   Layer.provide(layerE2eeCrypto),
 );

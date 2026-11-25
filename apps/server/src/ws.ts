@@ -10,6 +10,7 @@ import * as Orchestrator from "./orchestration-v2/Orchestrator.ts";
 import * as PeerClientPairing from "./peer/PeerClientPairing.ts";
 import * as PeerLinkRequests from "./peer/PeerLinkRequests.ts";
 import * as PeerLinks from "./peer/PeerLinks.ts";
+import * as RelayAccount from "./relay/k3relay/RelayAccount.ts";
 import * as RelayConnector from "./relay/k3relay/RelayConnector.ts";
 import * as PeerThreadRelay from "./peer/PeerThreadRelay.ts";
 
@@ -1516,6 +1517,7 @@ export const layerWsRpc = (
       const secretResolver = yield* SecretResolver.SecretResolver;
       const peerLinks = yield* PeerLinks.PeerLinks;
       const relayConnector = yield* RelayConnector.RelayConnector;
+      const relayAccount = yield* RelayAccount.RelayAccount;
       const peerLinkRequests = yield* PeerLinkRequests.PeerLinkRequests;
       const peerThreadRelay = yield* PeerThreadRelay.PeerThreadRelay;
       const peerClientPairing = yield* PeerClientPairing.PeerClientPairing;
@@ -3647,6 +3649,10 @@ export const layerWsRpc = (
         [WS_METHODS.k3RelayRevokeDevice]: (input) => relayConnector.revokeDevice(input.deviceId),
         [WS_METHODS.k3RelayRenameDevice]: (input) =>
           relayConnector.renameDevice(input.deviceId, input.name),
+        [WS_METHODS.k3RelayAccountSubscribe]: (_input) => relayAccount.changes,
+        [WS_METHODS.k3RelayAccountSignIn]: (input) => relayAccount.signIn(input.provider),
+        [WS_METHODS.k3RelayAccountSignOut]: (_input) => relayAccount.signOut,
+        [WS_METHODS.k3RelayAccountSetApproval]: (input) => relayAccount.setApproval(input),
       });
       const splitHandlers: Pick<typeof handlers, SplitWsRpc["_tag"]> = handlers;
       const otherHandlers: Pick<typeof handlers, Exclude<ServerWsRpc, SplitWsRpc>["_tag"]> =
@@ -3677,6 +3683,7 @@ export const layer = Layer.unwrap(
     const reviewGuides = yield* PullRequestReviewGuideService.PullRequestReviewGuideService;
     const peerLinks = yield* PeerLinks.PeerLinks;
     const relayConnector = yield* RelayConnector.RelayConnector;
+    const relayAccount = yield* RelayAccount.RelayAccount;
     const peerLinkRequests = yield* PeerLinkRequests.PeerLinkRequests;
     const peerThreadRelay = yield* PeerThreadRelay.PeerThreadRelay;
     const peerClientPairing = yield* PeerClientPairing.PeerClientPairing;
@@ -3808,6 +3815,7 @@ export const layer = Layer.unwrap(
               ),
               Layer.provide(Layer.succeed(PeerLinks.PeerLinks, peerLinks)),
               Layer.provide(Layer.succeed(RelayConnector.RelayConnector, relayConnector)),
+              Layer.provide(Layer.succeed(RelayAccount.RelayAccount, relayAccount)),
               Layer.provide(Layer.succeed(PeerLinkRequests.PeerLinkRequests, peerLinkRequests)),
               Layer.provide(Layer.succeed(PeerThreadRelay.PeerThreadRelay, peerThreadRelay)),
               Layer.provide(Layer.succeed(PeerClientPairing.PeerClientPairing, peerClientPairing)),

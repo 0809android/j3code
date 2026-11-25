@@ -2,6 +2,8 @@ import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   EnvironmentHttpApi,
+  type K3RelayAccountProvider,
+  type K3RelayAccountState,
   type K3RelayDevice,
   type K3RelayDeviceAlgorithm,
   type K3RelayHostState,
@@ -54,6 +56,7 @@ import { layerServerEnvironmentHttpApi } from "../../http.ts";
 import * as SqlitePersistence from "../../persistence/Sqlite.ts";
 import * as ManagedPolicy from "../../policy/ManagedPolicy.ts";
 import * as ServerSettings from "../../serverSettings.ts";
+import * as RelayAccount from "./RelayAccount.ts";
 import * as RelayConnector from "./RelayConnector.ts";
 import * as RelayDeviceLedger from "./RelayDeviceLedger.ts";
 
@@ -275,21 +278,24 @@ const loadRelay = async () => {
  * A real relay on an ephemeral port for the scope. It reads the test's clock; `clock.skewMs` moves
  * it ahead, where it drops the host's revocations as stale.
  */
-export const startK3RelayTestRelay = Effect.acquireRelease(
-  Clock.clockWith((testClock) =>
-    Effect.promise(async () => {
-      const { config, createRelay } = await loadRelay();
-      const clock = { skewMs: 0 };
-      const relay = createRelay({
-        config,
-        now: () => testClock.currentTimeMillisUnsafe() + clock.skewMs,
-      });
-      const port = await relay.listen();
-      return { relay, port, clock, url: `ws://127.0.0.1:${port}` };
-    }),
-  ),
-  ({ relay }) => Effect.promise(() => relay.close()),
-);
+export const startK3RelayTestRelayWith = (overrides: object) =>
+  Effect.acquireRelease(
+    Clock.clockWith((testClock) =>
+      Effect.promise(async () => {
+        const { config, createRelay } = await loadRelay();
+        const clock = { skewMs: 0 };
+        const relay = createRelay({
+          config: { ...config, ...overrides },
+          now: () => testClock.currentTimeMillisUnsafe() + clock.skewMs,
+        });
+        const port = await relay.listen();
+        return { relay, port, clock, url: `ws://127.0.0.1:${port}` };
+      }),
+    ),
+    ({ relay }) => Effect.promise(() => relay.close()),
+  );
+
+export const startK3RelayTestRelay = startK3RelayTestRelayWith({});
 
 // ── A promise-shaped handle, for tests outside this package ──────────────────
 
@@ -311,6 +317,20 @@ export interface K3RelayTestHost {
   readonly approvePairing: (deviceId: string) => Promise<K3RelayDevice>;
   readonly rejectPairing: () => Promise<void>;
   readonly revokeDevice: (deviceId: string) => Promise<K3RelayDevice>;
+  /** This host's account at the relay (spec §20.4), as the settings screen drives it. */
+  readonly account: {
+    readonly signIn: (provider: K3RelayAccountProvider) => Promise<{ authorizeUrl: string }>;
+    readonly signOut: () => Promise<void>;
+    readonly state: () => Promise<K3RelayAccountState>;
+    readonly awaitState: (
+      predicate: (state: K3RelayAccountState) => boolean,
+      timeoutMs?: number,
+    ) => Promise<K3RelayAccountState>;
+    readonly setApproval: (input: {
+      readonly requireApproval: boolean;
+      readonly acknowledgedRisk: boolean;
+    }) => Promise<K3RelayAccountState>;
+  };
   /** A grant this host signs, as if issued at `issuedAt`, for a device key. */
   readonly signGrant: (input: {
     readonly alg: K3RelayDeviceAlgorithm;
@@ -327,7 +347,9 @@ export interface K3RelayTestRelayHandle {
 
 const runtimeLayer = Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, layerE2eeCrypto);
 
-export const startK3RelayTestRelayHandle = async (): Promise<K3RelayTestRelayHandle> => {
+export const startK3RelayTestRelayHandle = async (
+  overrides: object = {},
+): Promise<K3RelayTestRelayHandle> => {
   const runtime = ManagedRuntime.make(runtimeLayer);
   const scope = await runtime.runPromise(Scope.make());
   const dispose = async () => {
@@ -335,7 +357,9 @@ export const startK3RelayTestRelayHandle = async (): Promise<K3RelayTestRelayHan
     await runtime.dispose();
   };
   try {
-    const { url } = await runtime.runPromise(startK3RelayTestRelay.pipe(Scope.provide(scope)));
+    const { url } = await runtime.runPromise(
+      startK3RelayTestRelayWith(overrides).pipe(Scope.provide(scope)),
+    );
     return { url, dispose };
   } catch (error) {
     await dispose();
@@ -386,6 +410,25 @@ export const startK3RelayTestHost = async (
         run(Effect.flatMap(RelayConnector.RelayConnector, (c) => c.rejectPairing)),
       revokeDevice: (deviceId) =>
         run(Effect.flatMap(RelayConnector.RelayConnector, (c) => c.revokeDevice(deviceId))),
+      account: {
+        signIn: (provider) =>
+          run(Effect.flatMap(RelayAccount.RelayAccount, (a) => a.signIn(provider))),
+        signOut: () => run(Effect.flatMap(RelayAccount.RelayAccount, (a) => a.signOut)),
+        state: () => run(Effect.flatMap(RelayAccount.RelayAccount, (a) => a.state)),
+        awaitState: (predicate, timeoutMs = 20_000) =>
+          run(
+            Effect.flatMap(RelayAccount.RelayAccount, (account) =>
+              account.changes.pipe(
+                Stream.filter(predicate),
+                Stream.runHead,
+                Effect.map(Option.getOrThrow),
+                Effect.timeout(timeoutMs),
+              ),
+            ),
+          ),
+        setApproval: (input) =>
+          run(Effect.flatMap(RelayAccount.RelayAccount, (a) => a.setApproval(input))),
+      },
       signGrant: (input) =>
         run(
           signGrant({
