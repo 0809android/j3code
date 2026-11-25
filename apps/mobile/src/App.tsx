@@ -20,7 +20,7 @@ import {
   type NavigationState,
 } from "@react-navigation/native";
 import { pipe } from "effect/Function";
-import { DEFAULT_HOSTED_APP_URL } from "@t3tools/shared/connectAuth";
+import { setHostedThreadLinkOrigin } from "@t3tools/shared/threadLinks";
 
 import { RegistryContext, useAtomValue } from "@effect/atom-react";
 import { ProjectChipIconRasterizer } from "./native/ProjectChipIconImages";
@@ -109,12 +109,16 @@ import {
 import { pruneNewTaskFlowStates } from "./features/threads/new-task-flow-state";
 import { pruneNewTaskBranchCheckouts } from "./features/threads/NewTaskDraftRouteScreen";
 import { installAppUpdateChecks } from "./features/updates/app-updates";
+import { configuredHostedAppUrl, hostedAppLinkPrefixes } from "./lib/hostedApp";
 
 import "../global.css";
 
 if (process.env.EXPO_PUBLIC_SHOWCASE === "1") {
   prepareNativeShowcaseCapture();
 }
+
+// Links to this build's hosted app, if it has one, read as thread links; none are read otherwise.
+setHostedThreadLinkOrigin(configuredHostedAppUrl());
 
 void SplashScreen.preventAutoHideAsync().catch(() => {});
 void hydrateWorkspaceSelections();
@@ -143,7 +147,7 @@ const appLinking = {
     "k3code://",
     "k3code-dev://",
     "k3code-preview://",
-    DEFAULT_HOSTED_APP_URL,
+    ...hostedAppLinkPrefixes(configuredHostedAppUrl()),
   ],
   config: { initialRouteName: "Home" },
   filter: (url: string) => shouldHandleAppLink(url, hasCloudPublicConfig()),
