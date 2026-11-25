@@ -1,5 +1,6 @@
 import type { ExpoConfig } from "expo/config";
 
+import { hostedAppOrigin } from "../../packages/shared/src/hostedApp.ts";
 import { BRAND_ASSET_PATHS } from "../../scripts/lib/brand-assets.ts";
 import { loadRepoEnv } from "../../scripts/lib/public-config.ts";
 
@@ -77,7 +78,6 @@ const VARIANT_CONFIG = {
     scheme: "k3code-dev",
     iosBundleIdentifier: "jp.kinocode.k3code.dev",
     androidPackage: "jp.kinocode.k3code.dev",
-    relyingParty: "clerk.t3.codes",
     assets: DEVELOPMENT_ASSETS,
   },
   preview: {
@@ -85,7 +85,6 @@ const VARIANT_CONFIG = {
     scheme: "k3code-preview",
     iosBundleIdentifier: "jp.kinocode.k3code.preview",
     androidPackage: "jp.kinocode.k3code.preview",
-    relyingParty: "clerk.t3.codes",
     assets: PREVIEW_ASSETS,
   },
   production: {
@@ -93,7 +92,6 @@ const VARIANT_CONFIG = {
     scheme: "k3code",
     iosBundleIdentifier: "jp.kinocode.k3code",
     androidPackage: "jp.kinocode.k3code",
-    relyingParty: "clerk.t3.codes",
     assets: RELEASE_ASSETS,
   },
 } as const;
@@ -112,8 +110,26 @@ function resolveAppVariant(value: string | undefined): AppVariant {
 }
 
 const variant = VARIANT_CONFIG[APP_VARIANT];
-// Copied thread links open the app. app.t3.codes/.well-known lists every variant's identifiers.
-const HOSTED_APP_HOST = "app.t3.codes";
+// K3 Code has no hosted web app of its own. When K3CODE_HOSTED_APP_URL names one, copied thread
+// links on that host open this app; the host's /.well-known must list every variant's identifiers.
+// Without it the app claims no web address at all.
+const hostedAppUrl = hostedAppOrigin(repoEnv.K3CODE_HOSTED_APP_URL);
+const hostedAppHost = hostedAppUrl === undefined ? undefined : new URL(hostedAppUrl).host;
+// The Clerk host, only when this build has T3 Connect configured; it is derived from the key.
+const clerkFrontendHost = clerkFrontendHostFromPublishableKey(
+  repoEnv.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY,
+);
+
+function clerkFrontendHostFromPublishableKey(publishableKey: string | undefined) {
+  const encoded = publishableKey?.trim().split("_")[2];
+  if (!encoded) return undefined;
+  try {
+    const host = Buffer.from(encoded, "base64").toString("utf8").replace(/\$$/, "");
+    return /^[a-z0-9.-]+$/i.test(host) ? host : undefined;
+  } catch {
+    return undefined;
+  }
+}
 const iosBundleIdentifier = isIosPersonalTeamBuild
   ? personalTeamBundleIdentifier!
   : variant.iosBundleIdentifier;
@@ -252,9 +268,10 @@ const config: ExpoConfig = {
     // Avoid Personal Team fallback: it cannot sign App Groups, Apple sign-in or push entitlements.
     appleTeamId: "ARK85ZXQ4Z",
     associatedDomains: [
-      `applinks:${variant.relyingParty}`,
-      `webcredentials:${variant.relyingParty}`,
-      `applinks:${HOSTED_APP_HOST}`,
+      ...(clerkFrontendHost
+        ? [`applinks:${clerkFrontendHost}`, `webcredentials:${clerkFrontendHost}`]
+        : []),
+      ...(hostedAppHost ? [`applinks:${hostedAppHost}`] : []),
     ],
     entitlements: {
       "keychain-access-groups": [`$(AppIdentifierPrefix)${variant.iosBundleIdentifier}`],
@@ -307,14 +324,16 @@ const config: ExpoConfig = {
     predictiveBackGestureEnabled: true,
     // expo-sensors declares this for its pedometer, which the app does not use.
     blockedPermissions: ["android.permission.ACTIVITY_RECOGNITION"],
-    intentFilters: [
-      {
-        action: "VIEW",
-        autoVerify: true,
-        data: [{ scheme: "https", host: HOSTED_APP_HOST, pathPrefix: "/threads/" }],
-        category: ["BROWSABLE", "DEFAULT"],
-      },
-    ],
+    intentFilters: hostedAppHost
+      ? [
+          {
+            action: "VIEW",
+            autoVerify: true,
+            data: [{ scheme: "https", host: hostedAppHost, pathPrefix: "/threads/" }],
+            category: ["BROWSABLE", "DEFAULT"],
+          },
+        ]
+      : [],
   },
   web: {
     favicon: variant.assets.appIcon,
@@ -463,6 +482,7 @@ const config: ExpoConfig = {
   extra: {
     appVariant: APP_VARIANT,
     iosPersonalTeamBuild: isIosPersonalTeamBuild,
+    hostedAppUrl: hostedAppUrl ?? null,
     relay: {
       url: null,
     },

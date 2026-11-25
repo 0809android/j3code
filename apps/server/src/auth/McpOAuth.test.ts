@@ -11,6 +11,7 @@ import {
 } from "@t3tools/contracts";
 import { expect, it } from "@effect/vitest";
 import * as Clock from "effect/Clock";
+import * as ConfigProvider from "effect/ConfigProvider";
 import * as Context from "effect/Context";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
@@ -58,6 +59,7 @@ const notLinked: EnvironmentCloudLinkStateResult = {
 const makeLayerRoutes = (
   capture: (auth: EnvironmentAuth.EnvironmentAuth["Service"]) => void,
   linkState: EnvironmentCloudLinkStateResult,
+  env: Readonly<Record<string, string>>,
 ) =>
   Layer.mergeAll(
     Layer.effectDiscard(
@@ -72,6 +74,8 @@ const makeLayerRoutes = (
           Layer.provide(
             Layer.mock(CloudLink.CloudLink)({ linkState: () => Effect.succeed(linkState) }),
           ),
+          // Deterministic: no hosted app unless the test names one.
+          Layer.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env }))),
         ),
       ),
       Layer.provide(AuthHttp.layerAuthenticatedAuth),
@@ -110,14 +114,19 @@ type Handler = (request: Request) => Effect.Effect<Response>;
 const withRoutes = <A, E>(
   use: (handler: Handler, auth: EnvironmentAuth.EnvironmentAuth["Service"]) => Effect.Effect<A, E>,
   linkState = notLinked,
+  env: Readonly<Record<string, string>> = {},
 ) =>
   Effect.gen(function* () {
     const random = yield* SecureRandom.SecureRandom;
     const context = Context.make(SecureRandom.SecureRandom, random);
     let routerAuth: EnvironmentAuth.EnvironmentAuth["Service"] | undefined;
-    const layerRoutes = makeLayerRoutes((auth) => {
-      routerAuth = auth;
-    }, linkState);
+    const layerRoutes = makeLayerRoutes(
+      (auth) => {
+        routerAuth = auth;
+      },
+      linkState,
+      env,
+    );
     return yield* Effect.acquireUseRelease(
       Effect.sync(() => HttpRouter.toWebHandler(layerRoutes, { disableLogger: true })),
       (web) =>
@@ -727,47 +736,66 @@ it.live("an app approval code approves only an app sign-in, at its own level", (
   ),
 );
 
+const HOSTED_APP_URL = "https://hosted.example.test";
+
+const handoff = (tunnelHostname: string, env: Readonly<Record<string, string>>, peerLink = false) =>
+  withRoutes(
+    (handler) =>
+      Effect.gen(function* () {
+        const registered = yield* handler(
+          at("/oauth/mcp/register", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: encodeJson({
+              client_name: "Agent",
+              redirect_uris: [REDIRECT],
+              token_endpoint_auth_method: "none",
+              ...(peerLink ? { software_id: MCP_PEER_LINK_SOFTWARE_ID } : {}),
+            }),
+          }),
+        ).pipe(Effect.flatMap(json<{ client_id: string }>));
+        const query = new URLSearchParams(
+          authorizeParams(registered.client_id, "http://localhost:51234/callback"),
+        );
+        const response = yield* handler(at(`/oauth/mcp/authorize?${query}`));
+        return { location: response.headers.get("location")!, query: query.toString() };
+      }),
+    { ...notLinked, linked: true, cloudUserId: "user_1", tunnelHostname },
+    env,
+  );
+
 it.effect(
-  "sends an app sign-in on the linked tunnel to the hosted app, and a link to its own page",
+  "sends an app sign-in on the linked tunnel to the configured hosted app, and a link to its own page",
   () =>
     Effect.gen(function* () {
-      const handoff = (tunnelHostname: string, peerLink = false) =>
-        withRoutes(
-          (handler) =>
-            Effect.gen(function* () {
-              const registered = yield* handler(
-                at("/oauth/mcp/register", {
-                  method: "POST",
-                  headers: { "content-type": "application/json" },
-                  body: encodeJson({
-                    client_name: "Agent",
-                    redirect_uris: [REDIRECT],
-                    token_endpoint_auth_method: "none",
-                    ...(peerLink ? { software_id: MCP_PEER_LINK_SOFTWARE_ID } : {}),
-                  }),
-                }),
-              ).pipe(Effect.flatMap(json<{ client_id: string }>));
-              const query = new URLSearchParams(
-                authorizeParams(registered.client_id, "http://localhost:51234/callback"),
-              );
-              const response = yield* handler(at(`/oauth/mcp/authorize?${query}`));
-              return { location: response.headers.get("location")!, query: query.toString() };
-            }),
-          { ...notLinked, linked: true, cloudUserId: "user_1", tunnelHostname },
-        );
-
-      const onTunnel = yield* handoff("box.example.ts.net");
+      const env = { K3CODE_HOSTED_APP_URL: HOSTED_APP_URL };
+      const onTunnel = yield* handoff("box.example.ts.net", env);
       const hosted = new URL(onTunnel.location);
-      expect(`${hosted.origin}${hosted.pathname}`).toBe("https://app.t3.codes/approve-agent");
+      expect(`${hosted.origin}${hosted.pathname}`).toBe(`${HOSTED_APP_URL}/approve-agent`);
       expect(hosted.searchParams.get("environment")).toEqual(expect.any(String));
       hosted.searchParams.delete("environment");
       expect(hosted.searchParams.toString()).toBe(onTunnel.query);
 
-      const elsewhere = yield* handoff("other.t3coderelay.com");
+      const elsewhere = yield* handoff("other.t3coderelay.com", env);
       expect(elsewhere.location).toBe(`/connect-agent?${elsewhere.query}`);
-      const peerLink = yield* handoff("box.example.ts.net", true);
+      const peerLink = yield* handoff("box.example.ts.net", env, true);
       expect(peerLink.location).toBe(`/connect-agent?${peerLink.query}`);
     }),
+);
+
+it.effect("keeps every app sign-in on this environment's own page without a hosted app", () =>
+  Effect.gen(function* () {
+    // Unset, empty, and an invalid value all mean there is no hosted app to hand off to.
+    for (const env of [
+      {},
+      { K3CODE_HOSTED_APP_URL: "" },
+      { K3CODE_HOSTED_APP_URL: "http://insecure.example.test" },
+    ]) {
+      const onTunnel = yield* handoff("box.example.ts.net", env);
+      expect(onTunnel.location).toBe(`/connect-agent?${onTunnel.query}`);
+      expect(onTunnel.location).not.toContain("t3.codes");
+    }
+  }),
 );
 
 it.live("one-click approves only access the browser session holds the scopes for", () =>

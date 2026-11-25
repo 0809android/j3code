@@ -1,4 +1,5 @@
 import type { DesktopAppBranding } from "@t3tools/contracts";
+import { K3_RELEASES_URL } from "@t3tools/shared/projectLinks";
 import {
   formatAppDisplayName,
   resolveHostedAppChannelLabel,
@@ -30,6 +31,6 @@ export const APP_DISPLAY_NAME =
   injectedDesktopAppBranding?.displayName ??
   formatAppDisplayName({ baseName: APP_BASE_NAME, stageLabel: APP_STAGE_LABEL });
 export const APP_VERSION = import.meta.env.APP_VERSION || "0.0.0";
-export const DESKTOP_DOWNLOAD_URL = "https://t3.codes/download";
-// Redirects to the App Store or Google Play to match the phone that opens it.
-export const MOBILE_APP_URL = "https://t3.codes/mobile";
+// K3 Code has no download site or app store listing yet; releases are on GitHub.
+export const DESKTOP_DOWNLOAD_URL = K3_RELEASES_URL;
+export const MOBILE_APP_URL = K3_RELEASES_URL;

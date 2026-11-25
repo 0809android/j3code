@@ -2254,22 +2254,15 @@
   "c65de112b48a66ed": "Kopplungslink hinzufügen",
   "bc8ab792af1d656f": "Auf deinem Computer ausführen:",
   "0ba14e4e920cfa00": "Oder lade die Desktop-App herunter",
-  "0e79b7a6508a6286": "Dann",
-  "363b9991fa23d36b": [
+  "b0ee28370857a4c7": "Installiere zuerst K3 Code von der Releases-Seite und führe dann aus:",
+  "205e15345457aa04": [
     "Überspringe die Installation, wenn du ",
     {
       "t": "code",
       "i": 1,
       "c": "t3"
     },
-    " bereits hast. Wenn",
-    " ",
-    {
-      "t": "code",
-      "i": 2,
-      "c": "t3"
-    },
-    " nach der Installation nicht gefunden wird, füge den Ordner, den das Installationsprogramm nennt, zu deinem PATH hinzu."
+    " bereits hast."
   ],
   "87b24d00c08f54bb": "Tastenkürzel-Datei kann nicht geöffnet werden",
   "0ee16208cbfcdbf4": "Unbekannter Fehler beim Öffnen der Datei.",

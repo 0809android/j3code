@@ -1,12 +1,14 @@
 import { assert, it } from "@effect/vitest";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 
 import {
   hostedAppUrlConfig,
   makeCloudCliOAuthConfig,
   makeRelayUrlConfig,
+  optionalHostedAppUrlConfig,
   resolveRelayClientTracingConfig,
 } from "./publicConfig.ts";
 
@@ -23,17 +25,50 @@ it.effect("rejects an insecure runtime relay URL override", () =>
 it.effect("rejects malformed or insecure hosted app URLs", () =>
   Effect.gen(function* () {
     for (const value of [
-      "app.t3.codes",
-      "http://app.t3.codes",
-      "https://app.t3.codes/nested",
-      "https://app.t3.codes?alias=true",
+      "app.example.test",
+      "http://app.example.test",
+      "https://app.example.test/nested",
+      "https://app.example.test?alias=true",
     ]) {
-      const result = yield* hostedAppUrlConfig.pipe(
-        provideEnv({ K3CODE_HOSTED_APP_URL: value }),
-        Effect.result,
-      );
-      assert.isTrue(Result.isFailure(result), value);
+      const env = { K3CODE_HOSTED_APP_URL: value };
+      const required = yield* hostedAppUrlConfig.pipe(provideEnv(env), Effect.result);
+      const optional = yield* optionalHostedAppUrlConfig.pipe(provideEnv(env), Effect.result);
+      assert.isTrue(Result.isFailure(required), value);
+      assert.isTrue(Result.isFailure(optional), value);
     }
+  }),
+);
+
+it.effect("has no hosted app unless one is configured", () =>
+  Effect.gen(function* () {
+    // Unset and empty mean none, not the former T3 hosted app or any other default.
+    for (const env of [{}, { K3CODE_HOSTED_APP_URL: "" }, { K3CODE_HOSTED_APP_URL: "  " }]) {
+      assert.deepEqual(yield* optionalHostedAppUrlConfig.pipe(provideEnv(env)), Option.none());
+      const required = yield* hostedAppUrlConfig.pipe(provideEnv(env), Effect.result);
+      assert.isTrue(Result.isFailure(required), JSON.stringify(env));
+    }
+  }),
+);
+
+it.effect("reads a configured hosted app as its origin", () =>
+  Effect.gen(function* () {
+    for (const value of ["https://app.example.test", " https://app.example.test/ "]) {
+      const env = { K3CODE_HOSTED_APP_URL: value };
+      assert.deepEqual(
+        yield* optionalHostedAppUrlConfig.pipe(provideEnv(env)),
+        Option.some("https://app.example.test"),
+      );
+      assert.strictEqual(
+        yield* hostedAppUrlConfig.pipe(provideEnv(env)),
+        "https://app.example.test",
+      );
+    }
+    assert.deepEqual(
+      yield* optionalHostedAppUrlConfig.pipe(
+        provideEnv({ K3CODE_HOSTED_APP_URL: "http://localhost:5733" }),
+      ),
+      Option.some("http://localhost:5733"),
+    );
   }),
 );
 

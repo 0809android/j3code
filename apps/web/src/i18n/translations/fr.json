@@ -2254,22 +2254,15 @@
   "c65de112b48a66ed": "Ajouter un lien d’appairage",
   "bc8ab792af1d656f": "Exécutez sur votre ordinateur :",
   "0ba14e4e920cfa00": "Ou téléchargez l’app desktop",
-  "0e79b7a6508a6286": "Puis",
-  "363b9991fa23d36b": [
+  "b0ee28370857a4c7": "Installez d’abord K3 Code depuis sa page des versions, puis exécutez :",
+  "205e15345457aa04": [
     "Ignorez l’installation si vous avez déjà ",
     {
       "t": "code",
       "i": 1,
       "c": "t3"
     },
-    ". Si",
-    " ",
-    {
-      "t": "code",
-      "i": 2,
-      "c": "t3"
-    },
-    " est introuvable après l’installation, ajoutez à votre PATH le dossier indiqué par l’installateur."
+    "."
   ],
   "87b24d00c08f54bb": "Impossible d’ouvrir le fichier des raccourcis clavier",
   "0ee16208cbfcdbf4": "Erreur inconnue à l’ouverture du fichier.",

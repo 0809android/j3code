@@ -5,7 +5,7 @@ import {
   MessageId,
   ThreadId,
 } from "@t3tools/contracts";
-import { describe, expect, it } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { serializeAssistantCitation } from "./assistantCitations.ts";
 import {
@@ -23,6 +23,7 @@ import {
   toComposerContextId,
   toKindScopedComposerContextId,
 } from "./composerContextReferences.ts";
+import { setHostedThreadLinkOrigin } from "./threadLinks.ts";
 
 const ctx = (value: string) => value as ComposerContextId;
 
@@ -567,6 +568,9 @@ describe("threadContextRecord", () => {
 });
 
 describe("threadLinkContextReferences", () => {
+  beforeEach(() => setHostedThreadLinkOrigin("https://hosted.example.test"));
+  afterEach(() => setHostedThreadLinkOrigin(undefined));
+
   const thread = (environmentId: string, threadId: string) => ({
     environmentId: EnvironmentId.make(environmentId),
     threadId: ThreadId.make(threadId),
@@ -577,9 +581,9 @@ describe("threadLinkContextReferences", () => {
   it("makes a chip of a copied link, a v2 link, and a labeled link, titled here", () => {
     const pasted = threadLinkContextReferences(
       [
-        "https://app.t3.codes/threads/env-1/t1",
+        "https://hosted.example.test/threads/env-1/t1",
         "<t3-thread://v2/env-1/t2>",
-        "[Written](https://app.t3.codes/threads/env-2/t3)",
+        "[Written](https://hosted.example.test/threads/env-2/t3)",
       ].join(" "),
       [],
       ({ threadId }) => (threadId === "t3" ? undefined : `Title ${threadId}`),
@@ -601,22 +605,25 @@ describe("threadLinkContextReferences", () => {
   it("prefers the record the copy carried, and names an unknown thread plainly", () => {
     const copied = threadContextRecord(thread("env-1", "t1"), "Copied title");
     const pasted = threadLinkContextReferences(
-      "https://app.t3.codes/threads/env-1/t1 https://app.t3.codes/threads/env-9/t9",
+      "https://hosted.example.test/threads/env-1/t1 https://hosted.example.test/threads/env-9/t9",
       [copied],
       () => "Here",
     );
     expect(pasted.records).toEqual([copied, threadContextRecord(thread("env-9", "t9"), "Here")]);
     expect(
-      threadLinkContextReferences("https://app.t3.codes/threads/env-9/t9", [], () => undefined)
-        .records,
+      threadLinkContextReferences(
+        "https://hosted.example.test/threads/env-9/t9",
+        [],
+        () => undefined,
+      ).records,
     ).toEqual([threadContextRecord(thread("env-9", "t9"), "Thread")]);
   });
 
   it("keeps links it may not chip, v1 links, and links in code as written", () => {
     const text = [
-      "https://app.t3.codes/threads/elsewhere/t1",
+      "https://hosted.example.test/threads/elsewhere/t1",
       "[Old](t3-thread://v1/t2)",
-      "`https://app.t3.codes/threads/env-1/t3`",
+      "`https://hosted.example.test/threads/env-1/t3`",
     ].join(" ");
     const pasted = threadLinkContextReferences(
       text,

@@ -13,6 +13,24 @@ describe("provider auth return destinations", () => {
       ).toBe(`${scheme}://app/settings/providers?instanceId=work`);
     },
   );
+  it("allows this machine, and the hosted app only when one is configured", () => {
+    const loopback = "http://127.0.0.1:5733/settings/providers?instanceId=work";
+    expect(providerAuthReturnUrl(loopback)).toBe(loopback);
+    const hosted = "https://hosted.example.test/settings/providers?instanceId=work";
+    expect(providerAuthReturnUrl(hosted)).toBeUndefined();
+    expect(providerAuthReturnUrl(hosted, undefined)).toBeUndefined();
+    expect(providerAuthReturnUrl(hosted, "https://hosted.example.test")).toBe(hosted);
+    expect(providerAuthReturnUrl(hosted, "https://hosted.example.test/ignored/path")).toBe(hosted);
+    expect(providerAuthReturnUrl(hosted, "https://other.example.test")).toBeUndefined();
+    expect(providerAuthReturnUrl(hosted, "http://hosted.example.test")).toBeUndefined();
+  });
+  it("never treats the former T3 hosted app as a return destination", () => {
+    for (const hostedAppUrl of [undefined, "https://hosted.example.test"]) {
+      expect(
+        providerAuthReturnUrl("https://app.t3.codes/welcome#agents:machine-id", hostedAppUrl),
+      ).toBeUndefined();
+    }
+  });
   it.each([
     "k3code://attacker/welcome",
     "k3code://app/welcome/../evil",

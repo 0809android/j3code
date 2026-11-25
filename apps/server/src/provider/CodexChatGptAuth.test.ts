@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off globalFetchInEffect:off - Local mock OAuth server validates the browser callback boundary.
 import * as NodeNet from "node:net";
+import * as ConfigProvider from "effect/ConfigProvider";
 import * as Context from "effect/Context";
 import * as Scope from "effect/Scope";
 import * as ServerConfig from "../config.ts";
@@ -688,6 +689,36 @@ it.effect(
         assert.notInclude(response.body, "hidden@example.test");
       }),
     ),
+);
+it.effect("returns to a hosted app only when one is configured, never to the former T3 one", () =>
+  Effect.gen(function* () {
+    for (const [env, returnUrl, redirected] of [
+      [{}, "https://hosted.example.test/welcome#agents:x", false],
+      [{}, "https://app.t3.codes/welcome#agents:x", false],
+      [
+        { K3CODE_HOSTED_APP_URL: "https://hosted.example.test" },
+        "https://hosted.example.test/welcome#agents:x",
+        true,
+      ],
+      [
+        { K3CODE_HOSTED_APP_URL: "https://hosted.example.test" },
+        "https://app.t3.codes/welcome#agents:x",
+        false,
+      ],
+    ] as const) {
+      yield* provision(
+        Effect.gen(function* () {
+          const h = yield* makeHarness;
+          h.setReturnUrl(returnUrl);
+          yield* h.signIn;
+          yield* h.phase("succeeded");
+          const body = h.callbackResponses[0]!.body;
+          assert.strictEqual(body.includes('http-equiv="refresh"'), redirected, returnUrl);
+          assert.notInclude(body, "app.t3.codes");
+        }),
+      ).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env }))));
+    }
+  }),
 );
 it.effect(
   "does not redirect to an arbitrary return URL or claim success after verification fails",
