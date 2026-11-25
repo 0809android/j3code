@@ -14,7 +14,11 @@ export const SOCKET_E2EE_QUERY_PARAM = "e2ee";
 
 export const E2EE_REQUIRED_CODE = "E2EE_REQUIRED";
 
-export { E2EE_HANDSHAKE_TIMEOUT, type E2eeSocket } from "./socketE2eeEngine.ts";
+export {
+  E2EE_HANDSHAKE_TIMEOUT,
+  type E2eeSessionInfo,
+  type E2eeSocket,
+} from "./socketE2eeEngine.ts";
 export {
   E2EE_IDENTITY_MISMATCH_CODE,
   E2eeIdentityMismatchError,
@@ -48,6 +52,7 @@ export {
   E2EE_FRAGMENT_BYTES,
   type E2eeV2ClientOptions,
   type E2eeV2ServerOptions,
+  requireAuthenticatedDevice,
   wrapClientSocketWithE2eeV2,
   wrapServerSocketWithE2eeV2,
 } from "./socketE2eeV2.ts";

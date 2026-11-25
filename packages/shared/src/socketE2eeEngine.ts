@@ -8,6 +8,8 @@ import * as Semaphore from "effect/Semaphore";
 import * as Socket from "effect/socket/Socket";
 import type { NonEmptyReadonlyArray } from "effect/Array";
 
+import type { E2eeDeviceIdentity } from "./socketE2eeDevice.ts";
+
 import {
   type E2eeFailure,
   E2eeProtocolError,
@@ -42,8 +44,22 @@ export interface E2eeChannel {
   ) => Effect.Effect<void, E2eeFailure>;
 }
 
+/**
+ * What an established connection proved. `transcriptHash` (`th`) binds the pairing proof and the
+ * confirmation code to this handshake. Only a v2 session whose confirm record carried a valid
+ * device signature, accepted by the host, is `deviceAuthenticated`.
+ */
+export type E2eeSessionInfo = {
+  readonly version: 1 | 2;
+  readonly transcriptHash: Uint8Array;
+} & (
+  | { readonly deviceAuthenticated: false; readonly device: undefined }
+  | { readonly deviceAuthenticated: true; readonly device: E2eeDeviceIdentity }
+);
+
 export interface E2eeHandshakeResult {
   readonly channel: E2eeChannel;
+  readonly info: E2eeSessionInfo;
   /** Runs after writers are released, for a verdict the peer sends back. */
   readonly confirm?: Effect.Effect<void, E2eeFailure> | undefined;
 }
@@ -54,6 +70,11 @@ export type E2eeHandshake = (
 ) => Effect.Effect<E2eeHandshakeResult, E2eeFailure>;
 
 export interface E2eeSocket extends Socket.Socket {
+  /**
+   * The current connection's session, once its handshake (and, for clients, the host's verdict)
+   * succeeded. The reader acquisition runs the handshake, so await this after acquiring it.
+   */
+  readonly sessionInfo: Effect.Effect<E2eeSessionInfo, Socket.SocketError>;
   /** Sends the protocol's authenticated close reason, when it has one, then closes. */
   readonly closeWithReason: (
     reason: E2eeRejectionReason,
@@ -79,13 +100,15 @@ export const makeE2eeSocket = Effect.fn("socketE2ee.makeSocket")(function* (
   options: { readonly mapReceiveError: (error: E2eeFailure) => E2eeFailure },
 ) {
   // The deferred for the connection a writer may send on. Each reader
-  // acquisition installs its own deferred before the handshake and resolves it
-  // on completion, so a writer either sends on the live session or waits for
-  // the next handshake.
+  // acquisition claims the pending deferred (or a fresh one) before the
+  // handshake and resolves it on completion, so a writer either sends on the
+  // live session or waits for the next handshake.
   const tickets = yield* Ref.make<Deferred.Deferred<ActiveConnection, Socket.SocketError>>(
     yield* Deferred.make<ActiveConnection, Socket.SocketError>(),
   );
   const writeLock = Semaphore.makeUnsafe(1);
+  // Resolved only after the peer's verdict, unlike the ticket, which releases writers earlier.
+  const sessions = yield* Ref.make(yield* Deferred.make<E2eeSessionInfo, Socket.SocketError>());
 
   // The writer is acquired independently of the reader, so it sends only once
   // the current connection's handshake is done. A write that races a reconnect
@@ -115,6 +138,36 @@ export const makeE2eeSocket = Effect.fn("socketE2ee.makeSocket")(function* (
         current === ticket ? Deferred.makeUnsafe<ActiveConnection, Socket.SocketError>() : current;
       return [undefined, next] as const;
     }).pipe(Effect.asVoid);
+
+  /**
+   * The deferred this connection resolves: the pending one if it is still open, so writers and
+   * session readers that arrived before the reader are served by this handshake.
+   */
+  const claimPending = <A>(ref: Ref.Ref<Deferred.Deferred<A, Socket.SocketError>>) =>
+    Ref.modify(ref, (current) => {
+      const next = Deferred.isDoneUnsafe(current)
+        ? Deferred.makeUnsafe<A, Socket.SocketError>()
+        : current;
+      return [next, next] as const;
+    });
+
+  const retireSession = (session: Deferred.Deferred<E2eeSessionInfo, Socket.SocketError>) =>
+    Ref.update(sessions, (current) =>
+      current === session ? Deferred.makeUnsafe<E2eeSessionInfo, Socket.SocketError>() : current,
+    );
+
+  /** Copies, so a caller that mutates the bytes cannot change what the next caller reads. */
+  const sessionInfo = Effect.flatMap(Ref.get(sessions), Deferred.await).pipe(
+    Effect.map((info): E2eeSessionInfo =>
+      info.deviceAuthenticated
+        ? {
+            ...info,
+            transcriptHash: Uint8Array.from(info.transcriptHash),
+            device: { ...info.device, publicKey: Uint8Array.from(info.device.publicKey) },
+          }
+        : { ...info, transcriptHash: Uint8Array.from(info.transcriptHash) },
+    ),
+  );
 
   const makeSource = (reader: Socket.Reader) => {
     const buffered: Array<Uint8Array | string> = [];
@@ -153,14 +206,15 @@ export const makeE2eeSocket = Effect.fn("socketE2ee.makeSocket")(function* (
     reader: Effect.gen(function* () {
       const reader = yield* socket.reader;
       const writer = yield* socket.writer;
-      const ticket = yield* Deferred.make<ActiveConnection, Socket.SocketError>();
-      yield* Ref.set(tickets, ticket);
+      const ticket = yield* claimPending(tickets);
+      const session = yield* claimPending(sessions);
       const { source, buffered } = makeSource(reader);
       const outcome = yield* Effect.exit(
         Effect.gen(function* () {
           const result = yield* handshake(source, writer);
           yield* Deferred.succeed(ticket, { channel: result.channel });
           if (result.confirm !== undefined) yield* result.confirm;
+          yield* Deferred.succeed(session, result.info);
           return result.channel;
         }).pipe(
           Effect.timeout(E2EE_HANDSHAKE_TIMEOUT),
@@ -178,10 +232,14 @@ export const makeE2eeSocket = Effect.fn("socketE2ee.makeSocket")(function* (
         const socketError = readError(failure.value);
         yield* retireTicket(ticket);
         yield* Deferred.fail(ticket, socketError);
+        yield* retireSession(session);
+        yield* Deferred.fail(session, socketError);
         return yield* socketError;
       }
       const channel = outcome.value;
-      yield* Effect.addFinalizer(() => retireTicket(ticket));
+      yield* Effect.addFinalizer(() =>
+        Effect.andThen(retireTicket(ticket), retireSession(session)),
+      );
       const receiveChunk = (chunk: Uint8Array | string) =>
         typeof chunk === "string"
           ? Effect.fail(
@@ -211,5 +269,5 @@ export const makeE2eeSocket = Effect.fn("socketE2ee.makeSocket")(function* (
         Effect.forEach(chunks, (chunk) => writerLoop(writer, chunk), { discard: true }),
     })),
   });
-  return Object.assign(wrapped, { closeWithReason }) satisfies E2eeSocket;
+  return Object.assign(wrapped, { closeWithReason, sessionInfo }) satisfies E2eeSocket;
 });

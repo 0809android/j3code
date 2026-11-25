@@ -1,10 +1,12 @@
 import * as Aead from "effect/crypto/Aead";
+import * as Deferred from "effect/Deferred";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
+import * as Ref from "effect/Ref";
 import * as Socket from "effect/socket/Socket";
 import { p256 } from "@noble/curves/nist.js";
 
@@ -16,6 +18,7 @@ import {
   type E2eeDeviceSigner,
   E2eeRejectedError,
   type E2eeRejectionReason,
+  type E2eeSocket,
   type E2eeV2ClientOptions,
   type E2eeV2ServerOptions,
   deviceIdFromPublicKey,
@@ -23,11 +26,21 @@ import {
   generateDeviceKeypair,
   generateIdentityKeypair,
   hostIdFromIdentityKey,
+  requireAuthenticatedDevice,
   wrapClientSocketWithE2ee,
   wrapClientSocketWithE2eeV2,
   wrapServerSocketWithE2ee,
   wrapServerSocketWithE2eeV2,
 } from "./socketE2ee.ts";
+import { relayDeviceId } from "./relay/encoding.ts";
+import {
+  type HostPairingState,
+  type PairingClaimMessage,
+  createPairingClaim,
+  openPairingWindow,
+  startDevicePairing,
+  submitPairingClaim,
+} from "./relay/pairing.ts";
 
 const ENVIRONMENT_ID = "env-e2ee-v2-test";
 const layerE2eeCrypto = Aead.layerWebCrypto.pipe(Layer.provideMerge(SecureRandom.layerWebCrypto));
@@ -818,4 +831,353 @@ describe("socketE2ee v2", () => {
       assertProtocolError(failure, "frame limit");
     }).pipe(Effect.provide(layerE2eeCrypto)),
   );
+});
+
+const PAIRING_NOW = 1_800_000_000_000;
+
+/** Like `host`, with the wrapped socket, so the body can read the session and guard it. */
+const hostWith = <A, E, R>(
+  socket: Socket.Socket,
+  options: E2eeV2ServerOptions,
+  body: (wrapped: E2eeSocket) => Effect.Effect<A, E, R>,
+) =>
+  Effect.scoped(
+    Effect.flatMap(wrapServerSocketWithE2eeV2(socket, options), (wrapped) => body(wrapped)),
+  );
+
+const deviceWith = <A, E, R>(
+  socket: Socket.Socket,
+  options: E2eeV2ClientOptions,
+  body: (
+    wrapped: E2eeSocket,
+    reader: Socket.Reader,
+    writer: Socket.Writer,
+  ) => Effect.Effect<A, E, R>,
+) =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const wrapped = yield* wrapClientSocketWithE2eeV2(socket, options);
+      const reader = yield* wrapped.reader;
+      return yield* body(wrapped, reader, yield* wrapped.writer);
+    }),
+  );
+
+describe("socketE2ee v2 sessions", () => {
+  it.effect("both ends read the same th after the verdict, and each handshake has its own", () =>
+    Effect.gen(function* () {
+      const identity = yield* generateIdentityKeypair();
+      const key = yield* generateDeviceKeypair("p256");
+      const ledger = makeLedger([key]);
+      const session = Effect.gen(function* () {
+        const pair = yield* makePair;
+        const hostFiber = yield* Effect.forkScoped(
+          hostWith(pair.server, hostOptions(identity.seed, ledger.verifyDevice), (wrapped) =>
+            Effect.andThen(wrapped.reader, wrapped.sessionInfo),
+          ),
+        );
+        const deviceInfo = yield* deviceWith(
+          pair.client,
+          clientOptions(identity.publicKey, deviceSignerFromKeypair(key)),
+          (wrapped) => wrapped.sessionInfo,
+        );
+        return { host: yield* Fiber.join(hostFiber), device: deviceInfo };
+      });
+      const first = yield* session;
+      const second = yield* session;
+      for (const { host: hostInfo, device: deviceInfo } of [first, second]) {
+        assert.equal(hostInfo.version, 2);
+        assert.equal(hostInfo.transcriptHash.length, 32);
+        assert.deepEqual(
+          Array.from(hostInfo.transcriptHash),
+          Array.from(deviceInfo.transcriptHash),
+        );
+        assert.isTrue(hostInfo.deviceAuthenticated);
+        assert.isTrue(deviceInfo.deviceAuthenticated);
+        assert.equal(hostInfo.device?.deviceId, relayDeviceId("p256", key.publicKey));
+        assert.equal(deviceInfo.device?.deviceId, hostInfo.device?.deviceId);
+      }
+      assert.notDeepEqual(
+        Array.from(first.host.transcriptHash),
+        Array.from(second.host.transcriptHash),
+      );
+    }).pipe(Effect.provide(layerE2eeCrypto)),
+  );
+
+  it.effect("sessionInfo hands out copies, so a caller cannot rewrite th for the next", () =>
+    Effect.gen(function* () {
+      const pair = yield* makePair;
+      const identity = yield* generateIdentityKeypair();
+      yield* Effect.forkScoped(
+        host(
+          pair.server,
+          hostOptions(identity.seed, makeLedger([]).verifyDevice, { requireDeviceAuth: false }),
+        ),
+      );
+      yield* deviceWith(pair.client, clientOptions(identity.publicKey, undefined), (wrapped) =>
+        Effect.gen(function* () {
+          const first = yield* wrapped.sessionInfo;
+          const original = Array.from(first.transcriptHash);
+          first.transcriptHash.fill(0);
+          assert.deepEqual(Array.from((yield* wrapped.sessionInfo).transcriptHash), original);
+        }),
+      );
+    }).pipe(Effect.provide(layerE2eeCrypto)),
+  );
+
+  it.effect("a host write issued before the reader is acquired goes out after the handshake", () =>
+    Effect.gen(function* () {
+      const pair = yield* makePair;
+      const identity = yield* generateIdentityKeypair();
+      const key = yield* generateDeviceKeypair("ed25519");
+      yield* Effect.forkScoped(
+        hostWith(
+          pair.server,
+          hostOptions(identity.seed, makeLedger([key]).verifyDevice),
+          (wrapped) =>
+            Effect.gen(function* () {
+              const writer = yield* wrapped.writer;
+              yield* Effect.forkScoped(writer.write("early"));
+              yield* Effect.yieldNow;
+              yield* wrapped.reader;
+              return yield* Effect.never;
+            }),
+        ),
+      );
+      yield* device(
+        pair.client,
+        clientOptions(identity.publicKey, deviceSignerFromKeypair(key)),
+        (reader) => Effect.map(pullOne(reader), (frame) => assert.equal(frame, "early")),
+      );
+    }).pipe(Effect.provide(layerE2eeCrypto)),
+  );
+
+  it.effect("a device whose host rejects it never gets a session to read", () =>
+    Effect.gen(function* () {
+      const pair = yield* makePair;
+      const identity = yield* generateIdentityKeypair();
+      const stranger = yield* generateDeviceKeypair("ed25519");
+      yield* Effect.forkScoped(
+        Effect.flip(host(pair.server, hostOptions(identity.seed, makeLedger([]).verifyDevice))),
+      );
+      const failure = yield* Effect.flip(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const wrapped = yield* wrapClientSocketWithE2eeV2(
+              pair.client,
+              clientOptions(identity.publicKey, deviceSignerFromKeypair(stranger)),
+            );
+            yield* Effect.forkScoped(wrapped.reader);
+            return yield* wrapped.sessionInfo;
+          }),
+        ),
+      );
+      assertRejected(failure, "unknown-device");
+    }).pipe(Effect.provide(layerE2eeCrypto)),
+  );
+
+  it.effect(
+    "an anonymous pairing claim is bound to its session's th; replayed elsewhere it fails and keeps S",
+    () =>
+      Effect.gen(function* () {
+        const identity = yield* generateIdentityKeypair();
+        const opened = yield* openPairingWindow({
+          hostIdentitySeed: identity.seed,
+          relayUrl: "https://relay.example",
+          now: PAIRING_NOW,
+        });
+        const pairing = yield* Ref.make<HostPairingState>(opened.state);
+        const options = hostOptions(identity.seed, makeLedger([]).verifyDevice, {
+          requireDeviceAuth: false,
+        });
+        /** The host's pairing route: one claim, checked against this session's own th. */
+        const pairingHost = (socket: Socket.Socket) =>
+          hostWith(socket, options, (wrapped) =>
+            Effect.gen(function* () {
+              const reader = yield* wrapped.reader;
+              const info = yield* wrapped.sessionInfo;
+              assert.isFalse(info.deviceAuthenticated);
+              assert.isUndefined(info.device);
+              const message = JSON.parse((yield* pullOne(reader)) as string);
+              const result = submitPairingClaim(yield* Ref.get(pairing), {
+                transcriptHash: info.transcriptHash,
+                message,
+                now: PAIRING_NOW,
+              });
+              yield* Ref.set(pairing, result.state);
+              const writer = yield* wrapped.writer;
+              yield* writer.write(
+                JSON.stringify(
+                  result.outcome.kind === "rejected"
+                    ? result.outcome.reply
+                    : { code: result.outcome.confirmationCode },
+                ),
+              );
+              return result.outcome;
+            }),
+          );
+
+        const deviceKey = yield* generateDeviceKeypair("ed25519");
+        const claimA = yield* Deferred.make<PairingClaimMessage>();
+        const sendA = yield* Deferred.make<void>();
+        const pairA = yield* makePair;
+        const hostA = yield* Effect.forkScoped(pairingHost(pairA.server));
+        const deviceA = yield* Effect.forkScoped(
+          deviceWith(
+            pairA.client,
+            clientOptions(identity.publicKey, undefined),
+            (wrapped, reader, writer) =>
+              Effect.gen(function* () {
+                const info = yield* wrapped.sessionInfo;
+                assert.isFalse(info.deviceAuthenticated);
+                const created = yield* createPairingClaim(
+                  startDevicePairing(opened.link, PAIRING_NOW),
+                  {
+                    transcriptHash: info.transcriptHash,
+                    signer: deviceSignerFromKeypair(deviceKey),
+                    name: "Phone",
+                    now: PAIRING_NOW,
+                  },
+                );
+                yield* Deferred.succeed(claimA, created.claim);
+                yield* Deferred.await(sendA);
+                yield* writer.write(JSON.stringify(created.claim));
+                return {
+                  code: created.confirmationCode,
+                  reply: JSON.parse((yield* pullOne(reader)) as string),
+                };
+              }),
+          ),
+        );
+        const stolen = yield* Deferred.await(claimA);
+
+        // Another anonymous session presents A's claim: its th differs, so the proof fails.
+        const pairB = yield* makePair;
+        const hostB = yield* Effect.forkScoped(pairingHost(pairB.server));
+        const replyB = yield* deviceWith(
+          pairB.client,
+          clientOptions(identity.publicKey, undefined),
+          (_wrapped, reader, writer) =>
+            Effect.gen(function* () {
+              yield* writer.write(JSON.stringify(stolen));
+              return JSON.parse((yield* pullOne(reader)) as string);
+            }),
+        );
+        const outcomeB = yield* Fiber.join(hostB);
+        assert.equal(outcomeB.kind, "rejected");
+        assert.deepEqual(replyB, { type: "pairing-rejected", reason: "invalid-claim" });
+        const afterReplay = yield* Ref.get(pairing);
+        assert.equal(afterReplay.phase, "open");
+
+        // The window survived, and the claim still verifies in its own session.
+        yield* Deferred.succeed(sendA, undefined);
+        const resultA = yield* Fiber.join(deviceA);
+        const outcomeA = yield* Fiber.join(hostA);
+        assert.equal(outcomeA.kind, "awaiting-approval");
+        assert.equal(
+          outcomeA.kind === "awaiting-approval" ? outcomeA.confirmationCode : "",
+          resultA.code,
+        );
+        assert.deepEqual(resultA.reply, { code: resultA.code });
+        assert.equal((yield* Ref.get(pairing)).phase, "awaiting-approval");
+      }).pipe(Effect.provide(layerE2eeCrypto)),
+  );
+
+  describe("requireAuthenticatedDevice", () => {
+    it.effect("refuses an anonymous session: no frame reaches the host, none leaves it", () =>
+      Effect.gen(function* () {
+        const pair = yield* makePair;
+        const identity = yield* generateIdentityKeypair();
+        const hostFiber = yield* Effect.forkScoped(
+          hostWith(
+            pair.server,
+            hostOptions(identity.seed, makeLedger([]).verifyDevice, { requireDeviceAuth: false }),
+            (wrapped) =>
+              Effect.gen(function* () {
+                const guarded = requireAuthenticatedDevice(wrapped);
+                const readFailure = yield* Effect.flip(guarded.reader);
+                const writer = yield* guarded.writer;
+                const writeFailure = yield* Effect.flip(writer.write('{"rpc":"secret"}'));
+                return { readFailure, writeFailure };
+              }),
+          ),
+        );
+        const deviceFailure = yield* Effect.flip(
+          device(pair.client, clientOptions(identity.publicKey, undefined), (reader, writer) =>
+            Effect.gen(function* () {
+              yield* writer.write('{"rpc":"listProjects"}');
+              return yield* reader.pull;
+            }),
+          ),
+        );
+        const { readFailure, writeFailure } = yield* Fiber.join(hostFiber);
+        assertRejected(readFailure, "host-policy");
+        assertRejected(writeFailure, "host-policy");
+        assertRejected(deviceFailure, "host-policy");
+      }).pipe(Effect.provide(layerE2eeCrypto)),
+    );
+
+    it.effect("refuses a v1 session on a host that still accepts v1", () =>
+      Effect.gen(function* () {
+        const pair = yield* makePair;
+        const identity = yield* generateIdentityKeypair();
+        const hostFiber = yield* Effect.forkScoped(
+          hostWith(
+            pair.server,
+            hostOptions(identity.seed, makeLedger([]).verifyDevice, {
+              acceptV1: true,
+              requireDeviceAuth: false,
+            }),
+            (wrapped) => Effect.flip(requireAuthenticatedDevice(wrapped).reader),
+          ),
+        );
+        yield* Effect.forkScoped(
+          Effect.scoped(
+            Effect.flatMap(
+              wrapClientSocketWithE2ee(pair.client, {
+                environmentId: ENVIRONMENT_ID,
+                expectedServerIdentityKey: identity.publicKey,
+              }),
+              (wrapped) => wrapped.reader,
+            ),
+          ),
+        );
+        assertRejected(yield* Fiber.join(hostFiber), "host-policy");
+      }).pipe(Effect.provide(layerE2eeCrypto)),
+    );
+
+    it.effect("passes an authenticated device through, with its identity", () =>
+      Effect.gen(function* () {
+        const pair = yield* makePair;
+        const identity = yield* generateIdentityKeypair();
+        const key = yield* generateDeviceKeypair("ed25519");
+        const hostFiber = yield* Effect.forkScoped(
+          hostWith(
+            pair.server,
+            hostOptions(identity.seed, makeLedger([key]).verifyDevice, {
+              requireDeviceAuth: false,
+            }),
+            (wrapped) =>
+              Effect.gen(function* () {
+                const guarded = requireAuthenticatedDevice(wrapped);
+                const reader = yield* guarded.reader;
+                yield* (yield* guarded.writer).write(yield* pullOne(reader));
+                return yield* guarded.sessionInfo;
+              }),
+          ),
+        );
+        yield* device(
+          pair.client,
+          clientOptions(identity.publicKey, deviceSignerFromKeypair(key)),
+          (reader, writer) =>
+            Effect.gen(function* () {
+              yield* writer.write("ping");
+              assert.equal(yield* pullOne(reader), "ping");
+            }),
+        );
+        const info = yield* Fiber.join(hostFiber);
+        assert.isTrue(info.deviceAuthenticated);
+        assert.equal(info.device?.deviceId, deviceIdFromPublicKey("ed25519", key.publicKey));
+      }).pipe(Effect.provide(layerE2eeCrypto)),
+    );
+  });
 });

@@ -292,8 +292,20 @@ const clientHandshakeV1 = Effect.fn("socketE2ee.clientHandshake")(function* (
   yield* writer.write(
     yield* sealRecord(session, aead, new Uint8Array(0), DIRECTION_C2S, RECORD_VERSION),
   );
-  return { channel: makeV1Channel(session, aead, "client") } satisfies E2eeHandshakeResult;
+  return {
+    channel: makeV1Channel(session, aead, "client"),
+    info: anonymousV1Info(transcript),
+  } satisfies E2eeHandshakeResult;
 });
+
+/** v1 never authenticates a device. */
+const anonymousV1Info = (transcript: Uint8Array) =>
+  ({
+    version: 1,
+    transcriptHash: transcript,
+    deviceAuthenticated: false,
+    device: undefined,
+  }) as const;
 
 /** The server half of v1, given the client hello the caller already pulled. */
 export const serverHandshakeV1 = Effect.fn("socketE2ee.serverHandshake")(function* (
@@ -353,7 +365,10 @@ export const serverHandshakeV1 = Effect.fn("socketE2ee.serverHandshake")(functio
       detail: "The E2EE key confirmation record was not empty.",
     });
   }
-  return { channel: makeV1Channel(session, aead, "server") } satisfies E2eeHandshakeResult;
+  return {
+    channel: makeV1Channel(session, aead, "server"),
+    info: anonymousV1Info(transcript),
+  } satisfies E2eeHandshakeResult;
 });
 
 /**

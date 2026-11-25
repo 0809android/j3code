@@ -22,6 +22,7 @@ import {
   type E2eeChannel,
   type E2eeFrameSource,
   type E2eeHandshakeResult,
+  type E2eeSessionInfo,
   type E2eeSocket,
   makeE2eeSocket,
 } from "./socketE2eeEngine.ts";
@@ -87,7 +88,7 @@ const isRejectionReason = Schema.is(E2eeRejectionReason);
 export interface E2eeV2ClientOptions {
   readonly environmentId: string;
   readonly expectedServerIdentityKey: Uint8Array;
-  /** Omit only on direct connections that predate device keys. */
+  /** Omit only on direct connections that predate device keys, and for pairing. */
   readonly device?: E2eeDeviceSigner | undefined;
   readonly maxFrameBytes?: number | undefined;
 }
@@ -97,7 +98,10 @@ export interface E2eeV2ServerOptions {
   readonly identitySeed: Uint8Array;
   /** Checks the device against the host's ledger; the device key is the only identity. */
   readonly verifyDevice: (device: E2eeDeviceIdentity) => Effect.Effect<void, E2eeRejectedError>;
-  /** Defaults to true. Relay connections must keep it on. */
+  /**
+   * Defaults to true. Relay connections must keep it on, except the pairing connection, whose
+   * anonymous sessions the caller must route to pairing only (see `requireAuthenticatedDevice`).
+   */
   readonly requireDeviceAuth?: boolean | undefined;
   /** Defaults to false. Never honoured while device authentication is required. */
   readonly acceptV1?: boolean | undefined;
@@ -483,10 +487,24 @@ const clientHandshake = Effect.fn("socketE2ee.clientHandshakeV2")(function* (
       options.maxFrameBytes ?? DEFAULT_MAX_FRAME_BYTES,
     ),
     confirm,
+    info: sessionInfoFor(
+      transcript,
+      device === undefined ? undefined : deviceIdentity(device.alg, device.publicKey),
+    ),
   } satisfies E2eeHandshakeResult;
 });
 
-/** Decides the verdict for a decrypted confirm record; `undefined` accepts. */
+const sessionInfoFor = (
+  transcript: Uint8Array,
+  device: E2eeDeviceIdentity | undefined,
+): E2eeSessionInfo =>
+  device === undefined
+    ? { version: 2, transcriptHash: transcript, deviceAuthenticated: false, device: undefined }
+    : { version: 2, transcriptHash: transcript, deviceAuthenticated: true, device };
+
+type Verdict = { readonly accepted: E2eeSessionInfo } | { readonly rejected: E2eeRejectionReason };
+
+/** Decides the verdict for a decrypted confirm record. */
 const authenticate = Effect.fnUntraced(function* (
   auth: ClientAuth,
   transcript: Uint8Array,
@@ -494,7 +512,9 @@ const authenticate = Effect.fnUntraced(function* (
   options: E2eeV2ServerOptions,
 ) {
   if (auth._tag === "anonymous") {
-    return options.requireDeviceAuth === false ? undefined : ("host-policy" as const);
+    return options.requireDeviceAuth === false
+      ? ({ accepted: sessionInfoFor(transcript, undefined) } satisfies Verdict)
+      : ({ rejected: "host-policy" } satisfies Verdict);
   }
   if (!isDeviceAlgorithm(auth.alg) || !isCanonicalDevicePublicKey(auth.alg, auth.publicKey)) {
     return yield* protocolError("The device key is not canonical.");
@@ -507,12 +527,12 @@ const authenticate = Effect.fnUntraced(function* (
       auth.signature,
     )
   ) {
-    return "key-mismatch" as const;
+    return { rejected: "key-mismatch" } satisfies Verdict;
   }
-  const verdict = yield* Effect.result(
-    options.verifyDevice(deviceIdentity(auth.alg, auth.publicKey)),
-  );
-  return Result.isFailure(verdict) ? verdict.failure.reason : undefined;
+  const device = deviceIdentity(auth.alg, auth.publicKey);
+  const ledger = yield* Effect.result(options.verifyDevice(device));
+  if (Result.isFailure(ledger)) return { rejected: ledger.failure.reason } satisfies Verdict;
+  return { accepted: sessionInfoFor(transcript, device) } satisfies Verdict;
 });
 
 const serverHandshake = Effect.fn("socketE2ee.serverHandshakeV2")(function* (
@@ -575,7 +595,7 @@ const serverHandshake = Effect.fn("socketE2ee.serverHandshakeV2")(function* (
   if (auth === undefined) {
     return yield* protocolError("The E2EE client authentication record is invalid.");
   }
-  const rejection = yield* authenticate(auth, transcript, identityPub, options);
+  const verdict: Verdict = yield* authenticate(auth, transcript, identityPub, options);
   const keys = yield* deriveTrafficKeys(
     sharedSecret,
     transcript,
@@ -594,15 +614,15 @@ const serverHandshake = Effect.fn("socketE2ee.serverHandshakeV2")(function* (
     "server",
     options.maxFrameBytes ?? DEFAULT_MAX_FRAME_BYTES,
   );
-  if (rejection !== undefined) {
-    yield* channel.sendClose!(writer, rejection);
+  if ("rejected" in verdict) {
+    yield* channel.sendClose!(writer, verdict.rejected);
     yield* writer.write(new Socket.CloseEvent(1008));
-    return yield* new E2eeRejectedError({ reason: rejection });
+    return yield* new E2eeRejectedError({ reason: verdict.rejected });
   }
   yield* writer.write(
     yield* sealInner(session, aead, DIRECTION_S2C, KIND_ACCEPT, new Uint8Array(0)),
   );
-  return { channel } satisfies E2eeHandshakeResult;
+  return { channel, info: verdict.accepted } satisfies E2eeHandshakeResult;
 });
 
 /** Client side of v2: pins the host key and, when it has one, authenticates the device key. */
@@ -612,7 +632,7 @@ export const wrapClientSocketWithE2eeV2 = Effect.fn("socketE2ee.wrapClientSocket
 ) {
   const aead = yield* Aead.Aead;
   const random = yield* SecureRandom.SecureRandom;
-  const wrapped = yield* makeE2eeSocket(
+  const wrapped: E2eeSocket = yield* makeE2eeSocket(
     socket,
     (source, writer) =>
       clientHandshake(source, writer, aead, options).pipe(
@@ -620,7 +640,7 @@ export const wrapClientSocketWithE2eeV2 = Effect.fn("socketE2ee.wrapClientSocket
       ),
     { mapReceiveError },
   );
-  return wrapped as Socket.Socket;
+  return wrapped;
 });
 
 /**
@@ -644,3 +664,44 @@ export const wrapServerSocketWithE2eeV2 = Effect.fn("socketE2ee.wrapServerSocket
   );
   return wrapped;
 });
+
+/**
+ * A view of a host socket that serves only device-authenticated v2 sessions: once the handshake
+ * is done, an anonymous (pairing) or v1 session is closed with `host-policy`, and its reader and
+ * writer fail. Hand this view, never the raw socket, to anything other than pairing.
+ */
+export const requireAuthenticatedDevice = (socket: E2eeSocket): E2eeSocket => {
+  const authorize = (side: "read" | "write") =>
+    Effect.flatMap(socket.sessionInfo, (info) => {
+      if (info.version === 2 && info.deviceAuthenticated) return Effect.void;
+      const cause = new E2eeRejectedError({ reason: "host-policy" });
+      return Effect.andThen(
+        socket.closeWithReason("host-policy"),
+        Effect.fail(
+          new Socket.SocketError({
+            reason:
+              side === "read"
+                ? new Socket.SocketReadError({ cause })
+                : new Socket.SocketWriteError({ cause }),
+          }),
+        ),
+      );
+    });
+  const guarded = Socket.make({
+    reader: Effect.tap(socket.reader, () => authorize("read")),
+    writer: Effect.map(socket.writer, (writer) => {
+      const write = (chunk: Uint8Array | string | Socket.CloseEvent) =>
+        Socket.isCloseEvent(chunk)
+          ? writer.write(chunk)
+          : Effect.andThen(authorize("write"), writer.write(chunk));
+      return {
+        write,
+        writeAll: (chunks) => Effect.forEach(chunks, write, { discard: true }),
+      } satisfies Socket.Writer;
+    }),
+  });
+  return Object.assign(guarded, {
+    closeWithReason: socket.closeWithReason,
+    sessionInfo: socket.sessionInfo,
+  }) satisfies E2eeSocket;
+};
