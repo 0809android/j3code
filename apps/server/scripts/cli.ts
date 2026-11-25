@@ -135,9 +135,9 @@ const buildExeCmd = Command.make(
             cwd: serverDir,
             env: {
               ...process.env,
-              T3CODE_PACK_EXE: packMode,
-              T3CODE_CLI_ASSET_DIR: cliAssetDir,
-              T3CODE_PACK_EXE_TARGET: target ?? "",
+              K3CODE_PACK_EXE: packMode,
+              K3CODE_CLI_ASSET_DIR: cliAssetDir,
+              K3CODE_PACK_EXE_TARGET: target ?? "",
             },
             stdout: config.verbose ? "inherit" : "ignore",
             stderr: "inherit",
@@ -225,7 +225,7 @@ const publishCmd = Command.make(
 ).pipe(Command.withDescription("Publish the t3 launcher to npm."));
 
 const cli = Command.make("cli").pipe(
-  Command.withDescription("T3 server build & publish CLI."),
+  Command.withDescription("K3 server build & publish CLI."),
   Command.withSubcommands([buildCmd, buildExeCmd, publishCmd]),
 );
 

@@ -1,8 +1,8 @@
-# T3 Code docs
+# K3 Code docs
 
-## Using T3 Code
+## Using K3 Code
 
-- [Install T3 Code](./user/install.md)
+- [Install K3 Code](./user/install.md)
 - [Messages and context](./user/composer.md)
 - [Working with threads](./user/thread-sidebar.md)
 - [Permission modes](./user/permission-modes.md)
@@ -17,23 +17,23 @@
 - [SnapShots](./user/snap-shot.md)
 - [Visual replies](./user/html-renders.md)
 - [Import browser sessions](./user/browser-import.md)
-- [Use T3 Code as your default browser](./user/default-browser.md)
+- [Use K3 Code as your default browser](./user/default-browser.md)
 - [Devices](./user/devices.md)
 - [Usage and limits](./user/usage.md)
 - [Secrets](./user/secrets.md)
-- [Product usage data](./user/telemetry.md)
+- [Usage data and diagnostics](./user/telemetry.md)
 - [Remote access](./user/remote-access.md)
 - [Guest links](./user/guest-links.md)
 - [T3 Connect troubleshooting](./user/t3-connect-troubleshooting.md)
 - [Outside agents (MCP)](./user/outside-agents.md)
 - [Running in the background](./user/background-service.md)
-- [Updating T3 Code](./user/updating.md)
+- [Updating K3 Code](./user/updating.md)
 - [Triage an issue](./user/triage.md)
 - Provider guides: [Codex](./user/providers-codex.md) · [Claude](./user/providers-claude.md) · [OpenCode](./user/providers-opencode.md) · [Antigravity](./user/providers-antigravity.md) · [Kiro](./user/providers-kiro.md) · [Pi](./user/providers-pi.md) · [Muse Code](./user/providers-muse.md) · [fx](./user/providers-fx.md)
 
 ---
 
-## Working on T3 Code
+## Working on K3 Code
 
 Start with the [development runbook](./operations/00_development.md) and
 [contribution policy](../CONTRIBUTING.md).
@@ -53,7 +53,6 @@ anything.
 - [05 · Remote environments](./internals/05_remote.md)
 - [06 · T3 Connect](./internals/06_t3-connect.md)
 - [07 · Server updates](./internals/07_server-updates.md)
-- [08 · Product analytics](./internals/08_product-analytics.md)
 - [09 · Connection runtime](./internals/09_connection-runtime.md)
 - [10 · Web UI](./internals/10_web-ui.md)
 - [11 · Mobile layout](./internals/11_mobile-layout.md)

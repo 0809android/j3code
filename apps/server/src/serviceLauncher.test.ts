@@ -168,7 +168,7 @@ const writeFakeRuntime = (
   });
 
 const runLauncher = async (root: string) => {
-  vi.stubEnv("T3CODE_HOME", root);
+  vi.stubEnv("K3CODE_HOME", root);
   try {
     await main();
   } finally {
@@ -418,10 +418,10 @@ setInterval(() => {}, 1_000);
         const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-service-env-" });
         const inherited = Object.freeze({
           PATH: "inherited-path",
-          T3CODE_HOME: root,
+          K3CODE_HOME: root,
           T3_BOOT_SERVICE_UNIT: "managed-unit",
           T3_SERVICE_LAUNCHER_CONTEXT: "managed-context",
-          T3CODE_PORT: "ambient",
+          K3CODE_PORT: "ambient",
         });
         assert.deepEqual(
           yield* Effect.promise(() => readServiceEnvironment(root, inherited)),
@@ -431,14 +431,14 @@ setInterval(() => {}, 1_000);
           path.join(root, SERVICE_ENV_FILE),
           [
             "# service configuration",
-            "export T3CODE_PORT=1234 # inline comment",
-            'T3CODE_TOKEN="literal $HOME ${USER} $(whoami) # token"',
+            "export K3CODE_PORT=1234 # inline comment",
+            'K3CODE_TOKEN="literal $HOME ${USER} $(whoami) # token"',
             'MULTILINE="first\nsecond"',
             "EMPTY=",
             "PATH=/bad",
             "Path=/bad",
-            "T3CODE_HOME=/bad",
-            "t3code_home=/bad",
+            "K3CODE_HOME=/bad",
+            "k3code_home=/bad",
             "T3_BOOT_SERVICE_UNIT=bad",
             "t3_boot_service_unit=bad",
             "T3_SERVICE_LAUNCHER_CONTEXT=bad",
@@ -447,8 +447,8 @@ setInterval(() => {}, 1_000);
         );
         assert.deepEqual(yield* Effect.promise(() => readServiceEnvironment(root, inherited)), {
           ...inherited,
-          T3CODE_PORT: "1234",
-          T3CODE_TOKEN: "literal $HOME ${USER} $(whoami) # token",
+          K3CODE_PORT: "1234",
+          K3CODE_TOKEN: "literal $HOME ${USER} $(whoami) # token",
           MULTILINE: "first\nsecond",
           EMPTY: "",
         });
@@ -460,7 +460,7 @@ setInterval(() => {}, 1_000);
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-service-launcher-task-" });
-      const unitPath = path.join(root, "t3code-task.xml");
+      const unitPath = path.join(root, "k3code-task.xml");
       const unit = renderBootServiceTask(unitPlan(root, "1.1.0"), {
         userId: "PC\\theo",
         homeDir: "C:\\Users\\theo",
@@ -474,12 +474,12 @@ setInterval(() => {}, 1_000);
         return { stdout: task };
       };
 
-      yield* Effect.promise(() => registerServiceTask(unitPath, "t3code-PC-theo", schtasks));
+      yield* Effect.promise(() => registerServiceTask(unitPath, "k3code-PC-theo", schtasks));
       assert.equal(task, disabledServiceTask(unit));
-      assert.deepEqual(yield* fs.readDirectory(root), ["t3code-task.xml"]);
+      assert.deepEqual(yield* fs.readDirectory(root), ["k3code-task.xml"]);
 
       task = unit.replace("1.1.0", "1.0.0");
-      yield* Effect.promise(() => registerServiceTask(unitPath, "t3code-PC-theo", schtasks));
+      yield* Effect.promise(() => registerServiceTask(unitPath, "k3code-PC-theo", schtasks));
       assert.equal(task, unit);
     }),
   );
@@ -490,7 +490,7 @@ setInterval(() => {}, 1_000);
       const path = yield* Path.Path;
       const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-service-launcher-unit-" });
       const home = path.join(root, "home");
-      const unitPath = path.join(home, "Library", "LaunchAgents", "t3code.plist");
+      const unitPath = path.join(home, "Library", "LaunchAgents", "k3code.plist");
       const render = (version: string) =>
         renderBootServicePlist(unitPlan(root, version), { homeDir: home, environmentPath: "" });
       yield* fs.makeDirectory(path.dirname(unitPath), { recursive: true });
@@ -516,7 +516,7 @@ setInterval(() => {}, 1_000);
         }),
       );
       vi.stubEnv("HOME", home);
-      vi.stubEnv("T3_BOOT_SERVICE_UNIT", "t3code.plist");
+      vi.stubEnv("T3_BOOT_SERVICE_UNIT", "k3code.plist");
 
       yield* Effect.promise(() =>
         expect(runLauncher(root)).rejects.toThrow("Active child exited unexpectedly (0)."),
@@ -535,7 +535,7 @@ setInterval(() => {}, 1_000);
         const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-service-launcher-xdg-" });
         const home = path.join(root, "home");
         const managerUnitDir = path.join(home, ".config", "systemd", "user");
-        const unitPath = path.join(managerUnitDir, "t3code.service");
+        const unitPath = path.join(managerUnitDir, "k3code.service");
         const render = (version: string) =>
           renderBootServiceUnit({ ...unitPlan(root, version), unitPath });
         yield* fs.makeDirectory(managerUnitDir, { recursive: true });
@@ -579,7 +579,7 @@ setInterval(() => {}, 1_000);
         vi.stubEnv("HOME", home);
         // environment.d changes what services inherit, not where the manager reads units.
         vi.stubEnv("XDG_CONFIG_HOME", path.join(home, "service-config"));
-        vi.stubEnv("T3_BOOT_SERVICE_UNIT", "t3code.service");
+        vi.stubEnv("T3_BOOT_SERVICE_UNIT", "k3code.service");
 
         yield* Effect.promise(() =>
           expect(runLauncher(root)).rejects.toThrow("Active child exited unexpectedly (0)."),
@@ -596,7 +596,7 @@ setInterval(() => {}, 1_000);
       const path = yield* Path.Path;
       const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-service-launcher-log-" });
       const home = path.join(root, "home");
-      const unitPath = path.join(home, "Library", "LaunchAgents", "t3code.plist");
+      const unitPath = path.join(home, "Library", "LaunchAgents", "k3code.plist");
       const plan = unitPlan(root, "1.0.0");
       yield* fs.makeDirectory(path.dirname(unitPath), { recursive: true });
       yield* fs.writeFileString(
@@ -620,7 +620,7 @@ setInterval(() => {}, 1_000);
         }),
       );
       vi.stubEnv("HOME", home);
-      vi.stubEnv("T3_BOOT_SERVICE_UNIT", "t3code.plist");
+      vi.stubEnv("T3_BOOT_SERVICE_UNIT", "k3code.plist");
 
       yield* Effect.promise(() =>
         expect(runLauncher(root)).rejects.toThrow("Active child exited unexpectedly (0)."),
@@ -664,7 +664,7 @@ process.exit(0);
     }),
   );
 
-  it.effect("starts the runtime in a T3 home whose name ends in a space", () =>
+  it.effect("starts the runtime in a K3 home whose name ends in a space", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
@@ -799,7 +799,7 @@ process.exit(0);
 
   it.effect.each([
     { unitVersion: "1.0.0", replacement: "an intentional downgrade" },
-    { unitVersion: "1.2.0", replacement: "another T3 home" },
+    { unitVersion: "1.2.0", replacement: "another K3 home" },
   ])(
     "recovers a rolled-back update with unit $unitVersion and preserves $replacement",
     ({ unitVersion, replacement }) =>
@@ -865,7 +865,7 @@ process.exit(0);
         const staleLauncher = yield* createLauncher;
         // A local install can replace the selection or service owner without stopping this launcher.
         const selectedRoot =
-          replacement === "another T3 home" ? path.join(root, "other-home") : root;
+          replacement === "another K3 home" ? path.join(root, "other-home") : root;
         yield* writeFakeRuntime(
           fs,
           path,
@@ -896,7 +896,7 @@ process.exit(0);
       }),
   );
 
-  it.effect("repoints a unit that names this T3 home through a symlink", () =>
+  it.effect("repoints a unit that names this K3 home through a symlink", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
@@ -941,7 +941,7 @@ process.exit(0);
     }),
   );
 
-  it.effect("waits without exiting and restarts once the other owner releases the T3 home", () =>
+  it.effect("waits without exiting and restarts once the other owner releases the K3 home", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
@@ -974,7 +974,7 @@ process.exit(0);
       yield* Effect.acquireRelease(
         Effect.sync(() =>
           vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
-            if (String(chunk).includes("owns this T3 home")) refused.resolve();
+            if (String(chunk).includes("owns this K3 home")) refused.resolve();
             return true;
           }),
         ),
@@ -1065,7 +1065,7 @@ process.exit(0);
         yield* Effect.acquireRelease(
           Effect.sync(() =>
             vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
-              if (String(chunk).includes("owns this T3 home")) refused.resolve();
+              if (String(chunk).includes("owns this K3 home")) refused.resolve();
               return true;
             }),
           ),
@@ -1140,7 +1140,7 @@ process.exit(0);
       yield* Effect.acquireRelease(
         Effect.sync(() =>
           vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
-            if (String(chunk).includes("owns this T3 home")) refused.resolve();
+            if (String(chunk).includes("owns this K3 home")) refused.resolve();
             return true;
           }),
         ),
@@ -1167,7 +1167,7 @@ process.exit(0);
     }),
   );
 
-  it.effect("treats the T3 home as owned while the lock or a pre-lock server holds it", () =>
+  it.effect("treats the K3 home as owned while the lock or a pre-lock server holds it", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
@@ -1365,9 +1365,9 @@ if (context.update?.status === "pending") {
       const databasePath = path.join(root, "userdata", "state.sqlite");
       const observationsPath = path.join(root, "environment-observations.jsonl");
       const envPath = path.join(root, SERVICE_ENV_FILE);
-      yield* fs.writeFileString(envPath, "T3CODE_TEST_SERVICE_TOKEN=initial\n");
-      vi.stubEnv("T3CODE_HOME", root);
-      vi.stubEnv("T3CODE_TEST_SERVICE_TOKEN", "inherited");
+      yield* fs.writeFileString(envPath, "K3CODE_TEST_SERVICE_TOKEN=initial\n");
+      vi.stubEnv("K3CODE_HOME", root);
+      vi.stubEnv("K3CODE_TEST_SERVICE_TOKEN", "inherited");
       yield* Effect.addFinalizer(() => Effect.sync(() => vi.unstubAllEnvs()));
       yield* fs.makeDirectory(path.dirname(databasePath), { recursive: true });
       yield* fs.writeFileString(databasePath, "before trial");
@@ -1376,13 +1376,13 @@ if (context.update?.status === "pending") {
 import { appendFileSync, writeFileSync } from "node:fs";
 const context = JSON.parse(process.env.T3_SERVICE_LAUNCHER_CONTEXT);
 appendFileSync(${JSON.stringify(observationsPath)}, JSON.stringify({
-  token: process.env.T3CODE_TEST_SERVICE_TOKEN,
+  token: process.env.K3CODE_TEST_SERVICE_TOKEN,
   update: context.update?.status ?? "active",
 }) + "\\n");
 if (context.update?.status === "pending") {
   process.send({ type: "prepared", updateId: "wrong-update" });
 } else if (context.update === undefined) {
-  writeFileSync(${JSON.stringify(envPath)}, "T3CODE_TEST_SERVICE_TOKEN=changed\\n");
+  writeFileSync(${JSON.stringify(envPath)}, "K3CODE_TEST_SERVICE_TOKEN=changed\\n");
   process.send({ type: "request-update", targetVersion: "1.1.0", dbPath: ${encodedDatabasePath} });
   setInterval(() => {}, 1_000);
 } else {
@@ -1441,8 +1441,8 @@ if (context.update?.status === "pending") {
         { token: "initial", update: "pending" },
         { token: "initial", update: "rolled-back" },
       ]);
-      assert.equal((yield* HostProcess.Environment).T3CODE_TEST_SERVICE_TOKEN, "inherited");
-      assert.equal(yield* fs.readFileString(envPath), "T3CODE_TEST_SERVICE_TOKEN=changed\n");
+      assert.equal((yield* HostProcess.Environment).K3CODE_TEST_SERVICE_TOKEN, "inherited");
+      assert.equal(yield* fs.readFileString(envPath), "K3CODE_TEST_SERVICE_TOKEN=changed\n");
     }),
   );
 

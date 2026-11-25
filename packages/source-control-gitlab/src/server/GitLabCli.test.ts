@@ -111,7 +111,7 @@ layer("GitLabCli.layer", (it) => {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const bodyDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-gitlab-mr-body-" });
-      const bodyFile = path.join(bodyDir, "t3code-pr-body.md");
+      const bodyFile = path.join(bodyDir, "k3code-pr-body.md");
       yield* fileSystem.writeFileString(bodyFile, "## Summary\n\nFixes the thing.\n");
       mockedRun.mockReturnValueOnce(Effect.succeed(processOutput("{}")));
 

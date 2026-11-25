@@ -1,7 +1,7 @@
 import * as Schema from "effect/Schema";
 import { NonNegativeInt } from "./baseSchemas.ts";
 
-/** What can be carried over from a T3 Code install on the same machine. */
+/** What can be carried over from a K3 Code install on the same machine. */
 export const LegacyImportKind = Schema.Literals(["settings", "providers", "sessions"]);
 export type LegacyImportKind = typeof LegacyImportKind.Type;
 
@@ -18,7 +18,7 @@ export const LegacyImportItem = Schema.Struct({
 export type LegacyImportItem = typeof LegacyImportItem.Type;
 
 export const LegacyImportScanResult = Schema.Struct({
-  // Null when no T3 Code data exists here, or this server already is that install.
+  // Null when no K3 Code data exists here, or this server already is that install.
   sourceDir: Schema.NullOr(Schema.String),
   items: Schema.Array(LegacyImportItem),
   // Sessions are staged and replace the database at the next server start.
@@ -55,6 +55,6 @@ export class LegacyImportError extends Schema.TaggedError<LegacyImportError>()(
   },
 ) {
   override get message(): string {
-    return `Could not import ${this.operation} from T3 Code.`;
+    return `Could not import ${this.operation} from K3 Code.`;
   }
 }

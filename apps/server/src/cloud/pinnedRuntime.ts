@@ -504,7 +504,7 @@ const PINNED_RUNTIME_PRUNED_PREFIX = ".pruned-";
 const PINNED_RUNTIME_PRUNE_GRACE = Duration.hours(1);
 /**
  * One `t3` launcher path per line, appended by the install scripts and by any prune that finds a
- * launcher on PATH. A service does not see the installer's `T3CODE_INSTALL_BIN_DIR` or the
+ * launcher on PATH. A service does not see the installer's `K3CODE_INSTALL_BIN_DIR` or the
  * interactive PATH, so this is how it finds a custom one, including installs that predate the file.
  */
 const PINNED_RUNTIME_LAUNCHERS_FILE = "launchers";
@@ -655,7 +655,7 @@ export const findPosixLauncher = Effect.fn("cloud.pinned_runtime.find_posix_laun
         path.resolve(cwd, directory || ".", "t3"),
       ),
       path.join(
-        environment["T3CODE_INSTALL_BIN_DIR"] ||
+        environment["K3CODE_INSTALL_BIN_DIR"] ||
           path.join(yield* HostProcess.HomeDirectory, ".local", "bin"),
         "t3",
       ),
@@ -711,7 +711,7 @@ const shellLauncherTargets = Effect.fn("cloud.pinned_runtime.shell_launcher_targ
     .split(/\r?\n/)
     .filter((launcher) => launcher.trim().length > 0);
   const found = [
-    environment["T3CODE_INSTALL_BIN_DIR"] || path.join(home, ".local", "bin"),
+    environment["K3CODE_INSTALL_BIN_DIR"] || path.join(home, ".local", "bin"),
     ...(environment["PATH"] ?? environment["Path"] ?? "").split(platform === "win32" ? ";" : ":"),
   ]
     .filter((directory) => path.isAbsolute(directory))
@@ -732,7 +732,7 @@ const shellLauncherTargets = Effect.fn("cloud.pinned_runtime.shell_launcher_targ
             Effect.map(windowsShimTarget),
             Effect.orElseSucceed(() => undefined),
           )
-        : // Fully resolved, through chained links and a symlinked T3 home alike.
+        : // Fully resolved, through chained links and a symlinked K3 home alike.
           yield* fs.realPath(launcher).pipe(Effect.orElseSucceed(() => undefined));
     if (resolved === undefined) continue;
     const scriptTarget =
@@ -768,7 +768,7 @@ const shellLauncherTargets = Effect.fn("cloud.pinned_runtime.shell_launcher_targ
 
 /**
  * Resolved executables rather than command lines: a server started through the `t3` symlink
- * shows up as `t3 serve`, possibly from another T3 home that runs this home's runtimes. Windows
+ * shows up as `t3 serve`, possibly from another K3 home that runs this home's runtimes. Windows
  * has no symlink launcher, and its `t3.cmd` shim runs the absolute path, so command lines do there.
  */
 const runningExecutables = Effect.fn("cloud.pinned_runtime.running_executables")(function* () {
@@ -893,7 +893,7 @@ const selectUnusedRuntimes = Effect.fn("cloud.pinned_runtime.select_unused")(fun
     ...(yield* shellLauncherTargets(input.baseDir)),
     ...input.references,
   ].map(foldCase);
-  // Process executables are resolved, so they name the real path of a symlinked T3 home.
+  // Process executables are resolved, so they name the real path of a symlinked K3 home.
   const realVersionsDir = yield* fs
     .realPath(versionsDir)
     .pipe(Effect.orElseSucceed(() => versionsDir));

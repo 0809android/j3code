@@ -75,7 +75,7 @@ const make = Effect.gen(function* () {
   const checkLimit = Effect.fn("TaskCache.checkLimit")(function* (operation: string) {
     const allowed = yield* protocol(() =>
       (operation === "store" ? bindings.storeLimit : bindings.readLimit).limit({
-        key: `t3code:${operation.startsWith("blob/") ? "blob" : operation}`,
+        key: `k3code:${operation.startsWith("blob/") ? "blob" : operation}`,
       }),
     );
     if (!allowed.success) return yield* new CacheError({ status: 429, reason: "rate_limit" });

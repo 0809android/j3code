@@ -245,15 +245,15 @@ const T3_TOOL_SENTENCES: ReadonlyMap<string, T3ToolSentence> = new Map<string, T
     "Create\nCreating\nCreated\nT3 threads",
     {
       detail: msg(
-        "{status, select, inProgress {Creating T3 threads} completed {Created T3 threads} failed {Failed to create T3 threads} declined {Declined to create T3 threads} stopped {Stopped creating T3 threads} other {Creating T3 threads}}",
+        "{status, select, inProgress {Creating K3 threads} completed {Created K3 threads} failed {Failed to create K3 threads} declined {Declined to create K3 threads} stopped {Stopped creating K3 threads} other {Creating K3 threads}}",
       ),
     },
   ],
   [
-    "Start\nStarting\nStarted\na T3 thread",
+    "Start\nStarting\nStarted\na K3 thread",
     {
       detail: msg(
-        "{status, select, inProgress {Starting a T3 thread} completed {Started a T3 thread} failed {Failed to start a T3 thread} declined {Declined to start a T3 thread} stopped {Stopped starting a T3 thread} other {Starting a T3 thread}}",
+        "{status, select, inProgress {Starting a K3 thread} completed {Started a K3 thread} failed {Failed to start a K3 thread} declined {Declined to start a K3 thread} stopped {Stopped starting a K3 thread} other {Starting a K3 thread}}",
       ),
     },
   ],
@@ -261,31 +261,31 @@ const T3_TOOL_SENTENCES: ReadonlyMap<string, T3ToolSentence> = new Map<string, T
     "List\nListing\nListed\nT3 threads",
     {
       detail: msg(
-        "{status, select, inProgress {Listing T3 threads} completed {Listed T3 threads} failed {Failed to list T3 threads} declined {Declined to list T3 threads} stopped {Stopped listing T3 threads} other {Listing T3 threads}}",
+        "{status, select, inProgress {Listing K3 threads} completed {Listed K3 threads} failed {Failed to list K3 threads} declined {Declined to list K3 threads} stopped {Stopped listing K3 threads} other {Listing K3 threads}}",
       ),
     },
   ],
   [
-    "Read\nReading\nRead\na T3 thread",
+    "Read\nReading\nRead\na K3 thread",
     {
       detail: msg(
-        "{status, select, inProgress {Reading a T3 thread} completed {Read a T3 thread} failed {Failed to read a T3 thread} declined {Declined to read a T3 thread} stopped {Stopped reading a T3 thread} other {Reading a T3 thread}}",
+        "{status, select, inProgress {Reading a K3 thread} completed {Read a K3 thread} failed {Failed to read a K3 thread} declined {Declined to read a K3 thread} stopped {Stopped reading a K3 thread} other {Reading a K3 thread}}",
       ),
     },
   ],
   [
-    "Send\nSending\nSent\nto a T3 thread",
+    "Send\nSending\nSent\nto a K3 thread",
     {
       detail: msg(
-        "{status, select, inProgress {Sending to a T3 thread} completed {Sent to a T3 thread} failed {Failed to send to a T3 thread} declined {Declined to send to a T3 thread} stopped {Stopped sending to a T3 thread} other {Sending to a T3 thread}}",
+        "{status, select, inProgress {Sending to a K3 thread} completed {Sent to a K3 thread} failed {Failed to send to a K3 thread} declined {Declined to send to a K3 thread} stopped {Stopped sending to a K3 thread} other {Sending to a K3 thread}}",
       ),
     },
   ],
   [
-    "Wait\nWaiting\nWaited\nfor a T3 thread",
+    "Wait\nWaiting\nWaited\nfor a K3 thread",
     {
       detail: msg(
-        "{status, select, inProgress {Waiting for a T3 thread} completed {Waited for a T3 thread} failed {Failed to wait for a T3 thread} declined {Declined to wait for a T3 thread} stopped {Stopped waiting for a T3 thread} other {Waiting for a T3 thread}}",
+        "{status, select, inProgress {Waiting for a K3 thread} completed {Waited for a K3 thread} failed {Failed to wait for a K3 thread} declined {Declined to wait for a K3 thread} stopped {Stopped waiting for a K3 thread} other {Waiting for a K3 thread}}",
       ),
     },
   ],
@@ -306,10 +306,10 @@ const T3_TOOL_SENTENCES: ReadonlyMap<string, T3ToolSentence> = new Map<string, T
     },
   ],
   [
-    "Interrupt\nInterrupting\nRequested an interrupt of\na T3 thread",
+    "Interrupt\nInterrupting\nRequested an interrupt of\na K3 thread",
     {
       detail: msg(
-        "{status, select, inProgress {Interrupting a T3 thread} completed {Requested an interrupt of a T3 thread} failed {Failed to interrupt a T3 thread} declined {Declined to interrupt a T3 thread} stopped {Stopped interrupting a T3 thread} other {Interrupting a T3 thread}}",
+        "{status, select, inProgress {Interrupting a K3 thread} completed {Requested an interrupt of a K3 thread} failed {Failed to interrupt a K3 thread} declined {Declined to interrupt a K3 thread} stopped {Stopped interrupting a K3 thread} other {Interrupting a K3 thread}}",
       ),
     },
   ],
@@ -685,7 +685,7 @@ const T3_TOOL_SENTENCES: ReadonlyMap<string, T3ToolSentence> = new Map<string, T
     "Update\nUpdating\nUpdated\nT3 thread metadata",
     {
       detail: msg(
-        "{status, select, inProgress {Updating T3 thread metadata} completed {Updated T3 thread metadata} failed {Failed to update T3 thread metadata} declined {Declined to update T3 thread metadata} stopped {Stopped updating T3 thread metadata} other {Updating T3 thread metadata}}",
+        "{status, select, inProgress {Updating K3 thread metadata} completed {Updated K3 thread metadata} failed {Failed to update K3 thread metadata} declined {Declined to update K3 thread metadata} stopped {Stopped updating K3 thread metadata} other {Updating K3 thread metadata}}",
       ),
     },
   ],

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // The app command of e2e.config.ts: starts the dev stack of the checkout it runs in on a fresh
-// T3 home. e2e stops it with a signal, which ends the scope and the processes it started.
+// K3 home. e2e stops it with a signal, which ends the scope and the processes it started.
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -43,9 +43,9 @@ const REAL_PROVIDERS = [
 export const SCENARIO_LINEAR_PORT = 13_997;
 
 export const SCENARIO_MACHINE_ENV = {
-  T3CODE_ENVIRONMENT_LABEL: "Scenario",
-  T3CODE_ENVIRONMENT_MACHINE_KIND: "laptop",
-  T3CODE_LINEAR_API_URL: `http://127.0.0.1:${SCENARIO_LINEAR_PORT}/graphql`,
+  K3CODE_ENVIRONMENT_LABEL: "Scenario",
+  K3CODE_ENVIRONMENT_MACHINE_KIND: "laptop",
+  K3CODE_LINEAR_API_URL: `http://127.0.0.1:${SCENARIO_LINEAR_PORT}/graphql`,
 };
 
 const encodeSettings = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
@@ -129,7 +129,7 @@ const startApp = Effect.fn("startApp")(function* (input: {
   const env = {
     ...hostEnvironment,
     PATH: `${path.join(input.home, "bin")}:${hostEnvironment.PATH ?? ""}`,
-    T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "0",
+    K3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "0",
     ...SCENARIO_MACHINE_ENV,
   };
   const devRunner = (mode: string, args: ReadonlyArray<string>) => [
@@ -149,16 +149,16 @@ const startApp = Effect.fn("startApp")(function* (input: {
     const serverPort = String(yield* net.reserveLoopbackPort());
     const token = yield* (yield* SecureRandom.SecureRandom).uuidV4();
     const ports = ["--port", serverPort, "--dev-url", origin];
-    const webEnv = { ...env, T3CODE_PORT_OFFSET: String(Number(webPort) - BASE_WEB_PORT) };
+    const webEnv = { ...env, K3CODE_PORT_OFFSET: String(Number(webPort) - BASE_WEB_PORT) };
     const server = yield* start({
       cwd: checkout,
       command: node,
       args: devRunner("dev:server", ports),
       env: {
         ...webEnv,
-        T3CODE_DEV_ALLOWED_ORIGINS: origin,
+        K3CODE_DEV_ALLOWED_ORIGINS: origin,
         // Makes the startup pairing link reusable, so every test can sign in with it.
-        T3CODE_DEV_AUTH_TOKEN: `${token}${token}`.replaceAll("-", ""),
+        K3CODE_DEV_AUTH_TOKEN: `${token}${token}`.replaceAll("-", ""),
       },
       onLine: (line) => {
         const url = /pairingUrl:\s*(\S+)/.exec(line)?.[1];
@@ -240,7 +240,7 @@ const command = Command.make(
         "web: server and Vite. mobile: server on every interface and Metro.",
       ),
     ),
-    home: Argument.String("t3-home").pipe(Argument.withDescription("T3 home to recreate.")),
+    home: Argument.String("t3-home").pipe(Argument.withDescription("K3 home to recreate.")),
     ports: Argument.String("port").pipe(
       Argument.withDescription(
         "web: <host> <web-port>. mobile: <server-port> <metro-port> <host>.",

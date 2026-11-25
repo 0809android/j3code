@@ -47,7 +47,6 @@ import * as ServerSettings from "../serverSettings.ts";
 import { makeRestoreMissingWorktree } from "../workspace/restoreMissingWorktree.ts";
 import type * as TaskFolders from "../workspace/TaskFolders.ts";
 import * as EventSink from "./EventSink.ts";
-import * as ProviderUsageAnalytics from "../telemetry/ProviderUsageAnalytics.ts";
 import * as ContextHandoffService from "./ContextHandoffService.ts";
 import { canForkBusySourceNatively, isActiveRun } from "./CommandPolicy.ts";
 import { contextBoundaryOrdinal, isScheduledFreshRun } from "./contextBoundary.ts";
@@ -236,7 +235,7 @@ export const isProviderTurnStartRunStateMissingError = Schema.is(
 const RESUME_PROMPT = "Continue where you left off.";
 
 const START_GAVE_UP_MESSAGE =
-  "T3 Code could not start this turn. Send the message again; if it keeps failing, check the server logs.";
+  "K3 Code could not start this turn. Send the message again; if it keeps failing, check the server logs.";
 
 const startFailureMessage = (error: Error): string => {
   const nestedCause = "cause" in error ? error.cause : undefined;
@@ -292,7 +291,6 @@ export const layer: Layer.Layer<
   ProviderTurnStartServiceV2,
   Effect.gen(function* () {
     const eventSink = yield* EventSink.EventSinkV2;
-    const turnAnalytics = yield* ProviderUsageAnalytics.ProviderTurnAnalytics;
     const contextHandoffService = yield* ContextHandoffService.ContextHandoffServiceV2;
     const idAllocator = yield* IdAllocator.IdAllocatorV2;
     const fileSystem = yield* FileSystem.FileSystem;
@@ -520,22 +518,13 @@ export const layer: Layer.Layer<
             } satisfies OrchestrationV2DomainEvent;
           }),
         );
-        const written = yield* eventSink.writeIfRunCurrent({
+        yield* eventSink.writeIfRunCurrent({
           threadId: run.threadId,
           runId,
           activeAttemptId: attempt.id,
           expectedStatus: "starting",
           events,
         });
-        // A steering restart that cannot start still ends a run whose earlier turns counted.
-        if (written.committed) {
-          yield* turnAnalytics.runSettled({
-            runId,
-            status,
-            completedAt: now,
-            childrenRunning: false,
-          });
-        }
       },
     );
 

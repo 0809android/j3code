@@ -21,7 +21,7 @@ export class ServerOwnsDatabaseError extends Schema.TaggedError<ServerOwnsDataba
   { stateDir: Schema.String },
 ) {
   override get message(): string {
-    return `Another T3 Code process, usually a running server, owns ${this.stateDir}, and this CLI would change its database schema. Use the \`t3\` that matches the running server, or stop that server, then retry. The database was not changed.`;
+    return `Another K3 Code process, usually a running server, owns ${this.stateDir}, and this CLI would change its database schema. Use the \`t3\` that matches the running server, or stop that server, then retry. The database was not changed.`;
   }
 }
 
@@ -47,7 +47,7 @@ const damagedDatabaseError = (dbPath: string, cause: SqlError.SqlError) =>
     reason: new SqlError.UnknownError({
       cause,
       operation: "open",
-      message: `The T3 Code database at ${dbPath} is damaged or is not a SQLite database, so T3 Code cannot start. To recover, quit T3 Code, then move that file and any -wal and -shm files next to it out of the folder, or replace them with a backup. T3 Code creates a new database on the next start.`,
+      message: `The K3 Code database at ${dbPath} is damaged or is not a SQLite database, so K3 Code cannot start. To recover, quit K3 Code, then move that file and any -wal and -shm files next to it out of the folder, or replace them with a backup. K3 Code creates a new database on the next start.`,
     }),
   });
 
@@ -116,7 +116,7 @@ const makeLayerFromPath = <E, R>(makeSetup: (dbPath: string) => Layer.Layer<neve
         writerWorker: true,
         spanAttributes: {
           "db.name": path.basename(dbPath),
-          "service.name": "t3code-server",
+          "service.name": "k3code-server",
         },
       }),
     ).pipe(
@@ -140,7 +140,7 @@ export const layerMemory = Layer.provideMerge(
   NodeSqliteClient.layer({ filename: ":memory:" }),
 );
 
-// A snapshot staged by the T3 Code import replaces the database, but never under a running server.
+// A snapshot staged by the K3 Code import replaces the database, but never under a running server.
 const applyStagedLegacyImportWhenIdle = Effect.fn("applyStagedLegacyImportWhenIdle")(function* () {
   const { dbPath, stateDir, serverRuntimeStatePath } = yield* ServerConfig.ServerConfig;
   if (!(yield* hasStagedLegacyImport(stateDir))) return;
@@ -165,7 +165,7 @@ const makeLayerConfig = <E, R>(
 
 export const layerConfig = makeLayerConfig(layerFromPath, true);
 
-/** For CLI commands: pending migrations run only while no server owns the T3 home. */
+/** For CLI commands: pending migrations run only while no server owns the K3 home. */
 export const layerCliConfig = makeLayerConfig(
   makeLayerFromPath(() => makeLayerSetup(runMigrationsAsOwner())),
 );

@@ -14,7 +14,7 @@ import { installCli, isForegroundProcStat, isForegroundPs, offerCliInstall } fro
 
 const VERSION = packageJson.version;
 
-/** A standalone runtime in a temp T3 home, started by the npm launcher from an npx cache. */
+/** A standalone runtime in a temp K3 home, started by the npm launcher from an npx cache. */
 const setup = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -39,8 +39,8 @@ const setup = Effect.gen(function* () {
       Effect.provideService(HostProcess.Environment, {
         PATH: "/usr/bin",
         SHELL: "/bin/zsh",
-        T3CODE_INSTALL_BIN_DIR: binDir,
-        T3CODE_NPM_LAUNCHER_PATH: path.join(npmPackage, "bin/t3.mjs"),
+        K3CODE_INSTALL_BIN_DIR: binDir,
+        K3CODE_NPM_LAUNCHER_PATH: path.join(npmPackage, "bin/t3.mjs"),
         ...env,
       }),
     );
@@ -62,7 +62,7 @@ it.layer(NodeServices.layer)("t3 install", (it) => {
       assert.isFalse(installed.onPath);
       assert.include(installed.pathCommand, "$HOME/bin");
 
-      // A link written through a symlinked T3 home is still ours.
+      // A link written through a symlinked K3 home is still ours.
       const alias = path.join(root, "alias");
       yield* fs.symlink(path.join(root, ".t3"), alias);
       yield* fs.remove(link);
@@ -131,7 +131,7 @@ it.layer(NodeServices.layer)("t3 install", (it) => {
       const windows = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
         provide(effect.pipe(Effect.provideService(HostProcess.Platform, "win32")));
       const desktopShim =
-        '@echo off\r\nrem Written by T3 Code\r\n"C:\\T3 Code\\T3 Code.exe" "x" %*\r\n';
+        '@echo off\r\nrem Written by K3 Code\r\n"C:\\K3 Code\\K3 Code.exe" "x" %*\r\n';
       yield* fs.writeFileString(shim, desktopShim);
       const foreignShim = yield* windows(installCli()).pipe(Effect.flip);
       assert.include(foreignShim.message, "Another t3 is already at");

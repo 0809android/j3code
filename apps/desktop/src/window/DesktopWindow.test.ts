@@ -221,7 +221,7 @@ const layerDesktopEnvironmentFor = (platform: NodeJS.Platform) =>
       Layer.mergeAll(
         NodeServices.layer,
         DesktopConfig.layerTest({
-          T3CODE_PORT: "3773",
+          K3CODE_PORT: "3773",
           VITE_DEV_SERVER_URL: "http://127.0.0.1:5733",
         }),
       ),
@@ -377,8 +377,8 @@ function layerTest(input: {
           getBrowserSession: () => Effect.succeed({} as Electron.Session),
           setMainWindow: input.setPreviewMainWindow ?? (() => Effect.void),
           prepareWebview: () => Effect.void,
-          isBrowserPartition: (partition) => partition.startsWith("persist:t3code-preview-"),
-          getBrowserPartition: () => Effect.succeed("persist:t3code-preview-test"),
+          isBrowserPartition: (partition) => partition.startsWith("persist:k3code-preview-"),
+          getBrowserPartition: () => Effect.succeed("persist:k3code-preview-test"),
           reapplyZoom: () =>
             Effect.sync(() => {
               input.previewZoomReapplies?.push(input.window.webContents.getZoomLevel());
@@ -488,8 +488,8 @@ const makeSplashScenario = (createOutcomes: readonly (Electron.BrowserWindow | n
           Layer.mock(PreviewManager.PreviewManager)({
             getBrowserSession: () => Effect.succeed({} as Electron.Session),
             setMainWindow: () => Effect.void,
-            isBrowserPartition: (partition) => partition.startsWith("persist:t3code-preview-"),
-            getBrowserPartition: () => Effect.succeed("persist:t3code-preview-test"),
+            isBrowserPartition: (partition) => partition.startsWith("persist:k3code-preview-"),
+            getBrowserPartition: () => Effect.succeed("persist:k3code-preview-test"),
           }),
         ),
       ),
@@ -558,7 +558,7 @@ describe("DesktopWindow", () => {
       "k3code://app.example/",
       "k3code://app:8080/",
       "k3code://user@other/",
-      "t3code:app",
+      "k3code:app",
       "k3code-dev://app/",
       "file:///etc/passwd",
       "data:text/html,<p>hi</p>",
@@ -1558,7 +1558,7 @@ describe("DesktopWindow", () => {
           }
           const webPreferences: Electron.WebPreferences = {};
           willAttachWebview({ preventDefault: () => {} }, webPreferences, {
-            partition: "persist:t3code-preview-test",
+            partition: "persist:k3code-preview-test",
           });
 
           assert.deepEqual(webPreferences.additionalArguments, expected);
@@ -1710,7 +1710,7 @@ describe("DesktopWindow", () => {
         createCount,
         mainWindow,
         onReveal: () => {
-          foreground = "T3 Code";
+          foreground = "K3 Code";
           operations.push("reveal");
         },
       });
@@ -1723,7 +1723,7 @@ describe("DesktopWindow", () => {
         operations.length = 0;
         foreground = "Discord";
         yield* desktopWindow.dispatchSnapShotEvent({ type: "started", id: captureOne });
-        assert.equal(foreground, "T3 Code");
+        assert.equal(foreground, "K3 Code");
         foreground = "Explorer";
         yield* desktopWindow.dispatchSnapShotEvent({ type: "ready", id: captureOne });
         yield* desktopWindow.dispatchSnapShotEvent({ type: "failed", id: captureTwo });

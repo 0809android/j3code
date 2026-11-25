@@ -134,13 +134,13 @@ describe("ssh auth", () => {
         const runtimeDirectoryOf = (askpass: string) => path.dirname(path.dirname(askpass));
 
         const first = yield* askpassPath();
-        const ownedTarget = yield* fs.makeTempDirectory({ prefix: "t3code-ssh-symlink-target-" });
+        const ownedTarget = yield* fs.makeTempDirectory({ prefix: "k3code-ssh-symlink-target-" });
         yield* fs.remove(runtimeDirectoryOf(first), { recursive: true });
         yield* fs.symlink(ownedTarget, runtimeDirectoryOf(first));
 
         const next = yield* askpassPath();
         assert.notEqual(next, first);
-        assert.equal(yield* fs.exists(path.join(ownedTarget, "t3code-ssh-askpass")), false);
+        assert.equal(yield* fs.exists(path.join(ownedTarget, "k3code-ssh-askpass")), false);
 
         yield* fs.remove(runtimeDirectoryOf(first));
         yield* fs.remove(ownedTarget, { recursive: true });

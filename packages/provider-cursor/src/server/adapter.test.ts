@@ -1117,8 +1117,8 @@ describe("CursorAdapterV2", () => {
           lastProviderTurn = providerTurn.providerTurn;
         const sent = sentMessages.at(-1)!;
         return {
-          orchestration: sent.includes("## T3 Code orchestration"),
-          devices: sent.includes("## T3 Code devices"),
+          orchestration: sent.includes("## K3 Code orchestration"),
+          devices: sent.includes("## K3 Code devices"),
           runtime: sent.includes("<runtime_info>"),
         };
       });
@@ -3717,7 +3717,7 @@ describe("CursorAdapterV2", () => {
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const workspace = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3code-cursor-dead-worker-",
+        prefix: "k3code-cursor-dead-worker-",
       });
       const instanceId = ProviderInstanceId.make("cursor");
       const threadId = ThreadId.make("cursor-dead-worker-thread");

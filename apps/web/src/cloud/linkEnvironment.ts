@@ -69,7 +69,7 @@ const ensureRelayClientAvailable = Effect.fn("linkEnvironment.ensureRelayClientA
     if (status.status === "unsupported") {
       return yield* new CloudEnvironmentLinkError({
         message: m(
-          msg("T3 Code cannot install the relay client automatically on {platform}-{arch}.", {
+          msg("K3 Code cannot install the relay client automatically on {platform}-{arch}.", {
             platform: status.platform,
             arch: status.arch,
           }),
@@ -110,7 +110,7 @@ const ensureRelayClientAvailable = Effect.fn("linkEnvironment.ensureRelayClientA
         message:
           installedStatus.status === "unsupported"
             ? m(
-                msg("T3 Code cannot install the relay client automatically on {platform}-{arch}.", {
+                msg("K3 Code cannot install the relay client automatically on {platform}-{arch}.", {
                   platform: installedStatus.platform,
                   arch: installedStatus.arch,
                 }),
@@ -398,7 +398,7 @@ export const linkEnvironmentToCloud: (input: {
   const configuredRelayUrl = relayUrl();
   if (!configuredRelayUrl) {
     return yield* new CloudEnvironmentLinkError({
-      message: m(msg("{name} is not configured.", { name: "T3CODE_RELAY_URL" })),
+      message: m(msg("{name} is not configured.", { name: "K3CODE_RELAY_URL" })),
     });
   }
   const managedTunnelsEnabled = (input.mode ?? "managed") === "managed";
