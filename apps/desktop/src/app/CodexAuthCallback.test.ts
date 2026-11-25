@@ -73,11 +73,12 @@ describe("desktop Codex callback helper", () => {
     expect(received).toBe(expected);
   });
   it("returns hosted web to the exact instance and environment without putting the code in its query", async () => {
+    const hostedAppUrl = "https://hosted.example.test";
     const authorizationUrl = request(await freePort());
     const expected = callback(authorizationUrl);
     const input = {
       authorizationUrl,
-      returnUrl: "https://app.t3.codes/settings/providers?environmentId=remote-one&instanceId=work",
+      returnUrl: `${hostedAppUrl}/settings/providers?environmentId=remote-one&instanceId=work`,
       environmentId: EnvironmentId.make("remote-one"),
       instanceId: ProviderInstanceId.make("work"),
       flowId: "flow-one",
@@ -87,15 +88,15 @@ describe("desktop Codex callback helper", () => {
       expect(response.status).toBe(303);
       const delivery = response.headers.get("location")!;
       expect(new URL(delivery).searchParams.has("code")).toBe(false);
-      expect(readCodexAuthDelivery(delivery)?.callbackUrl).toBe(expected);
-      expect(readCodexAuthDelivery(delivery)?.returnUrl).toBe(input.returnUrl);
+      expect(readCodexAuthDelivery(delivery, hostedAppUrl)?.callbackUrl).toBe(expected);
+      expect(readCodexAuthDelivery(delivery, hostedAppUrl)?.returnUrl).toBe(input.returnUrl);
       return true;
     };
     let opening!: Promise<boolean>;
     await receiveCodexAuthCallback(
       authorizationUrl,
       () => (opening = openBrowser()),
-      (url) => codexAuthDeliveryUrl(input, url),
+      (url) => codexAuthDeliveryUrl(input, url, hostedAppUrl),
     );
     await opening;
   });

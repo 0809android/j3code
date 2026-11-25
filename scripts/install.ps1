@@ -1,7 +1,7 @@
 # Installs the K3 Code CLI from a GitHub Release archive on Windows. Needs
 # only PowerShell 5.1+; no Node, npm, or compiler.
 #
-#   irm https://t3.codes/install.ps1 | iex
+#   .\scripts\install.ps1   (K3 Code has no hosted install script yet)
 #
 # Environment:
 #   K3CODE_CHANNEL           release train to follow: stable, nightly, or preview
