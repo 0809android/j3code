@@ -8,35 +8,18 @@ import {
   AuthAccessTokenType,
   AuthEnvironmentBootstrapTokenType,
   AuthTokenExchangeGrantType,
-  EnvironmentHttpApi,
   type K3RelayHostState,
-  type ManagedPolicyDocument,
-  type ServerSettings as ServerSettingsValue,
 } from "@t3tools/contracts";
 import { assert, describe, expect, it } from "@effect/vitest";
 import * as Clock from "effect/Clock";
-import * as Digest from "effect/crypto/Digest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as PubSub from "effect/PubSub";
 import * as Schedule from "effect/Schedule";
-import * as Schema from "effect/Schema";
 import * as Socket from "effect/socket/Socket";
 import * as Stream from "effect/Stream";
-import { FetchHttpClient } from "effect/http";
-import * as Etag from "effect/http/Etag";
-import * as HttpPlatform from "effect/http/HttpPlatform";
-import * as HttpRouter from "effect/http/HttpRouter";
-import * as HttpServerRequest from "effect/http/HttpServerRequest";
-import * as HttpServerResponse from "effect/http/HttpServerResponse";
-import * as HttpApi from "effect/http-api/HttpApi";
-import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
-import * as Rpc from "effect/rpc/Rpc";
 import * as RpcClient from "effect/rpc/RpcClient";
-import * as RpcGroup from "effect/rpc/RpcGroup";
 import * as RpcSerialization from "effect/rpc/RpcSerialization";
-import * as RpcServer from "effect/rpc/RpcServer";
 
 import { type MuxClient, makeMuxClient, makeMuxFetch, makeMuxWebSocket } from "@t3tools/shared/mux";
 import {
@@ -63,204 +46,16 @@ import {
 
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
 import { makeDpopKey } from "../../auth/dpop.testkit.ts";
-import * as AuthHttp from "../../auth/http.ts";
 import * as ServerE2eeIdentity from "../../auth/ServerE2eeIdentity.ts";
-import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
 import * as SessionStore from "../../auth/SessionStore.ts";
-import {
-  classifyRequestTransport,
-  transportAllowedByPolicy,
-} from "../../auth/transportSecurity.ts";
-import { deriveAuthClientMetadata } from "../../auth/utils.ts";
-import * as ServerConfig from "../../config.ts";
-import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
-import * as SqlitePersistence from "../../persistence/Sqlite.ts";
-import * as ManagedPolicy from "../../policy/ManagedPolicy.ts";
 import * as ServerSettings from "../../serverSettings.ts";
+import {
+  layerK3RelayTestHost as layerHost,
+  RelayProbeRpcs as ProbeRpcs,
+  startK3RelayTestRelay as startRelay,
+} from "./k3relayHost.testkit.ts";
 import * as RelayConnector from "./RelayConnector.ts";
 import * as RelayDeviceLedger from "./RelayDeviceLedger.ts";
-
-// ── The host: real auth routes, a probe route, and an RPC socket like ws.ts ─────
-
-class AuthTestApi extends HttpApi.make("environment").add(EnvironmentHttpApi.groups.auth) {}
-
-const WhoAmI = Schema.Struct({ subject: Schema.String, transport: Schema.String });
-const ProbeRpcs = RpcGroup.make(Rpc.make("relayProbe.whoami", { success: WhoAmI }));
-
-const layerRpcRoute = HttpRouter.add(
-  "GET",
-  "/ws",
-  Effect.gen(function* () {
-    const request = yield* HttpServerRequest.HttpServerRequest;
-    const transport = classifyRequestTransport(request);
-    const settings = yield* (yield* ServerSettings.ServerSettingsService).getSettings.pipe(
-      Effect.orDie,
-    );
-    if (!transportAllowedByPolicy(transport, settings.remoteTransportPolicy)) {
-      return HttpServerResponse.jsonUnsafe(
-        { code: "REMOTE_TRANSPORT_NOT_ALLOWED" },
-        { status: 403 },
-      );
-    }
-    const auth = yield* EnvironmentAuth.EnvironmentAuth;
-    const sessions = yield* SessionStore.SessionStore;
-    const session = yield* Effect.result(auth.authenticateWebSocketUpgrade(request, "rpc"));
-    if (session._tag === "Failure") {
-      return HttpServerResponse.jsonUnsafe({ code: "auth_invalid" }, { status: 401 });
-    }
-    const { protocol, httpEffect } = yield* RpcServer.makeProtocolWithHttpEffectWebsocket;
-    yield* RpcServer.make(ProbeRpcs).pipe(
-      Effect.provideService(RpcServer.Protocol, protocol),
-      Effect.provide(
-        ProbeRpcs.toLayer({
-          "relayProbe.whoami": () =>
-            Effect.succeed({ subject: session.success.subject, transport }),
-        }),
-      ),
-      Effect.forkScoped,
-    );
-    return yield* Effect.raceFirst(
-      httpEffect,
-      sessions
-        .awaitInvalidation(session.success.sessionId, session.success.proofKeyThumbprint)
-        .pipe(Effect.ignore, Effect.as(HttpServerResponse.empty())),
-    );
-  }).pipe(Effect.provide(RpcSerialization.layerJson)),
-);
-
-/** Answers with what the server concluded about the request's route and address. */
-const layerProbeRoute = HttpRouter.add(
-  "GET",
-  "/relay-probe",
-  Effect.map(HttpServerRequest.HttpServerRequest, (request) =>
-    HttpServerResponse.jsonUnsafe({
-      transport: classifyRequestTransport(request),
-      ipAddress: deriveAuthClientMetadata({ request }).ipAddress ?? null,
-    }),
-  ),
-);
-
-/** The test settings service, plus the change stream the connector follows. */
-const layerSettingsWithChanges = (overrides: Parameters<typeof ServerSettings.layerTest>[0]) =>
-  Layer.effect(
-    ServerSettings.ServerSettingsService,
-    Effect.gen(function* () {
-      const base = yield* ServerSettings.ServerSettingsService;
-      const changes = yield* PubSub.unbounded<ServerSettingsValue>();
-      return ServerSettings.ServerSettingsService.of({
-        ...base,
-        updateSettings: (patch) =>
-          base.updateSettings(patch).pipe(Effect.tap((next) => PubSub.publish(changes, next))),
-        streamChanges: Stream.fromPubSub(changes),
-        subscribeChanges: Effect.map(PubSub.subscribe(changes), Stream.fromSubscription),
-      });
-    }),
-  ).pipe(Layer.provide(ServerSettings.layerTest(overrides)));
-
-const layerHost = (options: {
-  readonly relayUrl: string;
-  readonly enabled?: boolean;
-  readonly maxSessions?: number;
-  readonly policy?: ManagedPolicyDocument;
-}) => {
-  const config = ServerConfig.layerTest(process.cwd(), { prefix: "t3-k3relay-test-" });
-  const storage = Layer.mergeAll(ServerSecretStore.layer, SqlitePersistence.layerMemory).pipe(
-    Layer.provideMerge(config),
-  );
-  const core = EnvironmentAuth.layer.pipe(
-    Layer.provideMerge(Layer.mergeAll(ServerE2eeIdentity.layer, ServerEnvironment.layerIdentity)),
-    Layer.provideMerge(ManagedPolicy.layerTest(options.policy)),
-    Layer.provideMerge(
-      layerSettingsWithChanges({
-        relay: {
-          enabled: options.enabled ?? true,
-          url: options.relayUrl,
-          maxSessions: options.maxSessions ?? 8,
-        },
-      }),
-    ),
-    Layer.provideMerge(storage),
-    Layer.provideMerge(
-      HttpPlatform.layer.pipe(
-        Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
-        Layer.provideMerge(Etag.layerWeak),
-      ),
-    ),
-    Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, FetchHttpClient.layer)),
-  );
-  const routes = Layer.mergeAll(
-    HttpApiBuilder.layer(AuthTestApi).pipe(
-      Layer.provide(AuthHttp.layer),
-      Layer.provide(AuthHttp.layerAuthenticatedAuth),
-    ),
-    layerRpcRoute,
-    layerProbeRoute,
-  ).pipe(
-    // Routes read these per request, as `HttpRouter.serve` provides them in the server.
-    HttpRouter.provideRequest(
-      Layer.effectContext(
-        Effect.context<
-          | EnvironmentAuth.EnvironmentAuth
-          | SessionStore.SessionStore
-          | ServerSecretStore.ServerSecretStore
-          | ServerSettings.ServerSettingsService
-          | Digest.Digest
-        >(),
-      ),
-    ),
-  );
-  return Layer.mergeAll(routes, RelayConnector.layer, RelayDeviceLedger.layer).pipe(
-    Layer.provideMerge(HttpRouter.layer),
-    Layer.provideMerge(core),
-    Layer.provideMerge(layerE2eeCrypto),
-  );
-};
-
-// ── The relay, in this process ───────────────────────────────────────────────
-
-/** The parts of `infra/k3-relay` these tests drive. */
-interface InProcessRelay {
-  readonly store: { getHost(hostId: string): unknown };
-  readonly metrics: { snapshot(): { readonly controls: number } };
-  listen(): Promise<number>;
-  close(): Promise<void>;
-}
-
-/**
- * The relay is its own package with its own lint and type rules, so it is loaded at run time
- * rather than type-checked as part of the server.
- */
-const loadRelay = async () => {
-  const testkit = (await import(
-    new URL("../../../../../infra/k3-relay/src/relay.testkit.ts", import.meta.url).href
-  )) as { readonly TEST_CONFIG: object };
-  const server = (await import(
-    new URL("../../../../../infra/k3-relay/src/server.ts", import.meta.url).href
-  )) as {
-    readonly createRelay: (options: {
-      readonly config: object;
-      readonly now: () => number;
-    }) => InProcessRelay;
-  };
-  return { config: testkit.TEST_CONFIG, createRelay: server.createRelay };
-};
-
-/** `clock.skewMs` moves the relay's clock; ahead, it drops the host's revocations as stale. */
-const startRelay = Effect.acquireRelease(
-  Effect.promise(async () => {
-    const { config, createRelay } = await loadRelay();
-    const clock = { skewMs: 0 };
-    const relay = createRelay({
-      config,
-      // @effect-diagnostics-next-line globalDate:off -- the relay keeps its own clock, as in production.
-      // oxlint-disable-next-line t3code/no-wall-clock-in-tests -- same reason.
-      now: () => Date.now() + clock.skewMs,
-    });
-    const port = await relay.listen();
-    return { relay, port, clock, url: `ws://127.0.0.1:${port}` };
-  }),
-  ({ relay }) => Effect.promise(() => relay.close()),
-);
 
 const awaitState = (predicate: (state: K3RelayHostState) => boolean) =>
   Effect.flatMap(RelayConnector.RelayConnector, (connector) =>
