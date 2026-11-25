@@ -1,5 +1,7 @@
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
+import * as HttpServerRespondable from "effect/http/HttpServerRespondable";
+import * as HttpServerResponse from "effect/http/HttpServerResponse";
 
 import { NonNegativeInt, PositiveInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
 
@@ -25,6 +27,98 @@ export const k3RelayE2eeEnvironmentId = (hostId: string): string => hostId;
 /** Device-only routes, served by the host's relay bridge inside the mux and nowhere else. */
 export const K3_RELAY_GRANT_PATH = "/api/relay/grant";
 export const K3_RELAY_BOOTSTRAP_PATH = "/api/relay/bootstrap";
+
+/**
+ * Relayed devices never get a signed URL (spec §12): a signed URL is a bearer capability that
+ * works over any route and outlives a revocation. They get a handle instead, which the host
+ * redeems only for the E2E-authenticated device it was issued to, inside the mux.
+ */
+export const K3_RELAY_ASSET_ROUTE_PREFIX = "/api/assets/file";
+export const K3_RELAY_UPLOAD_ROUTE_PREFIX = "/api/attachments/upload/relay";
+
+/** The `code` of a host's answer to a request that cannot work through the relay. */
+export const K3_RELAY_UNSUPPORTED_CODE = "relay-unsupported";
+
+/** What cannot work through the relay, and so is refused there with this reason. */
+export const K3RelayUnsupportedFeature = Schema.Literals([
+  /** Signed asset or upload URLs: bearer capabilities usable outside the E2E channel. */
+  "signed-url",
+  /** Media tickets: `<img>`, EventSource and socket credentials in a URL. */
+  "media-ticket",
+  "guest-share",
+  /** `/api/preview/tunnel`: raw TCP (SOCKS5) into the host's loopback ports. */
+  "preview-tunnel",
+  /** The device hub's proxy and `/api/devices/ws`. */
+  "device-hub",
+  /** The server browser's streamed preview tabs. */
+  "preview-stream",
+  "voice-input",
+]);
+export type K3RelayUnsupportedFeature = typeof K3RelayUnsupportedFeature.Type;
+
+export const K3RelayUnsupportedResponse = Schema.Struct({
+  code: Schema.Literal(K3_RELAY_UNSUPPORTED_CODE),
+  feature: K3RelayUnsupportedFeature,
+  message: Schema.String,
+});
+export type K3RelayUnsupportedResponse = typeof K3RelayUnsupportedResponse.Type;
+
+export const k3RelayUnsupportedMessage = (feature: K3RelayUnsupportedFeature): string => {
+  switch (feature) {
+    case "signed-url":
+      return "Signed URLs are not issued through the K3 relay.";
+    case "media-ticket":
+      return "Media tickets are not issued through the K3 relay.";
+    case "guest-share":
+      return "Guest sharing does not work through the K3 relay.";
+    case "preview-tunnel":
+      return "Port forwarding to the host does not work through the K3 relay.";
+    case "device-hub":
+      return "Devices on the host cannot be used through the K3 relay.";
+    case "preview-stream":
+      return "The host's browser preview does not work through the K3 relay.";
+    case "voice-input":
+      return "Voice input does not work through the K3 relay.";
+  }
+};
+
+export const k3RelayUnsupportedResponse = (
+  feature: K3RelayUnsupportedFeature,
+): K3RelayUnsupportedResponse => ({
+  code: K3_RELAY_UNSUPPORTED_CODE,
+  feature,
+  message: k3RelayUnsupportedMessage(feature),
+});
+
+/** A refusal of something the relay cannot carry; answers 403 with {@link K3RelayUnsupportedResponse}. */
+export class K3RelayUnsupportedError extends Schema.TaggedError<K3RelayUnsupportedError>()(
+  "K3RelayUnsupportedError",
+  { code: Schema.Literal(K3_RELAY_UNSUPPORTED_CODE), feature: K3RelayUnsupportedFeature },
+  { httpApiStatus: 403 },
+) {
+  static of(feature: K3RelayUnsupportedFeature) {
+    return new K3RelayUnsupportedError({ code: K3_RELAY_UNSUPPORTED_CODE, feature });
+  }
+
+  [HttpServerRespondable.symbol]() {
+    return Effect.succeed(
+      HttpServerResponse.jsonUnsafe(k3RelayUnsupportedResponse(this.feature), {
+        status: 403,
+        headers: { "cache-control": "no-store" },
+      }),
+    );
+  }
+
+  override get message(): string {
+    return k3RelayUnsupportedMessage(this.feature);
+  }
+}
+
+const isK3RelayUnsupportedResponse = Schema.is(K3RelayUnsupportedResponse);
+
+/** The refused feature, when a host's answer is a relay refusal. */
+export const k3RelayUnsupportedFeatureOf = (body: unknown): K3RelayUnsupportedFeature | null =>
+  isK3RelayUnsupportedResponse(body) ? body.feature : null;
 
 export const K3RelaySettings = Schema.Struct({
   enabled: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false))),
@@ -100,6 +194,14 @@ export const K3RelayPairingCloseReason = Schema.Literals([
 export type K3RelayPairingCloseReason = typeof K3RelayPairingCloseReason.Type;
 
 /** The host's pairing window. The offer link (with its secret) is only returned to its creator. */
+/**
+ * How the waiting device is approved (spec §20.3). `compare-code`: the user compares the codes and
+ * the approval names the code they saw. `one-tap`: the first device, not paired by QR, in an "Add
+ * device" window the host's user opened, approved with one tap. QR pairing always compares codes.
+ */
+export const K3RelayApprovalMode = Schema.Literals(["compare-code", "one-tap"]);
+export type K3RelayApprovalMode = typeof K3RelayApprovalMode.Type;
+
 export const K3RelayPairingState = Schema.Union([
   Schema.Struct({ phase: Schema.Literal("idle") }),
   Schema.Struct({ phase: Schema.Literal("open"), expiresAt: NonNegativeInt }),
@@ -111,6 +213,10 @@ export const K3RelayPairingState = Schema.Union([
     /** `K7QM-2XFD`; the device shows the same code. Approving needs the user to compare them. */
     confirmationCode: TrimmedNonEmptyString,
     approvalDeadline: NonNegativeInt,
+    /** Older hosts always compared codes. */
+    approval: K3RelayApprovalMode.pipe(
+      Schema.withDecodingDefaultKey(Effect.succeed("compare-code" as const)),
+    ),
   }),
   Schema.Struct({ phase: Schema.Literal("closed"), reason: K3RelayPairingCloseReason }),
 ]);
@@ -156,6 +262,16 @@ export type K3RelayPairingOffer = typeof K3RelayPairingOffer.Type;
 export const K3RelayDeviceInput = Schema.Struct({ deviceId: TrimmedNonEmptyString });
 export type K3RelayDeviceInput = typeof K3RelayDeviceInput.Type;
 
+/**
+ * Approving names the device, and, unless the host offered one tap, the confirmation code the user
+ * compared: the host refuses a code-compare approval without the code it showed.
+ */
+export const K3RelayApproveInput = Schema.Struct({
+  deviceId: TrimmedNonEmptyString,
+  confirmationCode: Schema.optionalKey(TrimmedNonEmptyString),
+});
+export type K3RelayApproveInput = typeof K3RelayApproveInput.Type;
+
 export const K3RelayRenameDeviceInput = Schema.Struct({
   deviceId: TrimmedNonEmptyString,
   name: Schema.String,
@@ -168,6 +284,8 @@ export const K3RelayFailure = Schema.Literals([
   "no-pending-pairing",
   "unknown-device",
   "invalid-name",
+  "confirmation-required",
+  "not-a-relay-device",
   "internal",
 ]);
 export type K3RelayFailure = typeof K3RelayFailure.Type;
@@ -187,6 +305,10 @@ export class K3RelayError extends Schema.TaggedError<K3RelayError>()("K3RelayErr
         return "That device is not in this host's ledger.";
       case "invalid-name":
         return "Device names must be 1-64 visible characters.";
+      case "confirmation-required":
+        return "Compare the confirmation codes, then approve with the code this host shows.";
+      case "not-a-relay-device":
+        return "Only a device paired through the K3 relay can remove itself.";
       case "internal":
         return "The K3 relay could not complete the request.";
     }

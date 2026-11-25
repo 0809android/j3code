@@ -1,4 +1,8 @@
-import { GitCommandError, OrchestrationDispatchCommandError } from "@t3tools/contracts";
+import {
+  GitCommandError,
+  K3RelayError,
+  OrchestrationDispatchCommandError,
+} from "@t3tools/contracts";
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- A synchronous digest inside the pure provider mapping.
 import * as NodeCrypto from "node:crypto";
 import * as FeatureFlags from "@t3tools/shared/FeatureFlags";
@@ -248,6 +252,7 @@ import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import * as ServerE2eeIdentity from "./auth/ServerE2eeIdentity.ts";
 import {
   classifyRequestTransport,
+  relayDeviceIdOf,
   transportAllowedByPolicy,
   transportSatisfiesE2eeRequirement,
 } from "./auth/transportSecurity.ts";
@@ -1376,6 +1381,8 @@ export const layerWsRpc = (
   serverBrowser: ServerBrowser.ServerBrowser["Service"],
   reportProfiles: ServerBrowser.ProfileReporter,
   settingsClient: { readonly secretReferences: boolean },
+  /** The E2E-authenticated device when this socket came through the K3 relay. */
+  relayDeviceId?: string,
 ) =>
   Layer.effectContext(
     Effect.gen(function* () {
@@ -3065,7 +3072,8 @@ export const layerWsRpc = (
         [WS_METHODS.workspaceTaskFolder]: (input) =>
           taskFolders.find(input.worktreePath).pipe(Effect.map((taskFolder) => ({ taskFolder }))),
         [WS_METHODS.workspaceAddTaskFolderRepository]: (input) => taskFolders.addRepository(input),
-        [WS_METHODS.attachmentsCreateUploadUrl]: (input) => issueAttachmentUploadUrl(input),
+        [WS_METHODS.attachmentsCreateUploadUrl]: (input) =>
+          issueAttachmentUploadUrl(input, relayDeviceId),
         [WS_METHODS.attachmentsDelete]: (input) => deletePendingAttachment(input.attachmentId),
         [WS_METHODS.agentSessionsScan]: () => agentSessionScanner.scan,
         [WS_METHODS.legacyImportScan]: () => legacyImport.scan,
@@ -3089,10 +3097,11 @@ export const layerWsRpc = (
                 path.isAbsolute(input.resource.path) &&
                 !isNetworkPath(input.resource.path))
             ) {
-              return yield* issueAssetUrl({ resource: input.resource });
+              return yield* issueAssetUrl({ resource: input.resource, relayDeviceId });
             }
             if (input.resource._tag === "draft-workspace-file") {
               return yield* issueAssetUrl({
+                relayDeviceId,
                 resource: input.resource,
                 workspaceRoot: input.resource.cwd,
               });
@@ -3117,6 +3126,7 @@ export const layerWsRpc = (
               // Clone projects precede their files; clients retry asset URLs after clone completion.
               const clone = yield* projectCloneTracker.get(project.value.projectId);
               return yield* issueAssetUrl({
+                relayDeviceId,
                 resource: input.resource,
                 ...(project.value.faviconPath
                   ? { projectFaviconPath: project.value.faviconPath }
@@ -3152,6 +3162,7 @@ export const layerWsRpc = (
               });
             }
             return yield* issueAssetUrl({
+              relayDeviceId,
               resource: input.resource,
               workspaceRoot: thread.thread.worktreePath ?? project.value.workspaceRoot,
             });
@@ -3642,11 +3653,19 @@ export const layerWsRpc = (
         [WS_METHODS.k3RelayCreatePairingOffer]: (_input) => relayConnector.createPairingOffer,
         [WS_METHODS.k3RelayCancelPairing]: (_input) => relayConnector.cancelPairing,
         [WS_METHODS.k3RelayApprovePairing]: (input) =>
-          relayConnector.approvePairing(input.deviceId),
+          relayConnector.approvePairing(input.deviceId, input.confirmationCode),
         [WS_METHODS.k3RelayRejectPairing]: (_input) => relayConnector.rejectPairing,
         [WS_METHODS.k3RelayRevokeDevice]: (input) => relayConnector.revokeDevice(input.deviceId),
         [WS_METHODS.k3RelayRenameDevice]: (input) =>
           relayConnector.renameDevice(input.deviceId, input.name),
+        // The device is the session's, never the payload's: a device removes itself and no other.
+        [WS_METHODS.k3RelayForgetThisDevice]: (_input) => {
+          const deviceId = EnvironmentAuth.relayPairedDeviceIdOf(currentSession.subject);
+          return deviceId === undefined ||
+            (relayDeviceId !== undefined && relayDeviceId !== deviceId)
+            ? Effect.fail(new K3RelayError({ failure: "not-a-relay-device" }))
+            : relayConnector.revokeDevice(deviceId).pipe(Effect.asVoid);
+        },
       });
       const splitHandlers: Pick<typeof handlers, SplitWsRpc["_tag"]> = handlers;
       const otherHandlers: Pick<typeof handlers, Exclude<ServerWsRpc, SplitWsRpc>["_tag"]> =
@@ -3777,7 +3796,13 @@ export const layer = Layer.unwrap(
           return httpEffect;
         }).pipe(
           Effect.provide(
-            layerWsRpc(session, serverBrowser, reportProfiles, readSettingsClient(url.value)).pipe(
+            layerWsRpc(
+              session,
+              serverBrowser,
+              reportProfiles,
+              readSettingsClient(url.value),
+              relayDeviceIdOf(request),
+            ).pipe(
               Layer.provideMerge(RpcSerialization.layerJson),
               // Handler-context reporters see only request defects, not server-wide defects.
               Layer.provide(DefectReporter.layer),

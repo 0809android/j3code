@@ -1,4 +1,4 @@
-import type { AssetResource } from "@t3tools/contracts";
+import { type AssetResource, K3_RELAY_ASSET_ROUTE_PREFIX } from "@t3tools/contracts";
 import {
   AssetAttachmentNotFoundError,
   AssetSourceControlMediaUrlValidationError,
@@ -50,6 +50,7 @@ import * as Stream from "effect/Stream";
 
 import { base64UrlDecodeUtf8, base64UrlEncode } from "../auth/utils.ts";
 import * as AssetSigner from "./AssetSigner.ts";
+import { issueRelayHandle, redeemRelayHandle } from "../relay/k3relay/relayHandles.ts";
 import { makeIsServerInternalPath } from "../auth/serverInternalPaths.ts";
 import { parseAttachmentFileExtension, resolveAttachmentPathById } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
@@ -608,6 +609,11 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
   readonly projectFaviconPath?: string;
   /** Where a cloned project's checkout stands, while the clone tracker still knows it. */
   readonly projectCheckout?: "pending" | "cloned";
+  /**
+   * The relayed device asking. It gets a handle only it can redeem through the relay, never a
+   * signed URL (spec §12).
+   */
+  readonly relayDeviceId?: string | undefined;
 }) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -947,6 +953,24 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
       Math.ceil(expiresAt / HTML_ATTACHMENT_TOKEN_BUCKET_MS) * HTML_ATTACHMENT_TOKEN_BUCKET_MS;
     claims = { ...claims, expiresAt };
   }
+  const extras = {
+    ...(sourcePath !== undefined ? { sourcePath } : {}),
+    ...(imageDimensions !== null ? { imageDimensions } : {}),
+    ...(fileRevision !== undefined ? { fileRevision } : {}),
+  };
+  if (input.relayDeviceId !== undefined) {
+    const handle = yield* issueRelayHandle({
+      deviceId: input.relayDeviceId,
+      kind: "asset",
+      claims,
+      expiresAt,
+    });
+    return {
+      relativeUrl: `${K3_RELAY_ASSET_ROUTE_PREFIX}/${handle}/${encodeURIComponent(fileName)}`,
+      expiresAt,
+      ...extras,
+    };
+  }
   const encodedPayload = base64UrlEncode(encodeAssetClaims(claims));
   const signer = yield* AssetSigner.AssetSigner;
   const signature = yield* signer
@@ -958,9 +982,7 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
   return {
     relativeUrl: `${ASSET_ROUTE_PREFIX}/${token}/${encodeURIComponent(fileName)}`,
     expiresAt,
-    ...(sourcePath !== undefined ? { sourcePath } : {}),
-    ...(imageDimensions !== null ? { imageDimensions } : {}),
-    ...(fileRevision !== undefined ? { fileRevision } : {}),
+    ...extras,
   };
 });
 
@@ -980,7 +1002,26 @@ export const resolveAsset = Effect.fn("AssetAccess.resolveAsset")(function* (
 
   const claims = decodeClaims(encodedPayload);
   if (!claims || claims.expiresAt <= (yield* Clock.currentTimeMillis)) return null;
+  return yield* resolveAssetClaims(claims, relativePath);
+});
 
+const isAssetClaims = Schema.is(AssetClaimsSchema);
+
+/** The asset behind a relay handle, for the device it was issued to (see `relayHandles.ts`). */
+export const resolveRelayAsset = Effect.fn("AssetAccess.resolveRelayAsset")(function* (
+  request: { readonly source?: object | undefined },
+  handle: string,
+  relativePath: string,
+) {
+  const claims = yield* redeemRelayHandle(request, "asset", handle);
+  if (!isAssetClaims(claims)) return null;
+  return yield* resolveAssetClaims(claims, relativePath);
+});
+
+const resolveAssetClaims = Effect.fn("AssetAccess.resolveAssetClaims")(function* (
+  claims: AssetClaims,
+  relativePath: string,
+) {
   if (claims.kind === "attachment") {
     const config = yield* ServerConfig.ServerConfig;
     const attachmentPath = resolveAttachmentPathById({

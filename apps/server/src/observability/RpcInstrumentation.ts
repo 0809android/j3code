@@ -279,6 +279,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.k3RelayRejectPairing]: "k3relay",
   [WS_METHODS.k3RelayRevokeDevice]: "k3relay",
   [WS_METHODS.k3RelayRenameDevice]: "k3relay",
+  [WS_METHODS.k3RelayForgetThisDevice]: "k3relay",
 } as const satisfies Readonly<Record<WsRpcMethod, string>>;
 
 const RPC_SPAN_PREFIX = "ws.rpc";

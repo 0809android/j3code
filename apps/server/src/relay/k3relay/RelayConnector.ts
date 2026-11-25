@@ -1,6 +1,7 @@
 import {
   K3_RELAY_BOOTSTRAP_PATH,
   K3_RELAY_GRANT_PATH,
+  type K3RelayApprovalMode,
   K3RelayConnectionError,
   type K3RelayConnectionStatus,
   type K3RelayDevice,
@@ -43,6 +44,7 @@ import {
 } from "@t3tools/shared/mux";
 import {
   type AddDeviceWindow,
+  type ApprovalPolicy,
   type HostPairingState,
   type LedgerDevice,
   type PairingReplyMessage,
@@ -50,6 +52,7 @@ import {
   approvalRequired,
   cancelPairing,
   consumeAddDeviceWindow,
+  decideNewDeviceApproval,
   decodeBase64url,
   defaultApprovalPolicy,
   encodeBase64url,
@@ -60,6 +63,7 @@ import {
   issueGrant,
   ledgerVerifyDevice,
   openAddDeviceWindow,
+  type PairingRoute,
   openPairingWindow,
   pairingCloseFrame,
   pairingOpenFrame,
@@ -98,6 +102,8 @@ import {
 import { captureRelayRouter, makeRelayMuxHandler, type RelayLocalRoute } from "./RelayBridge.ts";
 import * as RelayDeviceLedger from "./RelayDeviceLedger.ts";
 import { relayStateDirectory } from "./RelayDeviceLedger.ts";
+import { makeGrantOutbox } from "./grantOutbox.ts";
+import { forgetRelayHandlesOf } from "./relayHandles.ts";
 import { openRelayWebSocket } from "./relaySockets.ts";
 
 /** An E2E record is at most one 16 KiB fragment plus framing; control frames are small JSON. */
@@ -163,7 +169,32 @@ const toDevice = (device: LedgerDevice, sessions: Iterable<LiveSession>): K3Rela
   };
 };
 
-const pairingView = (state: HostPairingState): K3RelayPairingState => {
+/**
+ * How a device that just made a valid claim is approved (spec §20.3): one tap only for the first
+ * device, not paired by QR, in a window the host's user opened. Everything else compares codes.
+ */
+export const pairingApprovalMode = (input: {
+  readonly policy: ApprovalPolicy;
+  readonly window: AddDeviceWindow | null;
+  readonly route: PairingRoute;
+  readonly now: number;
+}): K3RelayApprovalMode =>
+  decideNewDeviceApproval(input).kind === "one-tap" ? "one-tap" : "compare-code";
+
+/**
+ * Whether approving now needs the confirmation code the user compared. A one-tap offer lasts only
+ * while its window is open: after that, the user compares codes like any other approval.
+ */
+export const approvalNeedsCode = (input: {
+  readonly mode: K3RelayApprovalMode;
+  readonly window: AddDeviceWindow | null;
+  readonly now: number;
+}): boolean => input.mode !== "one-tap" || !isAddDeviceWindowOpen(input.window, input.now);
+
+const pairingView = (
+  state: HostPairingState,
+  approval: K3RelayApprovalMode,
+): K3RelayPairingState => {
   switch (state.phase) {
     case "idle":
       return { phase: "idle" };
@@ -177,6 +208,7 @@ const pairingView = (state: HostPairingState): K3RelayPairingState => {
         alg: state.device.alg,
         confirmationCode: state.confirmationCode,
         approvalDeadline: state.approvalDeadline,
+        approval,
       };
     case "closed":
       return { phase: "closed", reason: state.reason };
@@ -234,8 +266,14 @@ export class RelayConnector extends Context.Service<
     /** Opens the 5-minute pairing window and the 10-minute "Add device" window. */
     readonly createPairingOffer: Effect.Effect<K3RelayPairingOffer, K3RelayError>;
     readonly cancelPairing: Effect.Effect<void, K3RelayError>;
-    /** The user compared the confirmation codes for this device and approved it. */
-    readonly approvePairing: (deviceId: string) => Effect.Effect<K3RelayDevice, K3RelayError>;
+    /**
+     * The user approved this device: with the confirmation code they compared, or, when the host
+     * offered one tap (`approval: "one-tap"` in the state), without it.
+     */
+    readonly approvePairing: (
+      deviceId: string,
+      confirmationCode?: string,
+    ) => Effect.Effect<K3RelayDevice, K3RelayError>;
     readonly rejectPairing: Effect.Effect<void, K3RelayError>;
     readonly revokeDevice: (deviceId: string) => Effect.Effect<K3RelayDevice, K3RelayError>;
     readonly renameDevice: (
@@ -277,12 +315,14 @@ const make = Effect.gen(function* () {
   });
   const sessions = new Map<string, LiveSession>();
   let activeSessions = 0;
-  let controlWriter: ((frame: object) => Effect.Effect<void>) | undefined;
+  let controlWriter: ((frame: object) => Effect.Effect<void, Socket.SocketError>) | undefined;
   let endpoints: RelayEndpoints | undefined;
 
   const pairingLock = yield* Semaphore.make(1);
   let pairing: HostPairingState = initialHostPairingState;
   let addDeviceWindow: AddDeviceWindow | null = null;
+  let pendingApproval: K3RelayApprovalMode = "compare-code";
+  const grantOutbox = makeGrantOutbox<Socket.SocketError>();
   let pendingDecision: Deferred.Deferred<PairingReplyMessage> | undefined;
   let pairingTimer: Fiber.Fiber<void> | undefined;
   const bootstrapIssuedAt = new Map<string, number>();
@@ -308,7 +348,7 @@ const make = Effect.gen(function* () {
       maxSessions: settings.relay.maxSessions,
       reachableWhenNetworkAccessOff: policyAllowed && settings.relay.enabled,
       requireApproval: approvalRequired(defaultApprovalPolicy),
-      pairing: pairingView(pairing),
+      pairing: pairingView(pairing, pendingApproval),
       devices: devices.map((device) => toDevice(device, live)),
     } satisfies K3RelayHostState;
   });
@@ -322,7 +362,13 @@ const make = Effect.gen(function* () {
     Ref.update(connection, (view) => ({ ...view, ...patch })).pipe(Effect.andThen(publish));
 
   const sendControl = (frame: object) =>
-    Effect.suspend(() => (controlWriter === undefined ? Effect.void : controlWriter(frame)));
+    Effect.suspend(() =>
+      controlWriter === undefined ? Effect.void : Effect.ignore(controlWriter(frame)),
+    );
+
+  /** A grant the relay must learn to admit the device; kept until a write of it succeeds. */
+  const sendGrantRegistration = (deviceId: string, frame: object) =>
+    Effect.suspend(() => grantOutbox.send(deviceId, frame, controlWriter));
 
   const hostKeys = identity.getKeypair.pipe(
     Effect.map((keypair) => ({ ...keypair, hostId: relayHostId(keypair.publicKey) })),
@@ -437,7 +483,10 @@ const make = Effect.gen(function* () {
     )
     .pipe(Effect.withSpan("RelayConnector.rejectPairing"));
 
-  const approveDevice = Effect.fn("RelayConnector.approvePairing")(function* (deviceId: string) {
+  const approveDevice = Effect.fn("RelayConnector.approvePairing")(function* (
+    deviceId: string,
+    confirmationCode?: string,
+  ) {
     return yield* pairingLock.withPermit(
       Effect.gen(function* () {
         if (!policyAllowed) return yield* relayError("policy-disallowed");
@@ -448,6 +497,12 @@ const make = Effect.gen(function* () {
           return yield* relayError("no-pending-pairing");
         }
         const waiting = pairing;
+        if (
+          approvalNeedsCode({ mode: pendingApproval, window: addDeviceWindow, now }) &&
+          confirmationCode !== waiting.confirmationCode
+        ) {
+          return yield* relayError("confirmation-required");
+        }
         const keys = yield* hostKeys.pipe(Effect.mapError(() => relayError("internal")));
         const credential = yield* auth
           .issueRelayDeviceBootstrapCredential({ deviceId, label: waiting.device.name })
@@ -464,8 +519,10 @@ const make = Effect.gen(function* () {
           Effect.mapError(() => relayError("internal")),
         );
         pairing = approved.state;
+        pendingApproval = "compare-code";
         if (addDeviceWindow !== null) addDeviceWindow = consumeAddDeviceWindow(addDeviceWindow);
-        yield* sendControl(approved.relayFrame);
+        // A grant the relay never learns would leave the device paired but locked out.
+        yield* sendGrantRegistration(deviceId, approved.relayFrame);
         yield* settlePending(approved.reply);
         yield* stopPairingTimer;
         yield* publish;
@@ -478,7 +535,7 @@ const make = Effect.gen(function* () {
    * A claim that arrived inside an anonymous pairing session. Only claims made while the host's
    * "Add device" window is open are considered; a verified one waits for the user's decision.
    */
-  const receiveClaim = (transcriptHash: Uint8Array, message: unknown) =>
+  const receiveClaim = (transcriptHash: Uint8Array, message: unknown, route: PairingRoute) =>
     pairingLock.withPermit(
       Effect.gen(function* () {
         const now = yield* Clock.currentTimeMillis;
@@ -500,6 +557,12 @@ const make = Effect.gen(function* () {
         }
         const decision = yield* Deferred.make<PairingReplyMessage>();
         pendingDecision = decision;
+        pendingApproval = pairingApprovalMode({
+          policy: defaultApprovalPolicy,
+          window: addDeviceWindow,
+          route,
+          now,
+        });
         // `S` is spent: the relay need not admit more pairing connections.
         yield* sendControl(pairingCloseFrame());
         if (pairing.phase === "awaiting-approval") {
@@ -546,7 +609,8 @@ const make = Effect.gen(function* () {
     const frames = yield* reader.pull.pipe(Effect.timeout(PAIRING_CLAIM_TIMEOUT));
     const first = frames[0];
     const message = typeof first === "string" ? parseJson(first) : undefined;
-    const received = yield* receiveClaim(info.transcriptHash, message);
+    // A claim here proves the offer's secret, so it came through the QR code or link.
+    const received = yield* receiveClaim(info.transcriptHash, message, "qr");
     let reply: PairingReplyMessage;
     if ("reply" in received) {
       reply = received.reply;
@@ -581,7 +645,10 @@ const make = Effect.gen(function* () {
         now,
       }),
     );
-    yield* sendControl(grantRegisterFrame(grant, info.device.publicKey));
+    yield* sendGrantRegistration(
+      info.device.deviceId,
+      grantRegisterFrame(grant, info.device.publicKey),
+    );
     return jsonResponse(200, { grant });
   });
 
@@ -778,13 +845,14 @@ const make = Effect.gen(function* () {
         yield* writer.write(encodeFrame({ type: "auth", hostId, sig: encodeBase64url(sig) }));
         const ready = yield* nextMessage.pipe(Effect.timeout(CONTROL_READY_TIMEOUT));
         if (ready.type !== "ready") return yield* new RelayControlError({ error: "unauthorized" });
-        controlWriter = (frame) => writer.write(encodeFrame(frame)).pipe(Effect.ignore);
+        controlWriter = (frame) => writer.write(encodeFrame(frame));
         yield* Effect.addFinalizer(() =>
           Effect.sync(() => {
             controlWriter = undefined;
           }),
         );
         yield* onReady;
+        yield* grantOutbox.flush(controlWriter);
         yield* setConnection({ status: "connected", error: null });
         if (pairing.phase === "open") yield* sendControl(pairingOpenFrame(pairing.offer));
         while (true) {
@@ -920,8 +988,10 @@ const make = Effect.gen(function* () {
     const revocation = yield* signRevocation({ hostIdentitySeed: keys.seed, deviceId, now }).pipe(
       Effect.mapError(() => relayError("internal")),
     );
+    yield* grantOutbox.drop(deviceId);
+    yield* forgetRelayHandlesOf(deviceId);
     if (controlWriter !== undefined) {
-      yield* controlWriter({ type: "revoke", ...revocation });
+      yield* Effect.ignore(controlWriter({ type: "revoke", ...revocation }));
     } else if (endpoints !== undefined) {
       // The relay's copy is advisory; the host ledger already refuses the device.
       yield* http

@@ -100,6 +100,8 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.peerLinksList]: AuthAccessReadScope,
   // The relay's state, pairing window and device ledger, as the access list shows its clients.
   [WS_METHODS.k3RelaySubscribe]: AuthAccessReadScope,
+  // A relayed device removes only itself (the host reads it from the session), as signing out does.
+  [WS_METHODS.k3RelayForgetThisDevice]: AuthOrchestrationReadScope,
   // Names only, so a client that reads threads can open a linked environment's.
   [WS_METHODS.peerLinksNames]: AuthOrchestrationReadScope,
   // A linked environment's thread is read as this one's own are.

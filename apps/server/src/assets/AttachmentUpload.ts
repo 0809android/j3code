@@ -5,6 +5,7 @@ import {
   ATTACHMENT_UPLOAD_URL_TTL_MS,
   type AttachmentCreateUploadUrlInput,
   AttachmentUploadSigningKeyError,
+  K3_RELAY_UPLOAD_ROUTE_PREFIX,
 } from "@t3tools/contracts";
 import { isSvgAttachment } from "@t3tools/shared/image";
 import * as Clock from "effect/Clock";
@@ -29,6 +30,7 @@ import {
 import { resolveAttachmentRelativePath } from "../attachmentPaths.ts";
 import { base64UrlDecodeUtf8, base64UrlEncode } from "../auth/utils.ts";
 import * as AssetSigner from "./AssetSigner.ts";
+import { issueRelayHandle, redeemRelayHandle } from "../relay/k3relay/relayHandles.ts";
 import * as ServerConfig from "../config.ts";
 import { inferImageExtension } from "../imageMime.ts";
 import * as DocumentText from "../provider/DocumentText.ts";
@@ -66,6 +68,8 @@ function decodeClaims(encodedPayload: string): AttachmentUploadClaims | null {
 
 export const issueAttachmentUploadUrl = Effect.fn("AttachmentUpload.issueUrl")(function* (
   input: AttachmentCreateUploadUrlInput,
+  /** A relayed device gets a handle only it can use through the relay, never a signed URL. */
+  relayDeviceId?: string,
 ) {
   const config = yield* ServerConfig.ServerConfig;
   const nowMs = yield* Clock.currentTimeMillis;
@@ -93,18 +97,26 @@ export const issueAttachmentUploadUrl = Effect.fn("AttachmentUpload.issueUrl")(f
     attachmentType === "file" ? attachmentFileExtension(name) : undefined,
   );
   const expiresAt = nowMs + ATTACHMENT_UPLOAD_URL_TTL_MS;
-  const encodedPayload = base64UrlEncode(
-    encodeAttachmentUploadClaims({
-      version: 1,
-      kind: "attachment-upload",
-      type: attachmentType,
-      attachmentId,
-      name,
-      mimeType: input.mimeType,
-      sizeBytes: input.sizeBytes,
+  const claims: AttachmentUploadClaims = {
+    version: 1,
+    kind: "attachment-upload",
+    type: attachmentType,
+    attachmentId,
+    name,
+    mimeType: input.mimeType,
+    sizeBytes: input.sizeBytes,
+    expiresAt,
+  };
+  if (relayDeviceId !== undefined) {
+    const handle = yield* issueRelayHandle({
+      deviceId: relayDeviceId,
+      kind: "upload",
+      claims,
       expiresAt,
-    }),
-  );
+    });
+    return { attachmentId, relativeUrl: `${K3_RELAY_UPLOAD_ROUTE_PREFIX}/${handle}`, expiresAt };
+  }
+  const encodedPayload = base64UrlEncode(encodeAttachmentUploadClaims(claims));
 
   const signer = yield* AssetSigner.AssetSigner;
   const signature = yield* signer
@@ -141,6 +153,17 @@ export const validateAttachmentUploadToken = Effect.fn("AttachmentUpload.validat
     return null;
   }
   return claims;
+});
+
+const isAttachmentUploadClaims = Schema.is(AttachmentUploadClaims);
+
+/** The upload claims behind a relay handle, for the device it was issued to. */
+export const redeemRelayUploadHandle = Effect.fn("AttachmentUpload.redeemRelayHandle")(function* (
+  request: { readonly source?: object | undefined },
+  handle: string,
+) {
+  const claims = yield* redeemRelayHandle(request, "upload", handle);
+  return isAttachmentUploadClaims(claims) ? claims : null;
 });
 
 export type StoreAttachmentUploadResult =

@@ -9,6 +9,7 @@ import * as HttpApiSchema from "effect/http-api/HttpApiSchema";
 import * as HttpServerRespondable from "effect/http/HttpServerRespondable";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
 
+import { K3RelayUnsupportedError } from "./k3Relay.ts";
 import {
   AuthAccessTokenResult,
   AuthBrowserSessionRequest,
@@ -627,7 +628,8 @@ class EnvironmentAuthHttpApi extends HttpApiGroup.make("auth")
       headers: OptionalBearerHeaders,
       params: AuthWebSocketTicketParams,
       success: AuthWebSocketTicketResult,
-      error: [EnvironmentInternalError],
+      // A media ticket is a credential in a URL: never issued through the K3 relay.
+      error: [EnvironmentInternalError, K3RelayUnsupportedError],
     }).middleware(EnvironmentAuthenticatedAuth),
   )
   .add(

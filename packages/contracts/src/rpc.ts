@@ -93,6 +93,7 @@ import {
   EnvironmentAuthorizationError,
 } from "./auth.ts";
 import {
+  K3RelayApproveInput,
   K3RelayDevice,
   K3RelayDeviceInput,
   K3RelayError,
@@ -766,6 +767,7 @@ export const WS_METHODS = {
   k3RelayRejectPairing: "k3relay.rejectPairing",
   k3RelayRevokeDevice: "k3relay.revokeDevice",
   k3RelayRenameDevice: "k3relay.renameDevice",
+  k3RelayForgetThisDevice: "k3relay.forgetThisDevice",
 } as const;
 
 const WsServerUpsertKeybindingRpc = Rpc.make(WS_METHODS.serverUpsertKeybinding, {
@@ -2515,7 +2517,7 @@ const WsK3RelayCancelPairingRpc = Rpc.make(WS_METHODS.k3RelayCancelPairing, {
 
 /** Names the device the user compared codes for, so a newer claim is never approved by accident. */
 const WsK3RelayApprovePairingRpc = Rpc.make(WS_METHODS.k3RelayApprovePairing, {
-  payload: K3RelayDeviceInput,
+  payload: K3RelayApproveInput,
   success: K3RelayDevice,
   error: K3RelayRpcError,
 });
@@ -2534,6 +2536,15 @@ const WsK3RelayRevokeDeviceRpc = Rpc.make(WS_METHODS.k3RelayRevokeDevice, {
 const WsK3RelayRenameDeviceRpc = Rpc.make(WS_METHODS.k3RelayRenameDevice, {
   payload: K3RelayRenameDeviceInput,
   success: K3RelayDevice,
+  error: K3RelayRpcError,
+});
+
+/**
+ * A device paired through the relay takes itself off the host's ledger. Only its own entry: the
+ * host reads the device from the session, never from the payload, and needs no `relay:configure`.
+ */
+const WsK3RelayForgetThisDeviceRpc = Rpc.make(WS_METHODS.k3RelayForgetThisDevice, {
+  payload: Schema.Struct({}),
   error: K3RelayRpcError,
 });
 
@@ -2794,6 +2805,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsK3RelayRejectPairingRpc,
   WsK3RelayRevokeDeviceRpc,
   WsK3RelayRenameDeviceRpc,
+  WsK3RelayForgetThisDeviceRpc,
   WsOrchestrationV2DispatchCommandRpc,
   WsOrchestrationV2GetWorkflowScriptRpc,
   WsOrchestrationV2GetNativeChildWorkRpc,

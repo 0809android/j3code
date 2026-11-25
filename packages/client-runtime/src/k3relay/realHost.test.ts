@@ -81,7 +81,7 @@ interface RealHost {
     timeoutMs?: number,
   ) => Promise<K3RelayHostState>;
   readonly createPairingOffer: () => Promise<K3RelayPairingOffer>;
-  readonly approvePairing: (deviceId: string) => Promise<K3RelayDevice>;
+  readonly approvePairing: (deviceId: string, confirmationCode?: string) => Promise<K3RelayDevice>;
   readonly revokeDevice: (deviceId: string) => Promise<K3RelayDevice>;
   readonly signGrant: (input: {
     readonly alg: "ed25519" | "p256";
@@ -223,7 +223,7 @@ const pairThroughOnboarding = (host: RealHost) =>
     // The user compares: the host shows the same code and the name the device sent.
     expect(waiting.confirmationCode).toBe(deviceCode);
     expect(waiting.deviceName).toBe("Kino's phone");
-    yield* hostCall(() => host.approvePairing(waiting.deviceId));
+    yield* hostCall(() => host.approvePairing(waiting.deviceId, waiting.confirmationCode));
 
     const environmentId = yield* Fiber.join(pairing);
     const registration = Option.getOrThrow(yield* Ref.get(saved));

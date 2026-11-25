@@ -54,6 +54,7 @@ import {
   RelayProbeRpcs as ProbeRpcs,
   startK3RelayTestRelay as startRelay,
 } from "./k3relayHost.testkit.ts";
+import { issueAssetUrl } from "../../assets/AssetAccess.ts";
 import * as RelayConnector from "./RelayConnector.ts";
 import * as RelayDeviceLedger from "./RelayDeviceLedger.ts";
 
@@ -191,7 +192,7 @@ const pairDevice = (host: HostView, signer: E2eeDeviceSigner, name = "Test Phone
       // The user compares the codes: the host's and the device's must match.
       expect(pending.pairing.confirmationCode).toBe(claim.confirmationCode);
       expect(pending.pairing.deviceName).toBe(name);
-      yield* connector.approvePairing(pending.pairing.deviceId);
+      yield* connector.approvePairing(pending.pairing.deviceId, claim.confirmationCode);
       const reply = parseFrame((yield* reader.pull)[0]);
       const paired = receivePairingReply(claim.state, reply, yield* Clock.currentTimeMillis);
       assert(paired.phase === "paired");
@@ -621,6 +622,132 @@ describe("RelayConnector through a real relay", () => {
   );
 });
 
+describe("RelayConnector routes through the mux (spec §12)", () => {
+  it.live(
+    "assets and uploads by device-bound handle, never by signed URL; media tickets and media routes refused",
+    () =>
+      Effect.gen(function* () {
+        const { url } = yield* startRelay;
+        yield* Effect.gen(function* () {
+          const host = yield* hostView(url);
+          const phone = yield* newDevice;
+          const laptop = yield* newDevice;
+          const pairedPhone = yield* pairDevice(host, phone, "Phone");
+          const pairedLaptop = yield* pairDevice(host, laptop, "Laptop");
+          const bytes = Uint8Array.from({ length: 300_000 }, (_, index) => (index * 7) % 256);
+
+          const issued = yield* Effect.scoped(
+            Effect.gen(function* () {
+              const { client, fetch } = yield* openDeviceSession(
+                host,
+                phone,
+                pairedPhone.record.grant,
+              );
+              const { rpc, accessToken, dpop } = yield* signInAndCallRpc(
+                client,
+                pairedPhone.bootstrapToken,
+              );
+
+              // The upload slot is a handle under the relay prefix, not a signed token.
+              const upload = yield* rpc["relayProbe.uploadUrl"]({
+                name: "photo.png",
+                mimeType: "image/png",
+                sizeBytes: bytes.byteLength,
+              });
+              expect(upload.relativeUrl).toMatch(
+                /^\/api\/attachments\/upload\/relay\/[A-Za-z0-9_-]{32}$/u,
+              );
+              const stored = yield* Effect.promise(async () => {
+                const response = await fetch(upload.relativeUrl, {
+                  method: "POST",
+                  headers: { "content-length": String(bytes.byteLength) },
+                  body: bytes,
+                });
+                return response.status;
+              });
+              expect(stored).toBe(204);
+
+              const asset = yield* rpc["relayProbe.assetUrl"]({
+                attachmentId: upload.attachmentId!,
+              });
+              expect(asset.relativeUrl).toMatch(/^\/api\/assets\/file\/[A-Za-z0-9_-]{32}\/[^/]+$/u);
+              // No `payload.signature` token anywhere before the file name.
+              expect(asset.relativeUrl.split("/")[4]).not.toContain(".");
+              const fetched = yield* Effect.promise(async () => {
+                const response = await fetch(asset.relativeUrl);
+                return {
+                  status: response.status,
+                  bytes: new Uint8Array(await response.arrayBuffer()),
+                };
+              });
+              expect(fetched.status).toBe(200);
+              expect(fetched.bytes).toEqual(bytes);
+
+              // A signed URL for the same file, as a LAN client would get, is refused here.
+              const signed = yield* issueAssetUrl({
+                resource: { _tag: "attachment", attachmentId: upload.attachmentId! },
+              });
+              expect(signed.relativeUrl).toMatch(/^\/api\/assets\/[^/]+\.[^/]+\//u);
+              const refusedSigned = yield* Effect.promise(async () => {
+                const response = await fetch(signed.relativeUrl);
+                return { status: response.status, body: await response.json() };
+              });
+              expect(refusedSigned).toMatchObject({
+                status: 403,
+                body: { code: "relay-unsupported", feature: "signed-url" },
+              });
+
+              // Media tickets are credentials in URLs: not through the relay.
+              const iat = yield* nowSeconds;
+              const mediaTicket = yield* Effect.promise(async () => {
+                const ticketUrl = `${ORIGIN}/api/auth/websocket-ticket/media`;
+                const response = await fetch("/api/auth/websocket-ticket/media", {
+                  method: "POST",
+                  headers: {
+                    authorization: `DPoP ${accessToken}`,
+                    dpop: dpop.sign({ method: "POST", url: ticketUrl, token: accessToken, iat }),
+                  },
+                });
+                return { status: response.status, body: await response.json() };
+              });
+              expect(mediaTicket).toMatchObject({
+                status: 403,
+                body: { code: "relay-unsupported", feature: "media-ticket" },
+              });
+
+              for (const [path, feature] of [
+                ["/api/preview/tunnel?port=3000", "preview-tunnel"],
+                ["/api/device-hub/api/devices", "device-hub"],
+                ["/api/preview-stream/ws?tabId=x", "preview-stream"],
+                ["/ws/voice", "voice-input"],
+                ["/api/guest/session?share=x", "guest-share"],
+              ] as const) {
+                const refusal = yield* Effect.promise(async () => {
+                  const response = await fetch(path);
+                  return { status: response.status, body: await response.json() };
+                });
+                expect(refusal).toMatchObject({
+                  status: 403,
+                  body: { code: "relay-unsupported", feature },
+                });
+              }
+              return asset.relativeUrl;
+            }),
+          );
+
+          // The phone's handle is no use to another paired device.
+          const stolen = yield* Effect.scoped(
+            Effect.gen(function* () {
+              const { fetch } = yield* openDeviceSession(host, laptop, pairedLaptop.record.grant);
+              return yield* Effect.promise(async () => (await fetch(issued)).status);
+            }),
+          );
+          expect(stolen).toBe(404);
+        }).pipe(Effect.provide(layerHost({ relayUrl: url })));
+      }).pipe(Effect.provide(layerTest)),
+  );
+});
+
 describe("RelayConnector pairing", () => {
   it.live(
     "refuses a wrong secret without closing the window, then rejects on the user's word",
@@ -705,6 +832,17 @@ describe("RelayConnector pairing", () => {
                 .approvePairing("aaaabbbbccccddddeeeeffffgggghhhh")
                 .pipe(Effect.flip);
               expect(wrong.failure).toBe("no-pending-pairing");
+              // A QR pairing always compares codes: no code, or another one, approves nothing.
+              const waiting = (yield* connector.state).pairing;
+              assert(waiting.phase === "awaiting-approval");
+              expect(waiting.approval).toBe("compare-code");
+              const noCode = yield* connector.approvePairing(waiting.deviceId).pipe(Effect.flip);
+              expect(noCode.failure).toBe("confirmation-required");
+              const otherCode = yield* connector
+                .approvePairing(waiting.deviceId, "AAAA-AAAA")
+                .pipe(Effect.flip);
+              expect(otherCode.failure).toBe("confirmation-required");
+              expect((yield* connector.state).pairing.phase).toBe("awaiting-approval");
 
               yield* connector.rejectPairing;
               return parseFrame((yield* reader.pull)[0]);
@@ -740,6 +878,76 @@ const countingListener = Effect.acquireRelease(
   ({ server }) =>
     Effect.promise(() => new Promise<void>((resolve) => server.close(() => resolve()))),
 );
+
+describe("approval of a new device (spec §20.3)", () => {
+  const policy = { requireApproval: true, optOut: null } as const;
+  const window = (now: number, used = false) => ({
+    openedAt: now,
+    expiresAt: now + 10 * 60_000,
+    openedBy: { kind: "host-user" } as const,
+    used,
+  });
+
+  it("offers one tap only to the first non-QR device inside the host user's window", () => {
+    const opened = window(1_000);
+    expect(
+      RelayConnector.pairingApprovalMode({ policy, window: opened, route: "account", now: 2_000 }),
+    ).toBe("one-tap");
+    // QR pairing compares codes, window or not.
+    expect(
+      RelayConnector.pairingApprovalMode({ policy, window: opened, route: "qr", now: 2_000 }),
+    ).toBe("compare-code");
+    // Outside the window, or once the window's one tap was spent.
+    expect(
+      RelayConnector.pairingApprovalMode({
+        policy,
+        window: opened,
+        route: "account",
+        now: 1_000 + 10 * 60_000,
+      }),
+    ).toBe("compare-code");
+    expect(
+      RelayConnector.pairingApprovalMode({
+        policy,
+        window: window(1_000, true),
+        route: "account",
+        now: 2_000,
+      }),
+    ).toBe("compare-code");
+    expect(
+      RelayConnector.pairingApprovalMode({ policy, window: null, route: "account", now: 2_000 }),
+    ).toBe("compare-code");
+    // A window a device opened (an introduction) never gives one tap.
+    expect(
+      RelayConnector.pairingApprovalMode({
+        policy,
+        window: {
+          ...opened,
+          openedBy: { kind: "device", deviceId: "d", permissions: ["devices:invite"] },
+        },
+        route: "account",
+        now: 2_000,
+      }),
+    ).toBe("compare-code");
+  });
+
+  it("asks for the code once a one-tap offer outlives its window", () => {
+    const opened = window(1_000);
+    expect(RelayConnector.approvalNeedsCode({ mode: "one-tap", window: opened, now: 5_000 })).toBe(
+      false,
+    );
+    expect(
+      RelayConnector.approvalNeedsCode({
+        mode: "one-tap",
+        window: opened,
+        now: 1_000 + 10 * 60_000,
+      }),
+    ).toBe(true);
+    expect(
+      RelayConnector.approvalNeedsCode({ mode: "compare-code", window: opened, now: 5_000 }),
+    ).toBe(true);
+  });
+});
 
 describe("RelayConnector stays off", () => {
   it.live("opens no socket when the relay is off, which is the default", () =>
