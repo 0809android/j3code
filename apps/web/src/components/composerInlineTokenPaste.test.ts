@@ -5,6 +5,7 @@ import {
   encodeComposerContextFragment,
 } from "@t3tools/shared/composerContextClipboard";
 import { threadContextRecord } from "@t3tools/shared/composerContextReferences";
+import { setHostedThreadLinkOrigin } from "@t3tools/shared/threadLinks";
 import { describe, expect, it } from "vite-plus/test";
 
 import { importPastedComposerText } from "./composerInlineTokenPaste";
@@ -51,10 +52,31 @@ describe("importPastedComposerText", () => {
   });
 
   it("keeps the link when the composer cannot take the thread", () => {
-    const pasted = "https://app.t3.codes/threads/env-1/thread-1";
-    expect(importPastedComposerText(clipboard({ "text/plain": pasted }), () => new Map())).toBe(
-      pasted,
-    );
+    const pasted = "https://hosted.example.test/threads/env-1/thread-1";
+    setHostedThreadLinkOrigin("https://hosted.example.test");
+    try {
+      expect(importPastedComposerText(clipboard({ "text/plain": pasted }), () => new Map())).toBe(
+        pasted,
+      );
+    } finally {
+      setHostedThreadLinkOrigin(undefined);
+    }
+  });
+
+  it("makes a chip of a hosted link only for the configured hosted app", () => {
+    const hosted = "https://hosted.example.test/threads/env-1/thread-1";
+    const former = "https://app.t3.codes/threads/env-1/thread-1";
+    const paste = (text: string) =>
+      importPastedComposerText(clipboard({ "text/plain": text }), importAll([]));
+    expect(paste(hosted)).toBe(hosted);
+    expect(paste(former)).toBe(former);
+    setHostedThreadLinkOrigin("https://hosted.example.test");
+    try {
+      expect(paste(hosted)).toBe(chip("Thread"));
+      expect(paste(former)).toBe(former);
+    } finally {
+      setHostedThreadLinkOrigin(undefined);
+    }
   });
 
   it("imports CRLF and CR clipboard text with LF line breaks", () => {

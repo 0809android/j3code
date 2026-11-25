@@ -1,8 +1,9 @@
 import type { DesktopBridge, DesktopUpdateState } from "@t3tools/contracts";
+import { K3_NEW_ISSUE_URL, K3_RELEASES_URL } from "@t3tools/shared/projectLinks";
 
 const FALLBACK_TRIAGE_COMMAND = "npx t3 triage";
-const DOWNLOAD_URL = "https://t3.codes/download";
-const ISSUE_URL = "https://github.com/pingdotgg/t3code/issues/new";
+const DOWNLOAD_URL = K3_RELEASES_URL;
+const ISSUE_URL = K3_NEW_ISSUE_URL;
 const LAST_FAILURE_KEY = "k3code:boot-failed-at";
 const REPEAT_FAILURE_MS = 5 * 60_000;
 const MAX_CAUSES = 3;
@@ -362,7 +363,7 @@ export function showBootError(error: unknown) {
     ...(bridge
       ? [
           link(
-            nightly ? `${DOWNLOAD_URL}?channel=nightly` : DOWNLOAD_URL,
+            DOWNLOAD_URL,
             nightly
               ? "Download and reinstall the latest nightly build"
               : "Download and reinstall K3 Code",

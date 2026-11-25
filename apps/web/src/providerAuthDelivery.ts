@@ -4,6 +4,7 @@ import { msg } from "gt-react";
 
 import { toastManager } from "./components/ui/toast";
 import { m } from "./i18n/messages";
+import { configuredHostedAppUrl } from "./hostedPairing";
 import { appAtomRegistry } from "./rpc/atomRegistry";
 import { environmentPresentations } from "./state/presentation";
 import { serverEnvironment } from "./state/server";
@@ -17,7 +18,7 @@ type ProviderAuthDelivery = NonNullable<ReturnType<typeof readCodexAuthDelivery>
  */
 export function startProviderAuthDelivery(): void {
   if (!window.location.hash.startsWith("#codex-auth=")) return;
-  const delivery = readCodexAuthDelivery(window.location.href);
+  const delivery = readCodexAuthDelivery(window.location.href, configuredHostedAppUrl());
   window.history.replaceState(
     window.history.state,
     "",
