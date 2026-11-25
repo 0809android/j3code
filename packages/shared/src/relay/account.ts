@@ -134,7 +134,8 @@ const readSignedPayload = (
   const payload = decodeBase64url(parts[1]);
   const sig = decodeBase64url(parts[2], 64);
   if (payload === null || sig === null || accountKey.length !== 32) return null;
-  if (!verifyDeviceSignature("ed25519", accountKey, labeledMessage(LABEL_TOKEN, payload), sig)) {
+  // The relay's framing (u32 lengths), not the E2EE layer's.
+  if (!verifyDeviceSignature("ed25519", accountKey, relaySigningInput(LABEL_TOKEN, payload), sig)) {
     return null;
   }
   try {

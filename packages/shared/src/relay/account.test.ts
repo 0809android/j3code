@@ -7,7 +7,6 @@ import {
   type E2eeDeviceAlgorithm,
   type E2eeDeviceSigner,
   deviceSignerFromKeypair,
-  labeledMessage,
 } from "../socketE2eeDevice.ts";
 import { identityPublicKeyFromSeed } from "../socketE2eeV1.ts";
 import {
@@ -20,7 +19,7 @@ import {
   verifyAccountHostTicket,
 } from "./account.ts";
 import { defaultApprovalPolicy, disableApproval, openAddDeviceWindow } from "./approval.ts";
-import { encodeBase64url, relayDeviceId, relayHostId } from "./encoding.ts";
+import { encodeBase64url, relayDeviceId, relayHostId, relaySigningInput } from "./encoding.ts";
 import {
   type HostPairingState,
   confirmationCode,
@@ -55,7 +54,7 @@ const signer = (alg: E2eeDeviceAlgorithm, n: number): E2eeDeviceSigner => {
 /** Signs exactly as the relay's `AccountTokens.sign` does (infra/k3-relay/src/account.ts). */
 const relayToken = (claims: Record<string, unknown>, secret = relaySecret): string => {
   const payload = new TextEncoder().encode(JSON.stringify(claims));
-  const sig = ed25519.sign(labeledMessage("k3relay-v1/account-token", payload), secret);
+  const sig = ed25519.sign(relaySigningInput("k3relay-v1/account-token", payload), secret);
   return `k3a1.${encodeBase64url(payload)}.${encodeBase64url(sig)}`;
 };
 
@@ -125,6 +124,26 @@ describe("account tickets", () => {
     assert.strictEqual(reason(ticketFor(device, { extra: "name" })), "malformed");
     const token = ticketFor(device);
     assert.strictEqual(reason(`${token.slice(0, -2)}AA`), "signature");
+  });
+
+  it("refuses a token signed over the E2EE layer's framing instead of the relay's", () => {
+    const payload = new TextEncoder().encode(
+      JSON.stringify({
+        v: 1,
+        typ: "host-access",
+        iss: ISSUER,
+        sub: ACCOUNT,
+        aud: hostId,
+        cnf: relayDeviceId(device.alg, device.publicKey),
+        iat: NOW,
+        exp: NOW + 1,
+      }),
+    );
+    const label = new TextEncoder().encode("k3relay-v1/account-token");
+    const u16 = (bytes: Uint8Array) => [bytes.length >> 8, bytes.length & 0xff, ...bytes];
+    const sig = ed25519.sign(Uint8Array.from([...u16(label), ...u16(payload)]), relaySecret);
+    const token = `k3a1.${encodeBase64url(payload)}.${encodeBase64url(sig)}`;
+    assert.isFalse(verifyAccountHostTicket(token, expected).ok);
   });
 
   it("reads a session token only with the relay's key", () => {
