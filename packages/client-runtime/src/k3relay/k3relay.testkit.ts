@@ -94,11 +94,9 @@ const loadRelay = Effect.promise(async () => ({
   server: (await import(/* @vite-ignore */ relaySource("server.ts"))) as RelayServerModule,
   testkit: (await import(/* @vite-ignore */ relaySource("relay.testkit.ts"))) as RelayTestkit,
 }));
-import {
-  decodePairingFrame,
-  encodePairingFrame,
-  k3relayE2eeEnvironmentId,
-} from "./relayHostContract.ts";
+import { k3RelayE2eeEnvironmentId } from "@t3tools/contracts";
+
+import { decodePairingFrame, encodePairingFrame } from "./pairing.ts";
 
 /**
  * A real `infra/k3-relay` server in this process, and a small host behind it: E2EE v2 server,
@@ -285,7 +283,7 @@ export const startTestHost = Effect.fn("K3RelayTestHost.start")(function* (
   const serveClient = (socket: Socket.Socket) =>
     Effect.gen(function* () {
       const e2ee = yield* wrapServerSocketWithE2eeV2(socket, {
-        environmentId: k3relayE2eeEnvironmentId(hostId),
+        environmentId: k3RelayE2eeEnvironmentId(hostId),
         identitySeed: options.impostorSeed ?? seed,
         verifyDevice,
         requireGrant: true,
@@ -300,7 +298,7 @@ export const startTestHost = Effect.fn("K3RelayTestHost.start")(function* (
   const servePairing = (socket: Socket.Socket) =>
     Effect.gen(function* () {
       const e2ee = yield* wrapServerSocketWithE2eeV2(socket, {
-        environmentId: k3relayE2eeEnvironmentId(hostId),
+        environmentId: k3RelayE2eeEnvironmentId(hostId),
         identitySeed: options.impostorSeed ?? seed,
         verifyDevice,
         requireDeviceAuth: false,

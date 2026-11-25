@@ -1,3 +1,4 @@
+import { K3_RELAY_GRANT_PATH, K3_RELAY_PROVISIONAL_ORIGIN } from "@t3tools/contracts";
 import {
   type DevicePairingRecord,
   type RelayGrant,
@@ -28,13 +29,12 @@ import * as ConnectionProfileStore from "../connection/profileStore.ts";
 import { credentialConnectionId } from "../connection/routes.ts";
 import { DeviceKeyStore } from "./deviceKeyStore.ts";
 import { k3relayConnectionError } from "./failure.ts";
-import { K3RELAY_GRANT_RENEWAL_PATH, K3RELAY_VIRTUAL_ORIGIN } from "./relayHostContract.ts";
 import { K3RelayTunnels } from "./tunnels.ts";
 import type { K3RelayTunnelInput } from "./tunnel.ts";
 
 const isK3RelayProfile = Schema.is(K3RelayConnectionProfile);
 
-export const K3RELAY_VIRTUAL_WS_ORIGIN = K3RELAY_VIRTUAL_ORIGIN.replace(/^https:/u, "wss:");
+export const K3RELAY_VIRTUAL_WS_ORIGIN = K3_RELAY_PROVISIONAL_ORIGIN.replace(/^https:/u, "wss:");
 
 /** Runs an HTTP effect over a channel: the fetch-based client reads `Fetch` per request. */
 export const overTransport =
@@ -92,7 +92,7 @@ export const renewK3RelayGrant = Effect.fn("K3Relay.renewGrant")(function* (inpu
   if (!grantNeedsRenewal(input.record.grant, now)) return Option.none<DevicePairingRecord>();
   const response = yield* Effect.tryPromise({
     try: (signal) =>
-      input.transport.fetch(`${K3RELAY_VIRTUAL_ORIGIN}${K3RELAY_GRANT_RENEWAL_PATH}`, {
+      input.transport.fetch(`${K3_RELAY_PROVISIONAL_ORIGIN}${K3_RELAY_GRANT_PATH}`, {
         method: "POST",
         signal,
       }),
@@ -168,7 +168,7 @@ export const makeK3RelayBroker = Effect.fn("clientRuntime.connection.broker.make
         .authorizeDirectDpop({
           expectedEnvironmentId: target.environmentId,
           connectionId: credentialConnectionId(target.connectionId),
-          httpBaseUrl: K3RELAY_VIRTUAL_ORIGIN,
+          httpBaseUrl: K3_RELAY_PROVISIONAL_ORIGIN,
           wsBaseUrl: K3RELAY_VIRTUAL_WS_ORIGIN,
         })
         .pipe(overTransport(tunnel.transport));

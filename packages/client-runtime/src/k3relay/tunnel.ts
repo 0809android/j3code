@@ -21,13 +21,14 @@ import * as Effect from "effect/Effect";
 import type * as Scope from "effect/Scope";
 import * as Socket from "effect/socket/Socket";
 
+import { K3_RELAY_PROVISIONAL_ORIGIN, k3RelayE2eeEnvironmentId } from "@t3tools/contracts";
+
 import type { ConnectionTransport, K3RelayFailureReason } from "../connection/model.ts";
 import {
   type K3RelayAdmission,
   admitK3RelaySocket,
   findK3RelayFailureReason,
 } from "./admission.ts";
-import { K3RELAY_VIRTUAL_ORIGIN, k3relayE2eeEnvironmentId } from "./relayHostContract.ts";
 import { K3RelayAdmissionError } from "./admission.ts";
 
 const RELAY_OPEN_TIMEOUT = "15 seconds";
@@ -100,7 +101,7 @@ export const makeK3RelayE2eeSocket = Effect.fn("K3Relay.makeE2eeSocket")(functio
   const socket: E2eeSocket = yield* wrapClientSocketWithE2eeV2(
     admitK3RelaySocket(raw, input.admission),
     {
-      environmentId: k3relayE2eeEnvironmentId(input.hostId),
+      environmentId: k3RelayE2eeEnvironmentId(input.hostId),
       expectedServerIdentityKey: input.hostIdentityKey,
       device: input.device,
       grant: input.grant,
@@ -147,8 +148,8 @@ export const openK3RelayTunnel: (
         }),
     ),
   );
-  const fetch = makeMuxFetch(mux, { baseUrl: K3RELAY_VIRTUAL_ORIGIN });
-  const MuxWebSocket = makeMuxWebSocket(mux, { baseUrl: K3RELAY_VIRTUAL_ORIGIN });
+  const fetch = makeMuxFetch(mux, { baseUrl: K3_RELAY_PROVISIONAL_ORIGIN });
+  const MuxWebSocket = makeMuxWebSocket(mux, { baseUrl: K3_RELAY_PROVISIONAL_ORIGIN });
   const transport: ConnectionTransport = {
     fetch,
     webSocketConstructor: (url, protocols) =>

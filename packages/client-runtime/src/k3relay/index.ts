@@ -8,6 +8,8 @@ export {
   K3RelayOnboarding,
   K3RelayPairingError,
   K3RelayPairingFailureReason,
+  decodePairingFrame,
+  encodePairingFrame,
   type K3RelayOfferPreview,
   type K3RelayPairedDevice,
   type K3RelayPairingInput,

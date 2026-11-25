@@ -1,4 +1,4 @@
-import type { EnvironmentId } from "@t3tools/contracts";
+import { type EnvironmentId, K3_RELAY_PROVISIONAL_ORIGIN } from "@t3tools/contracts";
 import {
   type DevicePairingRecord,
   type DevicePairingState,
@@ -42,11 +42,6 @@ import * as ManagedRelay from "../relay/managedRelay.ts";
 import { findK3RelayFailureReason } from "./admission.ts";
 import { overTransport } from "./broker.ts";
 import { DeviceKeyStore } from "./deviceKeyStore.ts";
-import {
-  K3RELAY_VIRTUAL_ORIGIN,
-  decodePairingFrame,
-  encodePairingFrame,
-} from "./relayHostContract.ts";
 import { makeK3RelayE2eeSocket, openK3RelayTunnel } from "./tunnel.ts";
 
 /**
@@ -103,6 +98,17 @@ export interface K3RelayPairedDevice {
   readonly keyId: string;
   readonly signer: E2eeDeviceSigner;
 }
+
+/** One JSON text frame each way on the anonymous pairing session: the claim, then the reply. */
+export const encodePairingFrame = (message: unknown): string => JSON.stringify(message);
+
+export const decodePairingFrame = (frame: string | Uint8Array): unknown => {
+  try {
+    return JSON.parse(typeof frame === "string" ? frame : new TextDecoder().decode(frame));
+  } catch {
+    return null;
+  }
+};
 
 const failure = (reason: K3RelayPairingFailureReason, detail: string) =>
   new K3RelayPairingError({ reason, detail });
@@ -256,16 +262,16 @@ export const redeemK3RelayPairing = Effect.fn("K3Relay.redeemPairing")(function*
       grant: paired.record.grant,
     }).pipe(Effect.mapError(pairingFailureFromConnection));
     const descriptor = yield* fetchRemoteEnvironmentDescriptor({
-      httpBaseUrl: K3RELAY_VIRTUAL_ORIGIN,
+      httpBaseUrl: K3_RELAY_PROVISIONAL_ORIGIN,
     }).pipe(overTransport(tunnel.transport), Effect.mapError(redeemFailed));
     const proof = yield* dpop.value
       .createProof({
         method: "POST",
-        url: environmentEndpointUrl(K3RELAY_VIRTUAL_ORIGIN, "/oauth/token"),
+        url: environmentEndpointUrl(K3_RELAY_PROVISIONAL_ORIGIN, "/oauth/token"),
       })
       .pipe(Effect.mapError(() => failure("dpop-unavailable", "Could not sign a DPoP proof.")));
     const access = yield* exchangeRemoteDpopAccessToken({
-      httpBaseUrl: K3RELAY_VIRTUAL_ORIGIN,
+      httpBaseUrl: K3_RELAY_PROVISIONAL_ORIGIN,
       credential: paired.bootstrapToken,
       clientMetadata: presentation.metadata,
       dpopProof: proof,

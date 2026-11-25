@@ -4,28 +4,7 @@ import type * as Stream from "effect/Stream";
 
 /**
  * The host's K3 Relay surface as this client uses it, until `packages/contracts` defines it.
- * Wiring the real contract means replacing this file's types and wire constants, nothing else.
  */
-
-/** The transcript names the host by its relay id: a device holding only an offer knows no environment id. */
-export const k3relayE2eeEnvironmentId = (hostId: string): string => hostId;
-
-/** Over the device-authenticated tunnel: 200 `{ grant }` when renewed, 204 when not due yet. */
-export const K3RELAY_GRANT_RENEWAL_PATH = "/api/k3relay/grant";
-
-/** The virtual origin both ends of the tunnel use, so DPoP `htu` checks pass (spec §7). */
-export const K3RELAY_VIRTUAL_ORIGIN = "https://k3host.invalid";
-
-/** One JSON text frame each way on the anonymous pairing session: the claim, then the reply. */
-export const encodePairingFrame = (message: unknown): string => JSON.stringify(message);
-
-export const decodePairingFrame = (frame: string | Uint8Array): unknown => {
-  try {
-    return JSON.parse(typeof frame === "string" ? frame : new TextDecoder().decode(frame));
-  } catch {
-    return null;
-  }
-};
 
 // ── Host settings (Settings > Relay) ────────────────────────────────────────
 

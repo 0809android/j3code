@@ -1,4 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
+import { K3_RELAY_PROVISIONAL_ORIGIN } from "@t3tools/contracts";
 import {
   type MuxStreamError,
   makeMuxHandler,
@@ -27,7 +28,6 @@ import {
   startTestHost,
   startTestRelay,
 } from "./k3relay.testkit.ts";
-import { K3RELAY_VIRTUAL_ORIGIN } from "./relayHostContract.ts";
 import { fetchK3RelayHostPresence } from "./status.ts";
 import * as K3RelayTunnels from "./tunnels.ts";
 import { type K3RelayTunnelInput, openK3RelayTunnel } from "./tunnel.ts";
@@ -108,7 +108,7 @@ describe("K3 Relay tunnel", () => {
         assert.isTrue(tunnel.session.deviceAuthenticated);
 
         const echoed = yield* Effect.promise(async () => {
-          const response = await tunnel.transport.fetch(`${K3RELAY_VIRTUAL_ORIGIN}/echo`, {
+          const response = await tunnel.transport.fetch(`${K3_RELAY_PROVISIONAL_ORIGIN}/echo`, {
             method: "POST",
             body: "over the relay",
           });
@@ -141,12 +141,12 @@ describe("K3 Relay tunnel", () => {
       const host = yield* startTestHost(relay, { handler: hostHandler });
       const tunnel = yield* openK3RelayTunnel(yield* tunnelInputFor(relay.relayUrl, host));
       const descriptor = yield* fetchRemoteEnvironmentDescriptor({
-        httpBaseUrl: K3RELAY_VIRTUAL_ORIGIN,
+        httpBaseUrl: K3_RELAY_PROVISIONAL_ORIGIN,
       }).pipe(overTransport(tunnel.transport), Effect.provide(FetchHttpClient.layer));
       assert.strictEqual(descriptor.environmentId, DESCRIPTOR.environmentId);
       // Without the tunnel the same request goes to the reserved `.invalid` name and fails.
       const direct = yield* fetchRemoteEnvironmentDescriptor({
-        httpBaseUrl: K3RELAY_VIRTUAL_ORIGIN,
+        httpBaseUrl: K3_RELAY_PROVISIONAL_ORIGIN,
         timeoutMs: 3_000,
       }).pipe(Effect.provide(FetchHttpClient.layer), Effect.exit);
       assert.isTrue(Exit.isFailure(direct));
@@ -159,7 +159,7 @@ describe("K3 Relay tunnel", () => {
       const host = yield* startTestHost(relay, { handler: hostHandler });
       const tunnel = yield* openK3RelayTunnel(yield* tunnelInputFor(relay.relayUrl, host));
       const seen = yield* Effect.promise(async () => {
-        const response = await tunnel.transport.fetch(`${K3RELAY_VIRTUAL_ORIGIN}/whoami`, {
+        const response = await tunnel.transport.fetch(`${K3_RELAY_PROVISIONAL_ORIGIN}/whoami`, {
           headers: { "x-forwarded-for": "10.0.0.1", "cf-connecting-ip": "10.0.0.1" },
         });
         return (await response.json()) as { headers: Array<[string, string]> };
@@ -296,7 +296,10 @@ describe("K3 Relay tunnel", () => {
       const fresh = yield* tunnels.acquire("k3relay:test", input);
       assert.notStrictEqual(fresh, first);
       const response = yield* Effect.promise(() =>
-        fresh.transport.fetch(`${K3RELAY_VIRTUAL_ORIGIN}/echo`, { method: "POST", body: "again" }),
+        fresh.transport.fetch(`${K3_RELAY_PROVISIONAL_ORIGIN}/echo`, {
+          method: "POST",
+          body: "again",
+        }),
       );
       assert.strictEqual(response.status, 200);
     }).pipe(Effect.scoped, Effect.provide(layerTest)),
