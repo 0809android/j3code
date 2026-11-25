@@ -30,6 +30,18 @@ export {
   wrapClientSocketWithE2ee,
   wrapServerSocketWithE2ee,
 } from "./socketE2eeV1.ts";
+export {
+  E2EE_DEVICE_ALGORITHMS,
+  type E2eeDeviceAlgorithm,
+  type E2eeDeviceIdentity,
+  type E2eeDeviceKeypair,
+  type E2eeDeviceSigner,
+  deviceIdFromPublicKey,
+  deviceSignerFromKeypair,
+  generateDeviceKeypair,
+  hostIdFromIdentityKey,
+} from "./socketE2eeDevice.ts";
+
 /** Layers the wrappers need. XChaCha20-Poly1305 never touches `crypto.subtle`. */
 export const layerE2eeCrypto = Aead.layerWebCrypto.pipe(
   Layer.provideMerge(SecureRandom.layerWebCrypto),
