@@ -16,7 +16,7 @@
 $ErrorActionPreference = "Stop"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-$repo = "pingdotgg/t3code"
+$repo = "kinocode-jp/k3code"
 $baseUrl = if ($env:K3CODE_RELEASE_BASE_URL) { $env:K3CODE_RELEASE_BASE_URL.TrimEnd("/") } else { "https://github.com/$repo/releases/download" }
 $t3Home = if ($env:K3CODE_HOME) { $env:K3CODE_HOME } else { Join-Path $HOME ".t3" }
 $binDir = if ($env:K3CODE_INSTALL_BIN_DIR) { $env:K3CODE_INSTALL_BIN_DIR } else { Join-Path $HOME ".local\bin" }
@@ -197,7 +197,7 @@ if ((Test-Path $marker) -and ((Get-Content $marker -Raw).Trim() -eq $version)) {
     } catch {
       $status = $_.Exception.Response.StatusCode.value__
       if ($status -eq 404) {
-        Fail "t3 $version has no release archive for win32-$arch; releases before the self-contained CLI can only be installed with 'npm install -g t3@$version'"
+        Fail "t3 $version has no release archive for win32-$arch; releases before the self-contained CLI can only be installed with 'npm install -g @kinocode/k3code@$version'"
       }
       throw
     }

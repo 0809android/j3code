@@ -3,7 +3,9 @@ import * as Schema from "effect/Schema";
 
 import { compareSemverVersions } from "./semver.ts";
 
-const CLI_RELEASE_REPOSITORY = "pingdotgg/t3code";
+const CLI_RELEASE_REPOSITORY = "kinocode-jp/k3code";
+/** The npm package of the K3 Code CLI launcher, as `npx @kinocode/k3code` names it. */
+export const CLI_NPM_PACKAGE_NAME = "@kinocode/k3code";
 export const CLI_RELEASES_PAGE_URL = `https://github.com/${CLI_RELEASE_REPOSITORY}/releases`;
 export const CLI_RELEASE_CHECKSUMS_FILE = "SHA256SUMS";
 export const CLI_RELEASE_BASE_URL_ENV = "K3CODE_RELEASE_BASE_URL";

@@ -1,7 +1,7 @@
 import type { DesktopBridge, DesktopUpdateState } from "@t3tools/contracts";
 import { K3_NEW_ISSUE_URL, K3_RELEASES_URL } from "@t3tools/shared/projectLinks";
 
-const FALLBACK_TRIAGE_COMMAND = "npx t3 triage";
+const FALLBACK_TRIAGE_COMMAND = "npx @kinocode/k3code triage";
 const DOWNLOAD_URL = K3_RELEASES_URL;
 const ISSUE_URL = K3_NEW_ISSUE_URL;
 const LAST_FAILURE_KEY = "k3code:boot-failed-at";
