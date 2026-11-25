@@ -27,6 +27,7 @@ export interface MetricsGauges {
   readonly sockets: () => number;
   readonly bufferedBytes: () => number;
   readonly traffic: () => TrafficStatus;
+  readonly selfPing: () => { enabled: boolean; ok: number; failed: number };
 }
 
 function percentile(values: ReadonlyArray<number>, fraction: number): number {
@@ -44,6 +45,7 @@ export class Metrics {
   readonly disconnects = new Map<DisconnectReason, number>();
   readonly startedAt: number;
   relayedBytes = 0;
+  sentBytes = 0;
   maxBufferedAmount = 0;
   backpressurePauses = 0;
   backpressureCloses = 0;
@@ -51,11 +53,13 @@ export class Metrics {
   peakSessions = 0;
   rejections = 0;
   #secondBytes = 0;
+  #secondBuffered = 0;
   #lastCpu = process.cpuUsage();
   #lastSampleAt: number;
   readonly #mbps: number[] = [];
   readonly #cpu: number[] = [];
   readonly #rss: number[] = [];
+  readonly #buffered: number[] = [];
 
   private readonly gauges: MetricsGauges;
   private readonly now: () => number;
@@ -71,13 +75,20 @@ export class Metrics {
     this.disconnects.set(reason, (this.disconnects.get(reason) ?? 0) + 1);
   }
 
+  /** Bytes accepted from a peer to pass on. This is what the monthly count is made of. */
   recordRelayed(bytes: number): void {
     this.relayedBytes += bytes;
+  }
+
+  /** Bytes whose write finished: what actually left, and what the bandwidth figures measure. */
+  recordSent(bytes: number): void {
+    this.sentBytes += bytes;
     this.#secondBytes += bytes;
   }
 
   recordBuffered(amount: number): void {
     if (amount > this.maxBufferedAmount) this.maxBufferedAmount = amount;
+    if (amount > this.#secondBuffered) this.#secondBuffered = amount;
   }
 
   recordSessionOpened(): void {
@@ -95,7 +106,9 @@ export class Metrics {
     this.#push(this.#mbps, (this.#secondBytes * 8) / 1_000_000 / seconds);
     this.#push(this.#cpu, ((cpu.user + cpu.system) / 1_000_000 / seconds) * 100);
     this.#push(this.#rss, process.memoryUsage().rss);
+    this.#push(this.#buffered, this.#secondBuffered);
     this.#secondBytes = 0;
+    this.#secondBuffered = 0;
   }
 
   #push(series: number[], value: number): void {
@@ -123,10 +136,13 @@ export class Metrics {
       cpuPercent: this.#cpu.at(-1) ?? 0,
       cpuPercentP95: percentile(this.#cpu, 0.95),
       relayedBytes: this.relayedBytes,
+      sentBytes: this.sentBytes,
       bandwidthMbps: this.#mbps.at(-1) ?? 0,
       bandwidthMbpsP95: percentile(this.#mbps, 0.95),
       bufferedBytes: this.gauges.bufferedBytes(),
       maxBufferedAmount: this.maxBufferedAmount,
+      maxBufferedAmountRecent: Math.max(this.#secondBuffered, ...this.#buffered, 0),
+      selfPing: this.gauges.selfPing(),
       backpressurePauses: this.backpressurePauses,
       backpressureCloses: this.backpressureCloses,
       rejections: this.rejections,

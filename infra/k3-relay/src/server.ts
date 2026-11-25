@@ -27,6 +27,7 @@ import {
 } from "./crypto.ts";
 import { createAlertNotifier } from "./alerts.ts";
 import { FairScheduler } from "./fair.ts";
+import { SelfPing } from "./keepalive.ts";
 import { ExpiringSet, PreAuthLimiter, SlidingWindow, ipKey } from "./limits.ts";
 import { Metrics, type DisconnectReason } from "./metrics.ts";
 import {
@@ -238,6 +239,7 @@ class RelayServer implements Relay {
   readonly #policies = new Map<string, HostPolicy & { baseWeight: number; until: number }>();
   readonly #traffic: TrafficGuard;
   readonly #throttle: HostThrottle;
+  readonly #selfPing: SelfPing | null;
   readonly #usage: UsageMeter;
   readonly #scheduler: FairScheduler;
   readonly #budget: BufferBudget;
@@ -291,6 +293,14 @@ class RelayServer implements Relay {
         return () => clearTimeout(timer);
       },
     });
+    this.#selfPing = config.selfPingUrl
+      ? new SelfPing({
+          url: config.selfPingUrl,
+          intervalMs: config.selfPingIntervalMs,
+          fetch: options.fetch ?? fetch,
+          logger: this.#logger,
+        })
+      : null;
     this.metrics = new Metrics(
       {
         sessions: () => this.#sessions.size,
@@ -299,6 +309,11 @@ class RelayServer implements Relay {
         sockets: () => this.#webSockets.size,
         bufferedBytes: () => this.#budget.used,
         traffic: () => this.#traffic.status(),
+        selfPing: () => ({
+          enabled: this.#selfPing !== null && config.selfPingIntervalMs > 0,
+          ok: this.#selfPing?.ok ?? 0,
+          failed: this.#selfPing?.failed ?? 0,
+        }),
       },
       now,
     );
@@ -362,6 +377,7 @@ class RelayServer implements Relay {
     this.#every(1_000, () => this.metrics.sample());
     this.#every(config.trafficCheckMs, () => this.#traffic.evaluate());
     this.#every(config.blockedPollMs, () => this.syncBlocked());
+    this.#selfPing?.start();
     this.#purge();
     this.#traffic.evaluate();
     const address = this.#http.address();
@@ -377,6 +393,7 @@ class RelayServer implements Relay {
     for (const timer of this.#timers) clearInterval(timer);
     this.#scheduler.close();
     this.#throttle.close();
+    this.#selfPing?.stop();
     for (const session of this.#sessions.values()) {
       this.#endSession(session, "shutdown", 1001, "shutdown");
     }

@@ -124,8 +124,12 @@ class Pipe {
       if (this.#dead) return;
       this.#inflight -= size;
       this.splice.deps.budget.sub(size);
-      if (error) this.splice.end("error", 1011, "send failed");
-      else this.evaluate();
+      if (error) {
+        this.splice.end("error", 1011, "send failed");
+        return;
+      }
+      this.splice.deps.metrics.recordSent(size);
+      this.evaluate();
     });
     this.splice.deps.metrics.recordBuffered(this.dst.bufferedAmount);
     this.evaluate();
