@@ -56,6 +56,7 @@ export type ConnectionSecurityBadgeKind =
   | "local"
   | "e2ee-transport"
   | "e2ee-app"
+  | "e2ee-relay"
   | "tls-tunnel"
   | "unencrypted";
 
@@ -92,6 +93,8 @@ export function connectionSecurityBadge(input: {
   switch (target._tag) {
     case "SshConnectionTarget":
       return { kind: "e2ee-transport" };
+    case "K3RelayConnectionTarget":
+      return { kind: "e2ee-relay" };
     case "RelayConnectionTarget":
       return { kind: "tls-tunnel" };
     case "PrimaryConnectionTarget":
@@ -127,6 +130,8 @@ export function connectionSecurityBadgeText(
       return resolve(msg("E2EE (Tailscale / SSH)"));
     case "e2ee-app":
       return resolve(msg("E2EE"));
+    case "e2ee-relay":
+      return resolve(msg("E2EE (via relay)"));
     case "tls-tunnel":
       return resolve(msg("TLS only"));
     case "unencrypted":
@@ -280,6 +285,10 @@ export function connectionCatalogDisplayUrl(entry: ConnectionCatalogEntry): stri
       return entry.target.httpBaseUrl;
     case "RelayConnectionTarget":
       return null;
+    case "K3RelayConnectionTarget":
+      return Option.isSome(entry.profile) && entry.profile.value._tag === "K3RelayConnectionProfile"
+        ? entry.profile.value.relayUrl
+        : null;
     case "BearerConnectionTarget":
       return Option.isSome(entry.profile) && entry.profile.value._tag === "BearerConnectionProfile"
         ? entry.profile.value.httpBaseUrl

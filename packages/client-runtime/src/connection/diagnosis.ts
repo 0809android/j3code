@@ -9,8 +9,14 @@ import type {
   ConnectionAttemptError,
   ConnectionFailureCause,
   ConnectionHop,
+  K3RelayFailureReason,
   SupervisorConnectionState,
 } from "./model.ts";
+import {
+  k3relayDiagnosisHops,
+  k3relayFailureSteps,
+  k3relayFailureText,
+} from "../k3relay/failure.ts";
 import { mFallback, msg } from "gt-i18n";
 import type { MFunctionType } from "gt-i18n/types";
 
@@ -384,6 +390,10 @@ export function presentConnectionDiagnosis(
   input: ConnectionDiagnosisInput,
   resolve: MFunctionType = mFallback,
 ): ConnectionDiagnosis | null {
+  const k3relayReason = input.state.lastFailure?.k3relayReason;
+  if (k3relayReason !== undefined && input.state.network !== "offline") {
+    return presentK3RelayDiagnosis(input, k3relayReason, resolve);
+  }
   const located = locate(input);
   if (located === null) return null;
   const host = input.hostLabel;
@@ -445,6 +455,36 @@ export function presentConnectionDiagnosis(
       relayPath || located.cause === "session_pending"
         ? t3ConnectTroubleshootingUrl(helpSection(located, failure))
         : null,
+  };
+}
+
+/** K3 Relay failures carry the relay's or host's own reason, so no hop needs guessing. */
+function presentK3RelayDiagnosis(
+  input: ConnectionDiagnosisInput,
+  reason: K3RelayFailureReason,
+  resolve: MFunctionType,
+): ConnectionDiagnosis {
+  const host = input.hostLabel;
+  const failure = input.state.lastFailure;
+  const facts: Array<readonly [string, string]> = [
+    [resolve(msg("Cause", { $context: "diagnostics field label" })), reason],
+    [resolve(msg("Route", { $context: "diagnostics field label" })), "K3 Relay"],
+  ];
+  if (input.state.attempt > 0) {
+    facts.push([
+      resolve(msg("Attempts", { $context: "diagnostics field label" })),
+      String(input.state.attempt),
+    ]);
+  }
+  if (input.clientVersion) facts.push([resolve(msg("App version")), input.clientVersion]);
+  if (input.serverVersion) facts.push([resolve(msg("Host version")), input.serverVersion]);
+  if (failure?.traceId) facts.push([resolve(msg("Trace ID")), failure.traceId]);
+  return {
+    headline: k3relayFailureText(reason, host, resolve),
+    hops: k3relayDiagnosisHops(reason, host, resolve),
+    steps: k3relayFailureSteps(reason, host, resolve),
+    facts,
+    moreInfoUrl: null,
   };
 }
 

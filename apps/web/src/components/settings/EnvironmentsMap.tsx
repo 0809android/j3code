@@ -206,6 +206,9 @@ function routeKindLabel(kind: ConnectionRouteKind, gt: GT): string {
   switch (kind) {
     case "relay":
       return "T3 Connect";
+    case "k3relay":
+      // oxlint-disable-next-line t3code/no-untranslated-copy -- product name
+      return "K3 Relay";
     case "loopback":
       return gt("This device");
     case "lan":

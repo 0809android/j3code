@@ -55,6 +55,7 @@ import * as DesktopCliCommand from "./DesktopCliCommand.ts";
 import * as DesktopCliShim from "./DesktopCliShim.ts";
 import * as DesktopClientSettings from "../settings/DesktopClientSettings.ts";
 import * as DesktopConnectionCatalogStore from "./DesktopConnectionCatalogStore.ts";
+import * as DesktopK3RelayDeviceKeys from "./DesktopK3RelayDeviceKeys.ts";
 import * as DesktopIpc from "../ipc/DesktopIpc.ts";
 import * as DesktopLocalEnvironmentAuth from "../backend/DesktopLocalEnvironmentAuth.ts";
 import * as DesktopManagedPolicy from "./DesktopManagedPolicy.ts";
@@ -203,6 +204,7 @@ const runStubbedDesktop = (stub: StubbedDesktop) =>
           Layer.mock(DesktopCliCommand.DesktopCliCommand, {}),
           Layer.mock(DesktopClientSettings.DesktopClientSettings, {}),
           Layer.mock(DesktopConnectionCatalogStore.DesktopConnectionCatalogStore, {}),
+          Layer.mock(DesktopK3RelayDeviceKeys.DesktopK3RelayDeviceKeys, {}),
           Layer.mock(DesktopIpc.DesktopIpc, {}),
           Layer.mock(DesktopLocalEnvironmentAuth.DesktopLocalEnvironmentAuth, {
             getBearerToken: stub

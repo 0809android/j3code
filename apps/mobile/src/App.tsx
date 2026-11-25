@@ -52,6 +52,7 @@ import { RootStack, rootPathnameFromState, workspaceLocationFromState } from "./
 import { I18nProvider } from "./i18n/I18nProvider";
 import { DEFAULT_LOCALE } from "./i18n/locales";
 import { appAtomRegistry } from "./state/atom-registry";
+import { installK3RelayLinks } from "./features/connection/k3relayLinks";
 import { subscribeComposerDraftModelReconciliation } from "./state/use-composer-drafts";
 import { environmentThreadShells, threadEnvironment } from "./state/threads";
 import { environmentShell, shellCachesReadAtom } from "./state/shell";
@@ -219,6 +220,7 @@ const appServiceDisposers = [
   startIncomingShareInbox(),
   installAgentNotificationNavigation(linkToAppPath),
   installAppShortcuts(linkToAppPath),
+  installK3RelayLinks(appAtomRegistry, linkToAppPath),
   installAppUpdateChecks(),
   installShowcaseCapture(rootPathnameFromState),
 ];

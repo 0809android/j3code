@@ -12,6 +12,11 @@ import { installNotificationBadge } from "./methods/notificationBadge.ts";
 import { getClientSettings, setClientSettings } from "./methods/clientSettings.ts";
 import { getConnectionCatalog, setConnectionCatalog } from "./methods/connectionCatalog.ts";
 import {
+  readK3RelayDeviceKey,
+  removeK3RelayDeviceKey,
+  writeK3RelayDeviceKey,
+} from "./methods/k3relayDeviceKeys.ts";
+import {
   getHostEnvironmentId,
   getLocalEnvironmentEnabled,
   setLocalEnvironmentEnabled,
@@ -134,6 +139,9 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   yield* ipc.handle(dismissSnapShotAnimation);
   yield* ipc.handle(acknowledgeSnapShot);
   yield* ipc.handle(setConnectionCatalog);
+  yield* ipc.handle(readK3RelayDeviceKey);
+  yield* ipc.handle(writeK3RelayDeviceKey);
+  yield* ipc.handle(removeK3RelayDeviceKey);
 
   yield* ipc.handle(discoverSshHosts);
   yield* ipc.handle(resolveSshHost);

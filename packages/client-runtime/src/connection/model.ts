@@ -1,6 +1,7 @@
 import { EnvironmentId, type ExecutionEnvironmentDescriptor } from "@t3tools/contracts";
 import { RelayEnvironmentEndpointFailure } from "@t3tools/contracts/relay";
 import * as Schema from "effect/Schema";
+import type * as Socket from "effect/socket/Socket";
 
 import { MarkedText } from "../errors/translatable.ts";
 
@@ -41,11 +42,21 @@ export class SshConnectionTarget extends Schema.TaggedClass<SshConnectionTarget>
   },
 ) {}
 
+/** A host reached through a K3 Relay, end-to-end encrypted to the host key pinned at pairing. */
+export class K3RelayConnectionTarget extends Schema.TaggedClass<K3RelayConnectionTarget>()(
+  "K3RelayConnectionTarget",
+  {
+    ...ConnectionTargetBase,
+    connectionId: Schema.String,
+  },
+) {}
+
 export const ConnectionTarget = Schema.Union([
   PrimaryConnectionTarget,
   BearerConnectionTarget,
   RelayConnectionTarget,
   SshConnectionTarget,
+  K3RelayConnectionTarget,
 ]);
 export type ConnectionTarget = typeof ConnectionTarget.Type;
 
@@ -53,6 +64,7 @@ export const PersistedConnectionTarget = Schema.Union([
   BearerConnectionTarget,
   RelayConnectionTarget,
   SshConnectionTarget,
+  K3RelayConnectionTarget,
 ]);
 export type PersistedConnectionTarget = typeof PersistedConnectionTarget.Type;
 
@@ -99,11 +111,29 @@ export type ConnectionFailureCause = typeof ConnectionFailureCause.Type;
  * `presentConnectionDiagnosis`. `via` names the route when the hop alone does
  * not: K3 Code on the host can fail behind the tunnel or on a direct route.
  */
+/** Why a K3 Relay connection stopped, from the relay's close code or the host's E2EE verdict. */
+export const K3RelayFailureReason = Schema.Literals([
+  "revoked",
+  "unknown-device",
+  "key-mismatch",
+  "grant-expired",
+  "host-policy",
+  "limit",
+  "degraded",
+  "host-offline",
+  "blocked",
+  "unauthorized",
+  "relay-unreachable",
+  "device-key-missing",
+]);
+export type K3RelayFailureReason = typeof K3RelayFailureReason.Type;
+
 const ConnectionFailureFields = {
   hop: Schema.optionalKey(ConnectionHop),
   via: Schema.optionalKey(Schema.Literals(["relay", "direct"])),
   failureCause: Schema.optionalKey(ConnectionFailureCause),
   httpStatus: Schema.optionalKey(Schema.Number),
+  k3relayReason: Schema.optionalKey(K3RelayFailureReason),
 };
 
 export class ConnectionTransientError extends Schema.TaggedError<ConnectionTransientError>()(
@@ -163,6 +193,18 @@ export interface DirectDpopConnection {
   readonly httpBaseUrl: string;
 }
 
+/**
+ * How to reach a host whose HTTP and WebSocket traffic does not go over the
+ * network directly, such as through a K3 Relay's multiplexed E2EE channel.
+ */
+export interface ConnectionTransport {
+  readonly fetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+  readonly webSocketConstructor: (
+    url: string,
+    protocols?: string | ReadonlyArray<string>,
+  ) => Socket.WebSocketLike;
+}
+
 export interface PreparedConnection {
   readonly environmentId: EnvironmentId;
   readonly label: string;
@@ -178,6 +220,8 @@ export interface PreparedConnection {
    * the connection instead of falling back to plaintext.
    */
   readonly e2eeServerIdentityKey?: string;
+  /** Set when this connection's traffic goes through a channel instead of the network. */
+  readonly transport?: ConnectionTransport;
 }
 
 export type SupervisorConnectionPhase =

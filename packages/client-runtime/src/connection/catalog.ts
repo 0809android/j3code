@@ -4,6 +4,7 @@ import * as Schema from "effect/Schema";
 
 import {
   BearerConnectionTarget,
+  K3RelayConnectionTarget,
   PrimaryConnectionTarget,
   RelayConnectionTarget,
   SshConnectionTarget,
@@ -45,7 +46,41 @@ export class SshConnectionProfile extends Schema.TaggedClass<SshConnectionProfil
   },
 ) {}
 
-export const ConnectionProfile = Schema.Union([BearerConnectionProfile, SshConnectionProfile]);
+/** The relay admission ticket the host signed for this device (spec §5). Re-verified before use. */
+export const K3RelayStoredGrant = Schema.Struct({
+  v: Schema.Literal(1),
+  hostId: Schema.String,
+  deviceId: Schema.String,
+  alg: Schema.Literals(["ed25519", "p256"]),
+  issuedAt: Schema.Number,
+  expiresAt: Schema.Number,
+  nonce: Schema.String,
+  sig: Schema.String,
+});
+export type K3RelayStoredGrant = typeof K3RelayStoredGrant.Type;
+
+export class K3RelayConnectionProfile extends Schema.TaggedClass<K3RelayConnectionProfile>()(
+  "K3RelayConnectionProfile",
+  {
+    ...ConnectionProfileBase,
+    relayUrl: Schema.String,
+    hostId: Schema.String,
+    /** The host key `Hk` (base64url) pinned at pairing. A different key never connects. */
+    hostIdentityKey: Schema.String,
+    /** Names the device key in the platform's key store; the secret never leaves it. */
+    deviceKeyId: Schema.String,
+    deviceAlg: Schema.Literals(["ed25519", "p256"]),
+    /** base64url. */
+    devicePublicKey: Schema.String,
+    grant: K3RelayStoredGrant,
+  },
+) {}
+
+export const ConnectionProfile = Schema.Union([
+  BearerConnectionProfile,
+  SshConnectionProfile,
+  K3RelayConnectionProfile,
+]);
 export type ConnectionProfile = typeof ConnectionProfile.Type;
 
 export interface ConnectionRoute {
@@ -117,10 +152,21 @@ export class SshConnectionRegistration extends Schema.TaggedClass<SshConnectionR
   },
 ) {}
 
+export class K3RelayConnectionRegistration extends Schema.TaggedClass<K3RelayConnectionRegistration>()(
+  "K3RelayConnectionRegistration",
+  {
+    target: K3RelayConnectionTarget,
+    profile: K3RelayConnectionProfile,
+    /** The DPoP-bound session redeemed over the relay from the pairing's bootstrap credential. */
+    credential: DpopConnectionCredential,
+  },
+) {}
+
 export const ConnectionRegistration = Schema.Union([
   RelayConnectionRegistration,
   BearerConnectionRegistration,
   SshConnectionRegistration,
+  K3RelayConnectionRegistration,
 ]);
 export type ConnectionRegistration = typeof ConnectionRegistration.Type;
 
@@ -149,6 +195,7 @@ export function connectionRegistrationCatalogEntry(
       };
     case "BearerConnectionRegistration":
     case "SshConnectionRegistration":
+    case "K3RelayConnectionRegistration":
       return {
         target: registration.target,
         profile: Option.some(registration.profile),

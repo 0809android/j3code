@@ -44,6 +44,7 @@ import {
 } from "./compatibility.ts";
 import { credentialConnectionId } from "./routes.ts";
 import { fetchRemoteEnvironmentDescriptor } from "../environment/descriptor.ts";
+import { makeK3RelayBroker, overTransport } from "../k3relay/broker.ts";
 
 export class ConnectionResolver extends Context.Service<
   ConnectionResolver,
@@ -274,6 +275,7 @@ export const make = Effect.gen(function* () {
   const bearer = yield* makeBearerBroker();
   const relay = yield* makeRelayBroker();
   const ssh = yield* makeSshBroker();
+  const k3relay = yield* makeK3RelayBroker();
   const httpClient = yield* HttpClient.HttpClient;
 
   const authorize = Effect.fn("clientRuntime.connection.broker.authorize")(function* (
@@ -296,6 +298,8 @@ export const make = Effect.gen(function* () {
           return relay(target);
         case "SshConnectionTarget":
           return ssh({ ...entry, target });
+        case "K3RelayConnectionTarget":
+          return k3relay({ ...entry, target });
       }
     })();
     const { descriptor: authorizedDescriptor, ...prepared } = authorized;
@@ -306,6 +310,7 @@ export const make = Effect.gen(function* () {
       }).pipe(
         Effect.mapError(mapRemoteEnvironmentError),
         Effect.provideService(HttpClient.HttpClient, httpClient),
+        overTransport(prepared.transport),
       ));
     if (descriptor.environmentId !== target.environmentId) {
       return yield* environmentMismatchError({

@@ -80,8 +80,9 @@ export interface LedgerStore {
 const MAX_NAME_CODE_POINTS = 64;
 const MAX_NAME_BYTES = 256;
 // Control, format (bidi overrides, zero-width), line/paragraph separators: they can disguise a
-// name on the approval screen.
-const UNSAFE_NAME_CHARS = /[\p{Cc}\p{Cf}\u2028\u2029]/u;
+// name on the approval screen. Lone surrogates (Cs) too, without `isWellFormed`, which Hermes and
+// the web build's ES2023 target lack.
+const UNSAFE_NAME_CHARS = /[\p{Cc}\p{Cf}\p{Cs}\u2028\u2029]/u;
 
 /** A device name the approval screen can show as-is: 1–64 characters, nothing invisible. */
 export const isValidDeviceName = (name: unknown): name is string =>
@@ -90,8 +91,7 @@ export const isValidDeviceName = (name: unknown): name is string =>
   name === name.trim() &&
   [...name].length <= MAX_NAME_CODE_POINTS &&
   new TextEncoder().encode(name).length <= MAX_NAME_BYTES &&
-  !UNSAFE_NAME_CHARS.test(name) &&
-  name.isWellFormed();
+  !UNSAFE_NAME_CHARS.test(name);
 
 const isConsistent = (device: LedgerDevice): boolean => {
   const key = decodeBase64url(device.publicKey);

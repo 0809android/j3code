@@ -568,3 +568,21 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     },
   },
 } satisfies DesktopBridge);
+
+// K3 Relay device keys stay out of `desktopBridge`, whose type lives in the shared contracts.
+contextBridge.exposeInMainWorld("k3relayDeviceKeys", {
+  read: async (keyId: string): Promise<string | null> => {
+    const result: unknown = await ipcRenderer.invoke(
+      IpcChannels.K3RELAY_DEVICE_KEY_READ_CHANNEL,
+      keyId,
+    );
+    return typeof result === "string" ? result : null;
+  },
+  write: async (keyId: string, secret: string): Promise<boolean> =>
+    (await ipcRenderer.invoke(IpcChannels.K3RELAY_DEVICE_KEY_WRITE_CHANNEL, {
+      keyId,
+      secret,
+    })) === true,
+  remove: async (keyId: string): Promise<boolean> =>
+    (await ipcRenderer.invoke(IpcChannels.K3RELAY_DEVICE_KEY_REMOVE_CHANNEL, keyId)) === true,
+});

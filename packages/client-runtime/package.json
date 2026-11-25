@@ -211,6 +211,10 @@
       "types": "./src/relay/index.ts",
       "default": "./src/relay/index.ts"
     },
+    "./k3relay": {
+      "types": "./src/k3relay/index.ts",
+      "default": "./src/k3relay/index.ts"
+    },
     "./state/auth": {
       "types": "./src/state/auth.ts",
       "default": "./src/state/auth.ts"

@@ -80,7 +80,15 @@ describe("device ledger", () => {
         yield* rejection(ledger.add({ ...base, publicKey: edKey(3).subarray(1) })),
         "invalid-key",
       );
-      for (const name of ["", " Phone", "Pho\nne", "evil‮enohp", "a​b", "x".repeat(65)]) {
+      for (const name of [
+        "",
+        " Phone",
+        "Pho\nne",
+        "evil‮enohp",
+        "a​b",
+        "x".repeat(65),
+        "lone\uD800",
+      ]) {
         assert.isFalse(isValidDeviceName(name), JSON.stringify(name));
         assert.strictEqual(
           yield* rejection(ledger.add({ ...base, publicKey: edKey(4), name })),
@@ -88,6 +96,7 @@ describe("device ledger", () => {
         );
       }
       assert.isTrue(isValidDeviceName("キノの iPhone 15"));
+      assert.isTrue(isValidDeviceName("Phone 😀"));
       const id = relayDeviceId("ed25519", edKey(2));
       assert.strictEqual(yield* rejection(ledger.rename(id, "bad\u0007")), "invalid-name");
     }),
