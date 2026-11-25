@@ -1,7 +1,15 @@
 import {
   K3_RELAY_BOOTSTRAP_PATH,
+  K3_RELAY_DEVICE_REVOKE_PATH,
   K3_RELAY_GRANT_PATH,
+  K3_RELAY_INTRODUCTION_APPROVE_PATH,
+  K3_RELAY_INTRODUCTION_CANCEL_PATH,
+  K3_RELAY_INTRODUCTION_CLAIM_PATH,
+  K3_RELAY_INTRODUCTION_PATH,
   K3_RELAY_NOTIFY_PATH,
+  type K3RelayIntroductionClaimResponse,
+  type K3RelayIntroductionFailure,
+  type K3RelayIntroductionState,
   K3RelayNotifyRegistration,
   type K3RelayApprovalMode,
   K3RelayConnectionError,
@@ -47,7 +55,22 @@ import {
 import {
   type AddDeviceWindow,
   type ApprovalPolicy,
+  type HostIntroductionState,
   type HostPairingState,
+  INTRODUCTION_DAILY_LIMIT,
+  INTRODUCTION_DAY_MS,
+  closeIntroduction,
+  decodeIntroductionSecret,
+  deviceCanInvite,
+  encodeIntroductionPeers,
+  initialHostIntroductionState,
+  introductionsApprovedSince,
+  isIntroductionClaimMessage,
+  isIntroductionLive,
+  openIntroduction,
+  submitIntroductionClaim,
+  tickIntroduction,
+  verifyIntroductionApproval,
   type LedgerDevice,
   type PairingReplyMessage,
   approvePairing,
@@ -68,7 +91,6 @@ import {
   type PairingRoute,
   openPairingWindow,
   pairingCloseFrame,
-  pairingOpenFrame,
   rejectPairing,
   relayHostId,
   relaySigningInput,
@@ -117,6 +139,8 @@ const RELAY_MAX_PAYLOAD = 64 * 1024;
 const SESSION_MAX_FRAME_BYTES = 64 * 1024;
 const PAIRING_MAX_FRAME_BYTES = 16 * 1024;
 const PAIRING_CLAIM_TIMEOUT = "60 seconds";
+/** How long the introducer's claim request waits for the new device before answering `open`. */
+const INTRODUCTION_CLAIM_WAIT = "20 seconds";
 const CONTROL_READY_TIMEOUT = "15 seconds";
 const BACKOFF_BASE_MS = 1_000;
 const BACKOFF_MAX_MS = 60_000;
@@ -176,8 +200,21 @@ const toDevice = (
     revokedAt: device.revokedAt,
     connectedSessions,
     notifications: notified.has(device.deviceId),
+    permissions: device.permissions ?? [],
+    approvedVia: device.approvedVia ?? null,
+    introducedBy: device.introducedBy ?? null,
   };
 };
+
+const introductionView = (state: HostIntroductionState): K3RelayIntroductionState =>
+  isIntroductionLive(state)
+    ? {
+        phase: state.phase,
+        introducerDeviceId: state.introducerDeviceId,
+        expiresAt: state.expiresAt,
+        deviceName: state.phase === "claimed" ? state.device.name : null,
+      }
+    : { phase: "idle" };
 
 /**
  * How a device that just made a valid claim is approved (spec §20.3): one tap only for the first
@@ -244,6 +281,9 @@ const jsonResponse = (status: number, body: unknown): MuxHttpResponse<never> => 
   ],
   body: JSON.stringify(body),
 });
+
+const introductionError = (status: number, error: K3RelayIntroductionFailure) =>
+  jsonResponse(status, { error });
 
 const orInternalError = <E>(effect: Effect.Effect<MuxHttpResponse<never>, E>) =>
   Effect.catchCause(effect, () => Effect.succeed(jsonResponse(500, { error: "internal" })));
@@ -321,6 +361,11 @@ export class RelayConnector extends Context.Service<
       deviceId: string,
       name: string,
     ) => Effect.Effect<K3RelayDevice, K3RelayError>;
+    /** The host's user grants or withdraws `devices:invite`; never for an introduced device. */
+    readonly setDevicePermissions: (
+      deviceId: string,
+      invite: boolean,
+    ) => Effect.Effect<K3RelayDevice, K3RelayError>;
   }
 >()("t3/relay/k3relay/RelayConnector") {}
 
@@ -365,6 +410,15 @@ const make = Effect.gen(function* () {
   let pairing: HostPairingState = initialHostPairingState;
   let addDeviceWindow: AddDeviceWindow | null = null;
   let pendingApproval: K3RelayApprovalMode = "compare-code";
+  /** How the device waiting in `pairing` got there, recorded in the ledger on approval. */
+  let pendingRoute: PairingRoute = "qr";
+  // Introductions share `pairingLock` and the relay's pairing window with pairing.
+  let introduction: HostIntroductionState = initialHostIntroductionState;
+  let introductionDecision: Deferred.Deferred<PairingReplyMessage> | undefined;
+  let introductionTimer: Fiber.Fiber<void> | undefined;
+  const introductionOpenedAt: Array<number> = [];
+  /** Completed and replaced on every introduction change, for the introducer's long poll. */
+  let introductionSignal = yield* Deferred.make<void>();
   const grantOutbox = makeGrantOutbox<Socket.SocketError>();
   let pendingDecision: Deferred.Deferred<PairingReplyMessage> | undefined;
   let pairingTimer: Fiber.Fiber<void> | undefined;
@@ -394,6 +448,7 @@ const make = Effect.gen(function* () {
       requireApproval: approvalRequired(yield* account.approvalPolicy),
       notifications: settings.relay.notifications,
       pairing: pairingView(pairing, pendingApproval),
+      introduction: introductionView(introduction),
       devices: devices.map((device) => toDevice(device, live, notified)),
     } satisfies K3RelayHostState;
   });
@@ -421,6 +476,21 @@ const make = Effect.gen(function* () {
     Effect.suspend(() =>
       controlWriter === undefined ? Effect.void : Effect.ignore(controlWriter(frame)),
     );
+
+  /**
+   * The relay admits anonymous pairing connections while its window is open. QR pairing and an
+   * introduction each need it until their claim arrives, so it stays open while either does.
+   */
+  const syncRelayWindow = Effect.suspend(() => {
+    const deadlines: Array<number> = [];
+    if (pairing.phase === "open") deadlines.push(pairing.offer.expiresAt);
+    if (introduction.phase === "open") deadlines.push(introduction.expiresAt);
+    return sendControl(
+      deadlines.length === 0
+        ? pairingCloseFrame()
+        : { type: "pairing-open", expiresAt: Math.max(...deadlines) },
+    );
+  });
 
   /** A grant the relay must learn to admit the device; kept until a write of it succeeds. */
   const sendGrantRegistration = (deviceId: string, frame: object) =>
@@ -460,7 +530,7 @@ const make = Effect.gen(function* () {
             const next = tickPairing(pairing, yield* Clock.currentTimeMillis);
             if (next === pairing) return;
             pairing = next;
-            if (wasOpen) yield* sendControl(pairingCloseFrame());
+            if (wasOpen) yield* syncRelayWindow;
             yield* settlePending({ type: "pairing-rejected", reason: "expired" });
             yield* publish;
           }),
@@ -496,7 +566,7 @@ const make = Effect.gen(function* () {
         ).pipe(Effect.mapError(() => relayError("internal")));
         pairing = opened.state;
         addDeviceWindow = openAddDeviceWindow({ kind: "host-user" }, now);
-        yield* sendControl(pairingOpenFrame(opened.offer));
+        yield* syncRelayWindow;
         yield* schedulePairingTimer(opened.offer.expiresAt);
         yield* publish;
         return {
@@ -519,7 +589,7 @@ const make = Effect.gen(function* () {
     }
     const wasOpen = pairing.phase === "open";
     pairing = next(pairing);
-    if (wasOpen) yield* sendControl(pairingCloseFrame());
+    if (wasOpen) yield* syncRelayWindow;
     yield* settlePending(reply);
     yield* stopPairingTimer;
     yield* publish;
@@ -562,6 +632,7 @@ const make = Effect.gen(function* () {
         ledger,
         bootstrapToken: credential.credential,
         now,
+        approvedVia: pendingRoute,
       }),
     ).pipe(
       Effect.tapError(() => auth.revokeRelayDevice(deviceId).pipe(Effect.ignore)),
@@ -636,8 +707,9 @@ const make = Effect.gen(function* () {
           };
         }
         pairing = result.state;
-        if (wasOpen) yield* sendControl(pairingCloseFrame());
+        if (wasOpen) yield* syncRelayWindow;
         const deviceId = result.outcome.state.device.deviceId;
+        pendingRoute = "account";
         const decision = decideAccountApproval({
           policy: yield* account.approvalPolicy,
           window: addDeviceWindow,
@@ -685,7 +757,7 @@ const make = Effect.gen(function* () {
         pairing = result.state;
         if (result.outcome.kind === "rejected") {
           if (wasOpen && result.state.phase === "closed") {
-            yield* sendControl(pairingCloseFrame());
+            yield* syncRelayWindow;
             yield* stopPairingTimer;
           }
           yield* publish;
@@ -693,6 +765,7 @@ const make = Effect.gen(function* () {
         }
         const decision = yield* Deferred.make<PairingReplyMessage>();
         pendingDecision = decision;
+        pendingRoute = route;
         pendingApproval = pairingApprovalMode({
           policy: yield* account.approvalPolicy,
           window: addDeviceWindow,
@@ -700,7 +773,7 @@ const make = Effect.gen(function* () {
           now,
         });
         // `S` is spent: the relay need not admit more pairing connections.
-        yield* sendControl(pairingCloseFrame());
+        yield* syncRelayWindow;
         if (pairing.phase === "awaiting-approval") {
           yield* schedulePairingTimer(pairing.approvalDeadline);
         }
@@ -720,6 +793,382 @@ const make = Effect.gen(function* () {
         yield* publish;
       }),
     );
+
+  // ── Introductions (spec §18.2) ─────────────────────────────────────────────
+
+  const signalIntroduction = Effect.gen(function* () {
+    const previous = introductionSignal;
+    introductionSignal = yield* Deferred.make<void>();
+    yield* Deferred.succeed(previous, undefined);
+  });
+
+  const settleIntroduction = (reply: PairingReplyMessage) =>
+    Effect.suspend(() => {
+      const pending = introductionDecision;
+      introductionDecision = undefined;
+      return pending === undefined ? Effect.void : Deferred.succeed(pending, reply);
+    });
+
+  const stopIntroductionTimer = Effect.suspend(() => {
+    const timer = introductionTimer;
+    introductionTimer = undefined;
+    return timer === undefined ? Effect.void : Fiber.interrupt(timer);
+  });
+
+  /** Ends the introduction (the caller holds `pairingLock`), answering a waiting new device. */
+  const endIntroduction = Effect.fn("RelayConnector.endIntroduction")(function* (
+    next: HostIntroductionState,
+    reply: PairingReplyMessage,
+  ) {
+    introduction = next;
+    yield* settleIntroduction(reply);
+    if (!isIntroductionLive(introduction)) yield* stopIntroductionTimer;
+    yield* syncRelayWindow;
+    yield* signalIntroduction;
+    yield* publish;
+  });
+
+  const scheduleIntroductionTimer = Effect.fn("RelayConnector.scheduleIntroductionTimer")(
+    function* (deadline: number) {
+      yield* stopIntroductionTimer;
+      const now = yield* Clock.currentTimeMillis;
+      introductionTimer = yield* Effect.sleep(Math.max(0, deadline - now)).pipe(
+        Effect.andThen(
+          pairingLock.withPermit(
+            Effect.gen(function* () {
+              const next = tickIntroduction(introduction, yield* Clock.currentTimeMillis);
+              if (next === introduction) return;
+              introductionTimer = undefined;
+              yield* endIntroduction(next, { type: "pairing-rejected", reason: "expired" });
+            }),
+          ),
+        ),
+        Effect.forkIn(layerScope),
+      );
+    },
+  );
+
+  /** Cancels the live introduction, if any, when `matches` it (the caller holds `pairingLock`). */
+  const cancelIntroductionIf = (matches: (state: HostIntroductionState) => boolean) =>
+    Effect.suspend(() =>
+      isIntroductionLive(introduction) && matches(introduction)
+        ? endIntroduction(closeIntroduction(introduction, "cancelled"), {
+            type: "pairing-rejected",
+            reason: "rejected",
+          })
+        : Effect.void,
+    );
+
+  /** `POST /api/relay/introduction`: the E2E-authenticated device opens a window here. */
+  const openIntroductionRoute = Effect.fn("RelayConnector.openIntroduction")(function* (
+    info: AuthenticatedSession,
+    request: MuxHttpRequest,
+  ) {
+    const usable = yield* Effect.result(requireUsable);
+    if (usable._tag === "Failure") return introductionError(403, "disabled");
+    const body = yield* readSmallJson(request);
+    const secret =
+      typeof body === "object" && body !== null
+        ? decodeIntroductionSecret((body as { readonly secret?: unknown }).secret)
+        : null;
+    const id = encodeBase64url(
+      Uint8Array.from(
+        yield* withServices(
+          Effect.flatMap(SecureRandom.SecureRandom, (random) => random.randomBytes(16)),
+        ),
+      ),
+    );
+    return yield* pairingLock.withPermit(
+      Effect.gen(function* () {
+        const now = yield* Clock.currentTimeMillis;
+        while ((introductionOpenedAt[0] ?? now) <= now - INTRODUCTION_DAY_MS) {
+          introductionOpenedAt.shift();
+        }
+        const previous = introduction;
+        const result = openIntroduction({
+          current: introduction,
+          introducerDeviceId: info.device.deviceId,
+          ledger: yield* ledger.list,
+          secret,
+          id,
+          openedToday: introductionOpenedAt.length,
+          now,
+        });
+        if (!result.ok) {
+          const status = { "not-permitted": 403, limit: 429, busy: 409, "invalid-request": 400 }[
+            result.reason
+          ];
+          return introductionError(status, result.reason);
+        }
+        // The same introducer started over: a new device waiting on the old window is refused.
+        if (isIntroductionLive(previous)) {
+          yield* settleIntroduction({ type: "pairing-rejected", reason: "rejected" });
+        }
+        introductionOpenedAt.push(now);
+        introduction = result.state;
+        yield* syncRelayWindow;
+        yield* scheduleIntroductionTimer(result.expiresAt);
+        yield* signalIntroduction;
+        yield* publish;
+        return jsonResponse(200, { introductionId: id, expiresAt: result.expiresAt });
+      }),
+    );
+  });
+
+  /** The live introduction, as its introducer may see it; another device sees none. */
+  const introductionFor = (deviceId: string, introductionId: unknown) =>
+    Effect.map(Clock.currentTimeMillis, (now) => {
+      const state = tickIntroduction(introduction, now);
+      return isIntroductionLive(state) &&
+        state.introducerDeviceId === deviceId &&
+        state.id === introductionId
+        ? state
+        : undefined;
+    });
+
+  /**
+   * `POST /api/relay/introduction/claim`: the new device's claim, once it arrived. Waits a while
+   * for it, so the introducer's screen shows the code without polling quickly.
+   */
+  const introductionClaimRoute = Effect.fn("RelayConnector.introductionClaim")(function* (
+    info: AuthenticatedSession,
+    request: MuxHttpRequest,
+  ) {
+    const body = yield* readSmallJson(request);
+    const introductionId =
+      typeof body === "object" && body !== null
+        ? (body as { readonly introductionId?: unknown }).introductionId
+        : undefined;
+    const answer = (state: HostIntroductionState | undefined) => {
+      if (state === undefined) return introductionError(409, "no-introduction");
+      if (state.phase !== "claimed") return undefined;
+      return jsonResponse(200, {
+        phase: "claimed",
+        introductionId: state.id,
+        expiresAt: state.expiresAt,
+        device: {
+          alg: state.device.alg,
+          dk: encodeBase64url(state.device.publicKey),
+          name: state.device.name,
+        },
+        peers: encodeIntroductionPeers(state.peers),
+      } satisfies K3RelayIntroductionClaimResponse);
+    };
+    const signal = introductionSignal;
+    const first = answer(yield* introductionFor(info.device.deviceId, introductionId));
+    if (first !== undefined) return first;
+    yield* Deferred.await(signal).pipe(Effect.timeout(INTRODUCTION_CLAIM_WAIT), Effect.ignore);
+    return (
+      answer(yield* introductionFor(info.device.deviceId, introductionId)) ??
+      jsonResponse(200, { phase: "open" } satisfies K3RelayIntroductionClaimResponse)
+    );
+  });
+
+  /**
+   * `POST /api/relay/introduction/approve`: the introducer's signed approval. Checked against the
+   * ledger as it is now, so a revoked introducer, or one that lost `devices:invite`, approves
+   * nothing. The new device gets the ordinary device's grant and credential, and no permission.
+   */
+  const approveIntroductionRoute = Effect.fn("RelayConnector.approveIntroduction")(function* (
+    info: AuthenticatedSession,
+    request: MuxHttpRequest,
+  ) {
+    const usable = yield* Effect.result(requireUsable);
+    if (usable._tag === "Failure") return introductionError(403, "disabled");
+    const message = yield* readSmallJson(request);
+    const keys = yield* hostKeys.pipe(Effect.mapError(() => relayError("internal")));
+    return yield* pairingLock.withPermit(
+      Effect.gen(function* () {
+        const now = yield* Clock.currentTimeMillis;
+        const introducerId = info.device.deviceId;
+        const verdict = verifyIntroductionApproval(introduction, {
+          hostId: keys.hostId,
+          sessionDeviceId: introducerId,
+          introducer: yield* ledger.get(introducerId),
+          message,
+          now,
+        });
+        if (!verdict.ok) {
+          const status =
+            verdict.reason === "invalid-request"
+              ? 400
+              : verdict.reason === "no-introduction" || verdict.reason === "expired"
+                ? 409
+                : 403;
+          return introductionError(status, verdict.reason);
+        }
+        if (introduction.phase !== "claimed" || introductionDecision === undefined) {
+          return introductionError(409, "no-introduction");
+        }
+        if (introductionsApprovedSince(yield* ledger.list, now) >= INTRODUCTION_DAILY_LIMIT) {
+          return introductionError(429, "limit");
+        }
+        const { device } = introduction;
+        const credential = yield* auth.issueRelayDeviceBootstrapCredential({
+          deviceId: device.deviceId,
+          label: device.name,
+        });
+        const approved = yield* Effect.gen(function* () {
+          const grant = yield* withServices(
+            issueGrant({
+              hostIdentitySeed: keys.seed,
+              alg: device.alg,
+              devicePublicKey: device.publicKey,
+              now,
+            }),
+          );
+          const existing = yield* ledger.get(device.deviceId);
+          if (existing?.status !== "active") {
+            yield* ledger.add({
+              alg: device.alg,
+              publicKey: device.publicKey,
+              name: device.name,
+              now,
+              approvedVia: "introduction",
+              introducedBy: introducerId,
+            });
+          }
+          return grant;
+        }).pipe(Effect.tapError(() => auth.revokeRelayDevice(device.deviceId).pipe(Effect.ignore)));
+        yield* sendGrantRegistration(
+          device.deviceId,
+          grantRegisterFrame(approved, device.publicKey),
+        );
+        yield* endIntroduction(closeIntroduction(introduction, "approved"), {
+          type: "pairing-accepted",
+          grant: approved,
+          bootstrapToken: credential.credential,
+        });
+        yield* Effect.logInfo("K3 relay device approved by introduction", {
+          deviceId: device.deviceId,
+          introducedBy: introducerId,
+        });
+        // Every device hears of it, so an unexpected introduction does not go unnoticed.
+        yield* notifier.notifyIntroduction.pipe(Effect.ignore, Effect.forkIn(layerScope));
+        return jsonResponse(200, { deviceId: device.deviceId });
+      }),
+    );
+  });
+
+  /** `POST /api/relay/introduction/cancel`: the introducer withdraws its window. */
+  const cancelIntroductionRoute = Effect.fn("RelayConnector.cancelIntroduction")(function* (
+    info: AuthenticatedSession,
+    request: MuxHttpRequest,
+  ) {
+    const body = yield* readSmallJson(request);
+    const introductionId =
+      typeof body === "object" && body !== null
+        ? (body as { readonly introductionId?: unknown }).introductionId
+        : undefined;
+    return yield* pairingLock.withPermit(
+      Effect.gen(function* () {
+        const live = yield* introductionFor(info.device.deviceId, introductionId);
+        if (live === undefined) return introductionError(409, "no-introduction");
+        yield* cancelIntroductionIf((state) => state === live);
+        return jsonResponse(200, {});
+      }),
+    );
+  });
+
+  /** A claim from the new device, inside an anonymous pairing session. */
+  const receiveIntroductionClaim = (transcriptHash: Uint8Array, message: unknown) =>
+    pairingLock.withPermit(
+      Effect.gen(function* () {
+        const now = yield* Clock.currentTimeMillis;
+        const keys = yield* Effect.option(hostKeys);
+        if (keys._tag === "None") {
+          return { reply: { type: "pairing-rejected", reason: "no-window" } } as const satisfies {
+            reply: PairingReplyMessage;
+          };
+        }
+        const wasOpen = introduction.phase === "open";
+        const result = submitIntroductionClaim(introduction, {
+          hostId: keys.value.hostId,
+          transcriptHash,
+          message,
+          now,
+        });
+        introduction = result.state;
+        if (result.outcome.kind === "rejected") {
+          if (wasOpen && !isIntroductionLive(introduction)) {
+            yield* stopIntroductionTimer;
+            yield* syncRelayWindow;
+            yield* signalIntroduction;
+            yield* publish;
+          }
+          return {
+            reply: { type: "pairing-rejected", reason: result.outcome.reason },
+          } as const satisfies { reply: PairingReplyMessage };
+        }
+        const decision = yield* Deferred.make<PairingReplyMessage>();
+        introductionDecision = decision;
+        yield* syncRelayWindow;
+        yield* signalIntroduction;
+        yield* publish;
+        return { decision } as const;
+      }),
+    );
+
+  /** The new device's session dropped while waiting: its introduction is over. */
+  const abandonIntroductionClaim = (decision: Deferred.Deferred<PairingReplyMessage>) =>
+    pairingLock.withPermit(
+      Effect.suspend(() => {
+        if (introductionDecision !== decision) return Effect.void;
+        introductionDecision = undefined;
+        return endIntroduction(closeIntroduction(introduction, "cancelled"), {
+          type: "pairing-rejected",
+          reason: "rejected",
+        });
+      }),
+    );
+
+  /**
+   * `POST /api/relay/devices/revoke`: a device with `devices:invite` revokes a lost device. Never
+   * itself, another device with `devices:invite`, or anything outside the ledger (the owner's
+   * sessions are not ledger devices).
+   */
+  const revokeByDeviceRoute = Effect.fn("RelayConnector.revokeByDevice")(function* (
+    info: AuthenticatedSession,
+    request: MuxHttpRequest,
+  ) {
+    const body = yield* readSmallJson(request);
+    const targetId =
+      typeof body === "object" && body !== null
+        ? (body as { readonly deviceId?: unknown }).deviceId
+        : undefined;
+    if (typeof targetId !== "string") return introductionError(400, "invalid-request");
+    if (!deviceCanInvite(yield* ledger.get(info.device.deviceId))) {
+      return introductionError(403, "not-permitted");
+    }
+    const target = yield* ledger.get(targetId);
+    if (target === undefined) return introductionError(404, "unknown-device");
+    if (
+      target.deviceId === info.device.deviceId ||
+      (target.permissions ?? []).includes("devices:invite")
+    ) {
+      return introductionError(403, "protected-device");
+    }
+    if (target.status === "active") yield* revokeDevice(target.deviceId);
+    return jsonResponse(200, { deviceId: target.deviceId });
+  });
+
+  /** Answers one pairing session's claim with the host's decision, or abandons it. */
+  const answerClaim = Effect.fn("RelayConnector.answerClaim")(function* (
+    received:
+      | { readonly reply: PairingReplyMessage }
+      | { readonly decision: Deferred.Deferred<PairingReplyMessage> },
+    nextFrame: Effect.Effect<unknown, Socket.SocketError>,
+    abandon: (decision: Deferred.Deferred<PairingReplyMessage>) => Effect.Effect<void>,
+  ) {
+    if ("reply" in received) return Option.some(received.reply);
+    const answered = yield* Effect.raceFirst(
+      Deferred.await(received.decision).pipe(Effect.asSome),
+      // Anything more from the device, or its close, ends the claim.
+      nextFrame.pipe(Effect.ignore, Effect.as(Option.none<PairingReplyMessage>())),
+    );
+    if (Option.isNone(answered)) yield* abandon(received.decision);
+    return answered;
+  });
 
   const servePairing = Effect.fn("RelayConnector.servePairing")(function* (
     socket: Socket.Socket,
@@ -762,21 +1211,20 @@ const make = Effect.gen(function* () {
       yield* writer.write(encodeFrame(reply));
       return yield* writer.write(new Socket.CloseEvent(1000));
     }
-    // A claim here proves the offer's secret, so it came through the QR code or link.
-    const received = yield* receiveClaim(info.transcriptHash, message, "qr");
-    let reply: PairingReplyMessage;
-    if ("reply" in received) {
-      reply = received.reply;
-    } else {
-      const answered = yield* Effect.raceFirst(
-        Deferred.await(received.decision).pipe(Effect.asSome),
-        // Anything more from the device, or its close, ends the claim.
-        reader.pull.pipe(Effect.ignore, Effect.as(Option.none<PairingReplyMessage>())),
-      );
-      if (Option.isNone(answered)) return yield* abandonClaim(received.decision);
-      reply = answered.value;
-    }
-    yield* writer.write(encodeFrame(reply));
+    // A claim here proves the offer's (or the introducer's) secret: it came through a QR code.
+    const answered = isIntroductionClaimMessage(message)
+      ? yield* answerClaim(
+          yield* receiveIntroductionClaim(info.transcriptHash, message),
+          reader.pull,
+          abandonIntroductionClaim,
+        )
+      : yield* answerClaim(
+          yield* receiveClaim(info.transcriptHash, message, "qr"),
+          reader.pull,
+          abandonClaim,
+        );
+    if (Option.isNone(answered)) return;
+    yield* writer.write(encodeFrame(answered.value));
     yield* writer.write(new Socket.CloseEvent(1000));
   });
 
@@ -876,6 +1324,24 @@ const make = Effect.gen(function* () {
     return jsonResponse(200, result.success);
   });
 
+  const introductionRoutes: Partial<
+    Record<
+      string,
+      (info: AuthenticatedSession, request: MuxHttpRequest) => Effect.Effect<MuxHttpResponse<never>>
+    >
+  > = {
+    [K3_RELAY_INTRODUCTION_PATH]: (info, request) =>
+      orInternalError(openIntroductionRoute(info, request)),
+    [K3_RELAY_INTRODUCTION_CLAIM_PATH]: (info, request) =>
+      orInternalError(introductionClaimRoute(info, request)),
+    [K3_RELAY_INTRODUCTION_APPROVE_PATH]: (info, request) =>
+      orInternalError(approveIntroductionRoute(info, request)),
+    [K3_RELAY_INTRODUCTION_CANCEL_PATH]: (info, request) =>
+      orInternalError(cancelIntroductionRoute(info, request)),
+    [K3_RELAY_DEVICE_REVOKE_PATH]: (info, request) =>
+      orInternalError(revokeByDeviceRoute(info, request)),
+  };
+
   /** The device-only routes; each call first re-checks the ledger, which may have changed. */
   const localRoutes =
     (info: AuthenticatedSession): RelayLocalRoute =>
@@ -891,6 +1357,18 @@ const make = Effect.gen(function* () {
           Effect.matchEffect({
             onFailure: (error) => Effect.succeed(jsonResponse(403, { error: error.reason })),
             onSuccess: () => route,
+          }),
+        );
+      }
+      const introductionRoute = introductionRoutes[pathname ?? ""];
+      if (introductionRoute !== undefined) {
+        if (method !== "POST") {
+          return Effect.succeed(jsonResponse(405, { error: "method-not-allowed" }));
+        }
+        return verifyActiveDevice(info.device).pipe(
+          Effect.matchEffect({
+            onFailure: (error) => Effect.succeed(jsonResponse(403, { error: error.reason })),
+            onSuccess: () => introductionRoute(info, request),
           }),
         );
       }
@@ -1070,7 +1548,7 @@ const make = Effect.gen(function* () {
         yield* onReady;
         yield* grantOutbox.flush(controlWriter);
         yield* setConnection({ status: "connected", error: null });
-        if (pairing.phase === "open") yield* sendControl(pairingOpenFrame(pairing.offer));
+        yield* syncRelayWindow;
         while (true) {
           const message = yield* nextMessage;
           if (message.type !== "session-open") continue;
@@ -1212,6 +1690,11 @@ const make = Effect.gen(function* () {
     const revocation = yield* signRevocation({ hostIdentitySeed: keys.seed, deviceId, now }).pipe(
       Effect.mapError(() => relayError("internal")),
     );
+    yield* pairingLock.withPermit(
+      cancelIntroductionIf(
+        (state) => isIntroductionLive(state) && state.introducerDeviceId === deviceId,
+      ),
+    );
     yield* grantOutbox.drop(deviceId);
     yield* forgetRelayHandlesOf(deviceId);
     yield* notifier.unregister(deviceId);
@@ -1252,6 +1735,33 @@ const make = Effect.gen(function* () {
     return toDevice(device, sessions.values(), yield* notifier.registeredDeviceIds);
   });
 
+  const setDevicePermissions = Effect.fn("RelayConnector.setDevicePermissions")(function* (
+    deviceId: string,
+    invite: boolean,
+  ) {
+    if (!policyAllowed) return yield* relayError("policy-disallowed");
+    const device = yield* ledger
+      .setPermissions(deviceId, invite ? ["devices:invite"] : [])
+      .pipe(
+        Effect.mapError((error) =>
+          error._tag === "DeviceLedgerError"
+            ? relayError(
+                error.reason === "introduced-device" ? "introduced-device" : "unknown-device",
+              )
+            : relayError("internal"),
+        ),
+      );
+    if (!invite) {
+      yield* pairingLock.withPermit(
+        cancelIntroductionIf(
+          (state) => isIntroductionLive(state) && state.introducerDeviceId === deviceId,
+        ),
+      );
+    }
+    yield* publish;
+    return toDevice(device, sessions.values(), yield* notifier.registeredDeviceIds);
+  });
+
   const forgetSessionDevice = Effect.fn("RelayConnector.forgetSessionDevice")(function* (session: {
     readonly subject: string;
     readonly relayDeviceId: string | undefined;
@@ -1275,6 +1785,7 @@ const make = Effect.gen(function* () {
     rejectPairing: rejectPendingPairing,
     revokeDevice,
     renameDevice,
+    setDevicePermissions,
     forgetSessionDevice,
   });
 });

@@ -25,7 +25,7 @@ import * as RelayNotifier from "./RelayNotifier.ts";
 /** A run can end moments before its continuation starts; a completion must hold this long. */
 const COMPLETION_CONFIRM_MS = 5_000;
 
-type AlertKind = Exclude<NotifyKind, "test">;
+type AlertKind = Exclude<NotifyKind, "test" | "device">;
 
 export const notifyKindOfPhase = (phase: AgentAwarenessPhase): AlertKind | null => {
   switch (phase) {

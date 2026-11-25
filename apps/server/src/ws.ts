@@ -3656,6 +3656,8 @@ export const layerWsRpc = (
         [WS_METHODS.k3RelayRevokeDevice]: (input) => relayConnector.revokeDevice(input.deviceId),
         [WS_METHODS.k3RelayRenameDevice]: (input) =>
           relayConnector.renameDevice(input.deviceId, input.name),
+        [WS_METHODS.k3RelaySetDevicePermissions]: (input) =>
+          relayConnector.setDevicePermissions(input.deviceId, input.invite),
         [WS_METHODS.k3RelayAccountSubscribe]: (_input) => relayAccount.changes,
         [WS_METHODS.k3RelayAccountSignIn]: (input) => relayAccount.signIn(input.provider),
         [WS_METHODS.k3RelayAccountSignOut]: (_input) => relayAccount.signOut,

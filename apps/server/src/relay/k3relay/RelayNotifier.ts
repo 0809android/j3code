@@ -79,8 +79,9 @@ export type RelayNotifyDelivery =
   | "gone"
   | "failed";
 
+/** Tests and security notices (`device`) reach every registered device, whatever it chose. */
 const kindAllowed = (kinds: K3RelayNotifyKinds, kind: NotifyKind): boolean =>
-  kind === "test" ? true : kinds[kind];
+  kind === "test" || kind === "device" ? true : kinds[kind];
 
 /**
  * End-to-end encrypted notifications through the K3 relay (spec §13). Devices register their
@@ -100,9 +101,11 @@ export class RelayNotifier extends Context.Service<
     readonly registeredDeviceIds: Effect.Effect<ReadonlySet<string>>;
     /** Seals one notification for every active device that wants this kind, and sends them. */
     readonly notify: (input: {
-      readonly kind: Exclude<NotifyKind, "test">;
+      readonly kind: Exclude<NotifyKind, "test" | "device">;
       readonly threadId: string;
     }) => Effect.Effect<ReadonlyArray<RelayNotifyDelivery>>;
+    /** Tells every active, registered device that a device joined by introduction. */
+    readonly notifyIntroduction: Effect.Effect<ReadonlyArray<RelayNotifyDelivery>>;
     /** A test notification to the asking device only. */
     readonly sendTest: (deviceId: string) => Effect.Effect<RelayNotifyDelivery, RelayNotifyError>;
   }
@@ -265,19 +268,21 @@ const make = Effect.gen(function* () {
 
   const environmentId = yield* environment.getEnvironmentId;
 
-  const notify: RelayNotifier["Service"]["notify"] = Effect.fn("RelayNotifier.notify")(
-    function* (input) {
-      if (!(yield* hostEnabled)) return [];
-      const targets = [...devices.values()];
-      const results = yield* Effect.forEach(
-        targets,
-        (device) => deliver(device, input.kind, input.threadId),
-        { concurrency: 4 },
-      );
-      yield* Effect.logDebug("K3 relay notifications", { kind: input.kind, results });
-      return results;
-    },
-  );
+  const broadcast = Effect.fn("RelayNotifier.broadcast")(function* (
+    kind: Exclude<NotifyKind, "test">,
+    threadId: string | undefined,
+  ) {
+    if (!(yield* hostEnabled)) return [];
+    const targets = [...devices.values()];
+    const results = yield* Effect.forEach(targets, (device) => deliver(device, kind, threadId), {
+      concurrency: 4,
+    });
+    yield* Effect.logDebug("K3 relay notifications", { kind, results });
+    return results;
+  });
+
+  const notify: RelayNotifier["Service"]["notify"] = (input) =>
+    broadcast(input.kind, input.threadId);
 
   const sendTest = Effect.fn("RelayNotifier.sendTest")(function* (deviceId: string) {
     const now = yield* Clock.currentTimeMillis;
@@ -299,6 +304,7 @@ const make = Effect.gen(function* () {
     unregister,
     registeredDeviceIds: Effect.sync(() => new Set(devices.keys())),
     notify,
+    notifyIntroduction: broadcast("device", undefined),
     sendTest,
   });
 });

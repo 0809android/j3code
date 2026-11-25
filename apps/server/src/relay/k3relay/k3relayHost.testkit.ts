@@ -475,6 +475,8 @@ export interface K3RelayTestHost {
   readonly approvePairing: (deviceId: string, confirmationCode?: string) => Promise<K3RelayDevice>;
   readonly rejectPairing: () => Promise<void>;
   readonly revokeDevice: (deviceId: string) => Promise<K3RelayDevice>;
+  /** As the host's user does in Settings: grants or withdraws `devices:invite`. */
+  readonly setDevicePermissions: (deviceId: string, invite: boolean) => Promise<K3RelayDevice>;
   /** Seals and sends a notification of this kind for this thread to every registered device. */
   readonly notify: (
     kind: "approval" | "input" | "completed" | "failed",
@@ -579,6 +581,12 @@ export const startK3RelayTestHost = async (
         run(Effect.flatMap(RelayConnector.RelayConnector, (c) => c.rejectPairing)),
       revokeDevice: (deviceId) =>
         run(Effect.flatMap(RelayConnector.RelayConnector, (c) => c.revokeDevice(deviceId))),
+      setDevicePermissions: (deviceId, invite) =>
+        run(
+          Effect.flatMap(RelayConnector.RelayConnector, (c) =>
+            c.setDevicePermissions(deviceId, invite),
+          ),
+        ),
       notify: (kind, threadId) =>
         run(Effect.flatMap(RelayNotifier.RelayNotifier, (n) => n.notify({ kind, threadId }))),
       account: {

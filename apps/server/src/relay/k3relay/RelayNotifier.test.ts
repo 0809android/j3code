@@ -111,6 +111,12 @@ describe("RelayNotifier", () => {
         expect(yield* notifier.notify({ kind: "completed", threadId: "t-1" })).toEqual([
           "kind-off",
         ]);
+        // A device joining by introduction is told to every device, whatever it chose.
+        yield* notifier.register(deviceId, {
+          publicKey: encodeBase64url(hpkeGenerateKeyPair().publicKey),
+          kinds: { approval: false, input: false, completed: false, failed: false },
+        });
+        expect(yield* notifier.notifyIntroduction).toEqual(["no-target"]);
 
         yield* settings.updateSettings({ relay: { notifications: false } });
         expect(yield* notifier.notify({ kind: "approval", threadId: "t-1" })).toEqual([]);
