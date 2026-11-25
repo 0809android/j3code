@@ -35,6 +35,10 @@
       "types": "./src/socketE2ee.ts",
       "import": "./src/socketE2ee.ts"
     },
+    "./relay": {
+      "types": "./src/relay/index.ts",
+      "import": "./src/relay/index.ts"
+    },
     "./composerPullRequestMatches": {
       "types": "./src/composerPullRequestMatches.ts",
       "import": "./src/composerPullRequestMatches.ts"
