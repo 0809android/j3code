@@ -17,27 +17,30 @@ import {
 export type RequestTransportKind = "loopback" | "tailscale" | "tunnel" | "lan-or-proxy" | "k3relay";
 
 /**
- * Sources of the requests the `RelayConnector` marked. The set is private to
- * this module and keyed by the request's `source`, which `modify` and the
- * decompression wrapper keep, so the mark follows a request through the router
+ * Sources of the requests the `RelayConnector` marked, with the device the E2E channel
+ * authenticated. The map is private to this module and keyed by the request's `source`, which
+ * `modify` and the decompression wrapper keep, so the mark follows a request through the router
  * and middleware. Nothing a peer sends (headers, address, URL) can add to it.
  */
-const relayRequestSources = new WeakSet<object>();
+const relayRequestSources = new WeakMap<object, { readonly deviceId: string | undefined }>();
 
 type RelayMarkable = { readonly source?: object | undefined };
 
 /**
  * Marks a request as having arrived through the relay and returns it. Only the
  * `RelayConnector` calls this, on the request it builds itself for each relayed
- * HTTP request or WebSocket upgrade. The mark is how `classifyRequestTransport`
- * knows the route; it is never read from a header.
+ * HTTP request or WebSocket upgrade, naming the device the E2E handshake authenticated.
+ * The mark is how `classifyRequestTransport` knows the route; it is never read from a header.
  */
-export const markRelayRequest = <R extends RelayMarkable>(request: R): R => {
+export const markRelayRequest = <R extends RelayMarkable>(
+  request: R,
+  device?: { readonly deviceId: string },
+): R => {
   const source = request.source;
   if (typeof source !== "object" || source === null) {
     throw new TypeError("A relay request needs an object source to carry the relay mark.");
   }
-  relayRequestSources.add(source);
+  relayRequestSources.set(source, { deviceId: device?.deviceId });
   return request;
 };
 
@@ -45,6 +48,14 @@ export const markRelayRequest = <R extends RelayMarkable>(request: R): R => {
 export const isRelayRequest = (request: RelayMarkable): boolean => {
   const source = request.source;
   return typeof source === "object" && source !== null && relayRequestSources.has(source);
+};
+
+/** The E2E-authenticated device behind a relayed request; undefined for any other request. */
+export const relayDeviceIdOf = (request: RelayMarkable): string | undefined => {
+  const source = request.source;
+  return typeof source === "object" && source !== null
+    ? relayRequestSources.get(source)?.deviceId
+    : undefined;
 };
 
 /**

@@ -36,7 +36,11 @@ import { HttpServerRequest, HttpServerResponse } from "effect/http";
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 
 import * as EnvironmentAuth from "./EnvironmentAuth.ts";
-import { classifyRequestTransport, transportAllowedByPolicy } from "./transportSecurity.ts";
+import {
+  classifyRequestTransport,
+  relayDeviceIdOf,
+  transportAllowedByPolicy,
+} from "./transportSecurity.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as SessionStore from "./SessionStore.ts";
 import { traceAuthenticatedRelayRequest, traceRelayRequest } from "../cloud/traceRelayRequest.ts";
@@ -448,6 +452,7 @@ export const layer = HttpApiBuilder.group(
                 proof.consume,
               );
             }
+            const relayDeviceId = relayDeviceIdOf(request);
             return yield* serverAuth.exchangeBootstrapCredentialForAccessToken(
               args.payload.subject_token,
               requestedScopes,
@@ -461,7 +466,10 @@ export const layer = HttpApiBuilder.group(
                   ...(args.payload.client_os ? { os: args.payload.client_os } : {}),
                 },
               }),
-              proof ? { proofKeyThumbprint: proof.thumbprint } : undefined,
+              {
+                ...(proof ? { proofKeyThumbprint: proof.thumbprint } : {}),
+                ...(relayDeviceId === undefined ? {} : { relayDeviceId }),
+              },
             );
           },
           traceRelayRequest,

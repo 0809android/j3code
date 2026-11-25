@@ -7,6 +7,7 @@ import {
   isPrivateTransport,
   isRelayRequest,
   markRelayRequest,
+  relayDeviceIdOf,
   transportAllowedByPolicy,
   transportSatisfiesE2eeRequirement,
 } from "./transportSecurity.ts";
@@ -120,6 +121,15 @@ describe("k3relay transport", () => {
       headers: Headers.fromInput({ "x-forwarded-for": "127.0.0.1" }),
     };
     expect(classifyRequestTransport(modified)).toBe("k3relay");
+  });
+
+  it("carries the E2E-authenticated device, which no header can name", () => {
+    const marked = markRelayRequest(request({ "x-k3-device": "spoofed" }), {
+      deviceId: "aaaabbbbccccddddeeeeffffgggghhhh",
+    });
+    expect(relayDeviceIdOf(marked)).toBe("aaaabbbbccccddddeeeeffffgggghhhh");
+    expect(relayDeviceIdOf({ ...marked })).toBe("aaaabbbbccccddddeeeeffffgggghhhh");
+    expect(relayDeviceIdOf(request({ "x-k3-device": "spoofed" }))).toBeUndefined();
   });
 
   it("only the connector can mark a request, and needs an object source to do it", () => {
