@@ -290,11 +290,12 @@ export function createAssetEnvironmentAtoms<R, E>(
         return yield* new RelayAssetFetchError({ reason: "store" });
       }
       // Behind a relay the minted URL is reachable only over the mux: hand out a local copy.
-      // Keyed by resource and revision, so a re-mint of an unchanged file keeps its URL.
+      // Keyed by resource and revision, so a re-mint (every 30 minutes, with a new handle) of
+      // an unchanged file keeps its copy and URL instead of fetching it again.
       const key = relayAssetKey(
         supervisor.target.environmentId,
         input.resource,
-        result.success.fileRevision ?? result.success.relativeUrl,
+        result.success.fileRevision ?? "",
       );
       const local = yield* resolveRelayAssetUrl(
         relayAssets,
