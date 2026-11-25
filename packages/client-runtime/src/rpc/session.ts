@@ -248,8 +248,17 @@ export const make = Effect.fn("RpcSessionFactory.make")(function* (
     // The protocol never reopens its socket, so every frame counted here came
     // from this session's one socket.
     let inboundFrames = 0;
+    const transport = connection.transport;
+    const baseWebSocketConstructor: typeof webSocketConstructor =
+      transport === undefined
+        ? webSocketConstructor
+        : (url, options) =>
+            transport.webSocketConstructor(
+              url,
+              typeof options === "string" || Array.isArray(options) ? options : options?.protocols,
+            );
     const countingWebSocketConstructor: typeof webSocketConstructor = (url, options) => {
-      const socket = webSocketConstructor(url, options);
+      const socket = baseWebSocketConstructor(url, options);
       socket.addEventListener("message", () => {
         inboundFrames += 1;
       });

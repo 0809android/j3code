@@ -31,6 +31,7 @@ import {
 import * as RemoteEnvironmentAuthorization from "../authorization/service.ts";
 import * as RpcSession from "../rpc/session.ts";
 import { fetchRemoteEnvironmentDescriptor } from "../environment/descriptor.ts";
+import { overTransport } from "../k3relay/broker.ts";
 
 export type ConnectionDriverProgress =
   | {
@@ -217,10 +218,26 @@ export const make = Effect.gen(function* () {
   };
 
   const checkHost = (prepared: PreparedConnection) =>
-    checkDescriptor(
-      prepared.httpBaseUrl,
-      prepared.environmentId,
-      prepared.httpBaseUrl.startsWith("https:"),
+    (prepared.transport === undefined
+      ? checkDescriptor(
+          prepared.httpBaseUrl,
+          prepared.environmentId,
+          prepared.httpBaseUrl.startsWith("https:"),
+        )
+      : // Every relay host shares the virtual origin, so its answer is not remembered by URL.
+        fetchRemoteEnvironmentDescriptor({
+          httpBaseUrl: prepared.httpBaseUrl,
+          timeoutMs: ROUTE_CHECK_TIMEOUT_MS,
+        }).pipe(
+          Effect.option,
+          Effect.map((descriptor): RouteCheck =>
+            Option.exists(descriptor, (value) => value.environmentId === prepared.environmentId)
+              ? "answered"
+              : "silent",
+          ),
+          Effect.provideService(HttpClient.HttpClient, httpClient),
+          overTransport(prepared.transport),
+        )
     ).pipe(
       Effect.withSpan("ConnectionDriver.checkHost", {
         attributes: { "connection.target.kind": prepared.target._tag },
@@ -259,6 +276,7 @@ export const make = Effect.gen(function* () {
                 : {}),
             })
             .pipe(
+              overTransport(prepared.transport),
               Effect.catch((error) =>
                 Effect.logWarning("Could not renew the connection's credential.", { error }),
               ),

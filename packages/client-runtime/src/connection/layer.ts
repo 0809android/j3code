@@ -15,6 +15,7 @@ import * as PlatformConnectionSource from "../platform/source.ts";
 import * as RelayEnvironmentDiscovery from "../relay/discovery.ts";
 import * as RemoteEnvironmentAuthorization from "../authorization/service.ts";
 import * as RpcSession from "../rpc/session.ts";
+import * as K3RelayTunnels from "../k3relay/tunnels.ts";
 
 export const watchDiscoveredCompatibility = Effect.fn("connection.watchDiscoveredCompatibility")(
   function* () {
@@ -73,7 +74,12 @@ export const watchDiscoveredCompatibility = Effect.fn("connection.watchDiscovere
 
 export function layerWithOptions(options: RpcSession.RpcSessionOptions) {
   const layerDriver = ConnectionDriver.layer.pipe(
-    Layer.provide(Layer.mergeAll(ConnectionResolver.layer, RpcSession.layer(options))),
+    Layer.provide(
+      Layer.mergeAll(
+        ConnectionResolver.layer.pipe(Layer.provide(K3RelayTunnels.layer)),
+        RpcSession.layer(options),
+      ),
+    ),
   );
   const layerRegistry = EnvironmentRegistry.layer.pipe(Layer.provide(layerDriver));
   const layerOnboarding = ConnectionOnboarding.layer.pipe(Layer.provide(layerRegistry));

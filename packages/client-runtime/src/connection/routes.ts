@@ -18,6 +18,7 @@ import type { MFunctionType } from "gt-i18n/types";
 
 export type ConnectionRouteKind =
   | "relay"
+  | "k3relay"
   | "loopback"
   | "lan"
   | "tailnet"
@@ -35,6 +36,7 @@ export function connectionRouteId(target: ConnectionTarget): string {
       return RELAY_ROUTE_ID;
     case "BearerConnectionTarget":
     case "SshConnectionTarget":
+    case "K3RelayConnectionTarget":
       return target.connectionId;
   }
 }
@@ -96,6 +98,8 @@ export function connectionRouteKind(route: ConnectionRoute): ConnectionRouteKind
       return "relay";
     case "SshConnectionTarget":
       return "ssh";
+    case "K3RelayConnectionTarget":
+      return "k3relay";
     case "PrimaryConnectionTarget":
     case "BearerConnectionTarget": {
       const hostname = routeHostname(route);
@@ -138,6 +142,8 @@ const ROUTE_KIND_RANK: Record<ConnectionRouteKind, number> = {
   public: 3,
   ssh: 4,
   relay: 5,
+  // The last resort: it shares a small relay's bandwidth (spec §18.3).
+  k3relay: 6,
 };
 
 export function insertRoute(
@@ -183,18 +189,23 @@ function routeAddressKey(route: ConnectionRoute): string | null {
       return `bearer:${profile.httpBaseUrl.replace(/\/+$/, "")}`;
     case "SshConnectionProfile":
       return `ssh:${sshTargetKey(profile.target)}`;
+    case "K3RelayConnectionProfile":
+      return `k3relay:${profile.hostId}`;
     default:
       return null;
   }
 }
 
 const T3_CONNECT_NAME = "T3 Connect";
+const K3_RELAY_NAME = "K3 Relay";
 
 /** The route's label in English. Display sites use `connectionRouteLabelText`. */
 export function connectionRouteLabel(route: ConnectionRoute): string {
   switch (connectionRouteKind(route)) {
     case "relay":
       return T3_CONNECT_NAME;
+    case "k3relay":
+      return K3_RELAY_NAME;
     case "loopback":
       return msg("This device");
     case "lan":

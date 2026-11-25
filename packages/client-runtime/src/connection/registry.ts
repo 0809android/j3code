@@ -25,6 +25,7 @@ import {
   SshConnectionProfile,
   connectionRegistrationCatalogEntry,
 } from "./catalog.ts";
+import { DeviceKeyStore } from "../k3relay/deviceKeyStore.ts";
 import * as ConnectionCredentialStore from "./credentialStore.ts";
 import * as ConnectionProfileStore from "./profileStore.ts";
 import * as Connectivity from "./connectivity.ts";
@@ -222,13 +223,16 @@ export const make = Effect.gen(function* () {
   const driver = yield* ConnectionDriver.ConnectionDriver;
   const wakeups = yield* ConnectionWakeups.ConnectionWakeups;
   const ssh = yield* ClientCapabilities.SshEnvironmentGateway;
+  const deviceKeys = yield* Effect.serviceOption(DeviceKeyStore);
   const persistedTargets = yield* storage.list;
   const disabledEnvironmentIds = new Set(yield* storage.listDisabled);
   const loadRoute = Effect.fn("EnvironmentRegistry.loadRoute")(function* (
     target: ConnectionTarget,
   ) {
     const profile: Option.Option<ConnectionProfile> =
-      target._tag === "BearerConnectionTarget" || target._tag === "SshConnectionTarget"
+      target._tag === "BearerConnectionTarget" ||
+      target._tag === "SshConnectionTarget" ||
+      target._tag === "K3RelayConnectionTarget"
         ? yield* profiles.get(target.connectionId)
         : Option.none();
     return { target, profile } satisfies ConnectionRoute;
@@ -903,6 +907,16 @@ export const make = Effect.gen(function* () {
       const profile = Option.getOrNull(route.profile);
       if (profile !== null && isSshConnectionProfile(profile)) {
         yield* disconnectSsh(environmentId, profile);
+      }
+      // The pairing's device key is useless without the pairing; the user pairs anew to return.
+      if (profile?._tag === "K3RelayConnectionProfile" && Option.isSome(deviceKeys)) {
+        yield* deviceKeys.value
+          .remove(profile.deviceKeyId)
+          .pipe(
+            Effect.catch((error) =>
+              Effect.logWarning("Could not delete the relay device key.", { environmentId, error }),
+            ),
+          );
       }
     }
   });
