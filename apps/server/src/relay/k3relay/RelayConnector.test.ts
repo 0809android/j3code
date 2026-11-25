@@ -15,13 +15,13 @@ import {
 } from "@t3tools/contracts";
 import { assert, describe, expect, it } from "@effect/vitest";
 import * as Clock from "effect/Clock";
+import * as Digest from "effect/crypto/Digest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
-import * as Scope from "effect/Scope";
 import * as Socket from "effect/socket/Socket";
 import * as Stream from "effect/Stream";
 import { FetchHttpClient } from "effect/http";
@@ -61,8 +61,6 @@ import {
   wrapClientSocketWithE2eeV2,
 } from "@t3tools/shared/socketE2ee";
 
-import { TEST_CONFIG } from "../../../../../infra/k3-relay/src/relay.testkit.ts";
-import { createRelay } from "../../../../../infra/k3-relay/src/server.ts";
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
 import { makeDpopKey } from "../../auth/dpop.testkit.ts";
 import * as AuthHttp from "../../auth/http.ts";
@@ -197,6 +195,19 @@ const layerHost = (options: {
     ),
     layerRpcRoute,
     layerProbeRoute,
+  ).pipe(
+    // Routes read these per request, as `HttpRouter.serve` provides them in the server.
+    HttpRouter.provideRequest(
+      Layer.effectContext(
+        Effect.context<
+          | EnvironmentAuth.EnvironmentAuth
+          | SessionStore.SessionStore
+          | ServerSecretStore.ServerSecretStore
+          | ServerSettings.ServerSettingsService
+          | Digest.Digest
+        >(),
+      ),
+    ),
   );
   return Layer.mergeAll(routes, RelayConnector.layer, RelayDeviceLedger.layer).pipe(
     Layer.provideMerge(HttpRouter.layer),
@@ -207,13 +218,42 @@ const layerHost = (options: {
 
 // ── The relay, in this process ───────────────────────────────────────────────
 
+/** The parts of `infra/k3-relay` these tests drive. */
+interface InProcessRelay {
+  readonly store: { getHost(hostId: string): unknown };
+  readonly metrics: { snapshot(): { readonly controls: number } };
+  listen(): Promise<number>;
+  close(): Promise<void>;
+}
+
+/**
+ * The relay is its own package with its own lint and type rules, so it is loaded at run time
+ * rather than type-checked as part of the server.
+ */
+const loadRelay = async () => {
+  const testkit = (await import(
+    new URL("../../../../../infra/k3-relay/src/relay.testkit.ts", import.meta.url).href
+  )) as { readonly TEST_CONFIG: object };
+  const server = (await import(
+    new URL("../../../../../infra/k3-relay/src/server.ts", import.meta.url).href
+  )) as {
+    readonly createRelay: (options: {
+      readonly config: object;
+      readonly now: () => number;
+    }) => InProcessRelay;
+  };
+  return { config: testkit.TEST_CONFIG, createRelay: server.createRelay };
+};
+
 /** `clock.skewMs` moves the relay's clock; ahead, it drops the host's revocations as stale. */
 const startRelay = Effect.acquireRelease(
   Effect.promise(async () => {
+    const { config, createRelay } = await loadRelay();
     const clock = { skewMs: 0 };
     const relay = createRelay({
-      config: TEST_CONFIG,
-      // oxlint-disable-next-line t3code/no-wall-clock-in-tests -- the in-process relay keeps its own clock, as in production.
+      config,
+      // @effect-diagnostics-next-line globalDate:off -- the relay keeps its own clock, as in production.
+      // oxlint-disable-next-line t3code/no-wall-clock-in-tests -- same reason.
       now: () => Date.now() + clock.skewMs,
     });
     const port = await relay.listen();
@@ -476,7 +516,7 @@ const closeReason = (
   return undefined;
 };
 
-const expectRejected = <A, E>(effect: Effect.Effect<A, E, Scope.Scope>, reason: string) =>
+const expectRejected = <A, E, R>(effect: Effect.Effect<A, E, R>, reason: string) =>
   Effect.gen(function* () {
     const failure = yield* Effect.scoped(effect).pipe(Effect.flip, Effect.timeout("15 seconds"));
     expect(closeReason(failure)).toMatchObject({ _tag: "E2eeRejectedError", reason });

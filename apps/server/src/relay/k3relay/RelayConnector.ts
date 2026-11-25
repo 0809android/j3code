@@ -84,6 +84,7 @@ import * as ServerE2eeIdentity from "../../auth/ServerE2eeIdentity.ts";
 import * as ServerConfig from "../../config.ts";
 import * as ManagedLimits from "../../policy/managedLimits.ts";
 import * as ManagedPolicy from "../../policy/ManagedPolicy.ts";
+import * as ServerActivation from "../../serverActivation.ts";
 import * as ServerSettingsService from "../../serverSettings.ts";
 import {
   type RelayEndpoints,
@@ -888,8 +889,14 @@ const make = Effect.gen(function* () {
   });
 
   const settingsChanges = yield* settingsService.subscribeChanges;
-  yield* applySettings(yield* currentSettings);
-  yield* settingsChanges.pipe(Stream.runForEach(applySettings), Effect.forkIn(layerScope));
+  // A standby server (during an update) shares this host key; connecting would evict the
+  // active server's control socket, so the relay waits for activation.
+  yield* ServerActivation.forkParked(
+    Effect.gen(function* () {
+      yield* applySettings(yield* currentSettings);
+      yield* settingsChanges.pipe(Stream.runForEach(applySettings));
+    }),
+  );
   yield* Scope.addFinalizer(
     layerScope,
     Effect.suspend(() => (running === undefined ? Effect.void : Fiber.interrupt(running))),
