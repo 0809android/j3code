@@ -1,6 +1,6 @@
 import { msg } from "gt-i18n";
 import { translatableDetail } from "../errors/translatable.ts";
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId, WS_METHODS } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Equal from "effect/Equal";
@@ -62,6 +62,8 @@ import {
 } from "./routes.ts";
 
 const isSshConnectionProfile = Schema.is(SshConnectionProfile);
+/** Removing a relay pairing waits this long at most for the host to hear about it. */
+const K3RELAY_FORGET_TIMEOUT = "3 seconds";
 
 function unsupportedState(
   entry: ConnectionCatalogEntry,
@@ -868,6 +870,26 @@ export const make = Effect.gen(function* () {
     }
   }, reconcileLock.withPermits(1));
 
+  /**
+   * A device paired through a K3 relay tells the host to take it off its ledger, so the host's
+   * device list does not keep a phone that is gone. Only over a live session, briefly: the device
+   * forgets the pairing either way, and the host can still revoke it.
+   */
+  const forgetOnK3RelayHost = Effect.fn("EnvironmentRegistry.forgetOnK3RelayHost")(function* (
+    environmentId: EnvironmentId,
+  ) {
+    const lease = (yield* SubscriptionRef.get(serviceScopes)).get(environmentId);
+    if (lease === undefined) return;
+    const session = yield* SubscriptionRef.get(lease.supervisor.session);
+    if (Option.isNone(session)) return;
+    yield* session.value.client[WS_METHODS.k3RelayForgetThisDevice]({}).pipe(
+      Effect.timeout(K3RELAY_FORGET_TIMEOUT),
+      Effect.catchCause((cause) =>
+        Effect.logInfo("The relay host was not told this device left.", { environmentId, cause }),
+      ),
+    );
+  });
+
   /** Callers hold its lease lock. */
   const removeLocked = Effect.fn("EnvironmentRegistry.removeLocked")(function* (
     environmentId: EnvironmentId,
@@ -878,6 +900,13 @@ export const make = Effect.gen(function* () {
       });
     }
     const entry = yield* getEntry(environmentId);
+    if (
+      connectionRoutes(entry).some(
+        (route) => Option.getOrNull(route.profile)?._tag === "K3RelayConnectionProfile",
+      )
+    ) {
+      yield* forgetOnK3RelayHost(environmentId);
+    }
 
     yield* pullRequestRoutingPermissions.forget(environmentId);
     yield* registrations.remove(environmentId);

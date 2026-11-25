@@ -33,6 +33,7 @@ import * as Rpc from "effect/rpc/Rpc";
 import * as RpcClient from "effect/rpc/RpcClient";
 import * as RpcGroup from "effect/rpc/RpcGroup";
 import * as RpcSerialization from "effect/rpc/RpcSerialization";
+import { AsyncResult } from "effect/reactivity";
 
 import { resolveRemoteDpopWebSocketConnectionUrl } from "../authorization/remote.ts";
 import {
@@ -49,12 +50,15 @@ import {
   k3relayTunnelInput,
   overTransport,
   pairingRecordOf,
+  refineWithPresence,
   renewK3RelayGrant,
 } from "./broker.ts";
 import * as DeviceKeyStore from "./deviceKeyStore.ts";
 import { k3relayFailureText } from "./failure.ts";
 import { RELAY_ASSET_LIMITS, makeRelayAssetCache, resolveRelayAssetUrl } from "./relayAssets.ts";
 import { uploadThroughRelay } from "./relayUpload.ts";
+import { reissueK3RelaySession } from "./reissue.ts";
+import { hostLacksK3Relay } from "../state/k3relay.ts";
 import { layerTestCrypto, layerWebSocketGlobal } from "./k3relay.testkit.ts";
 import {
   type K3RelayPairingProgress,
@@ -197,6 +201,8 @@ const HostRpcs = RpcGroup.make(
   Rpc.make("relayProbe.whoami", {
     success: Schema.Struct({ subject: Schema.String, transport: Schema.String }),
   }),
+  /** Served by no host: how an older host answers a method it does not have. */
+  Rpc.make("relayProbe.missing", { success: Schema.String }),
   Rpc.make("relayProbe.assetUrl", {
     payload: Schema.Struct({ attachmentId: Schema.String }),
     success: Issued,
@@ -350,6 +356,11 @@ describe("K3 Relay client against the real host", () => {
         );
         expect(seen.activeSessions).toBeGreaterThan(0);
         expect(seen.status).toBe("connected");
+
+        // A method this host lacks fails the way an older host fails the relay subscription.
+        const missing = yield* Effect.exit(rpc["relayProbe.missing"]());
+        assert(Exit.isFailure(missing));
+        expect(hostLacksK3Relay(AsyncResult.failure(missing.cause))).toBe(true);
       }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(layerDevice, layerWebSocketGlobal))),
   );
 
@@ -553,6 +564,78 @@ describe("K3 Relay client against the real host", () => {
       });
       expect(refused.status).toBe(403);
       expect(k3RelayUnsupportedFeatureOf(refused.body)).toBe("preview-tunnel");
+    }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(layerDevice, layerWebSocketGlobal))),
+  );
+
+  it.live(
+    "a lapsed session is replaced through the device's own credential; a revoked device gets none",
+    () =>
+      Effect.gen(function* () {
+        const relay = yield* startRelay;
+        const host = yield* startHost(relay.url);
+        const { registration, deviceId } = yield* pairThroughOnboarding(host);
+        const input = yield* k3relayTunnelInput(registration.profile);
+
+        const renewed = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const tunnel = yield* openK3RelayTunnel(input);
+            // A session the host no longer takes: the RPC upgrade is refused.
+            const stale = yield* openRpc(tunnel.transport, "stale-session-token").pipe(
+              Effect.flatMap((rpc) => rpc["relayProbe.whoami"]()),
+              Effect.flip,
+              Effect.timeout("10 seconds"),
+            );
+            expect(stale).toBeDefined();
+            const credential = yield* reissueK3RelaySession(tunnel.transport);
+            expect(credential.accessToken).not.toBe(registration.credential.accessToken);
+            const rpc = yield* openRpc(tunnel.transport, credential.accessToken);
+            return yield* rpc["relayProbe.whoami"]();
+          }),
+        );
+        expect(renewed).toEqual({
+          subject: `relay-paired-device:${deviceId}`,
+          transport: "k3relay",
+        });
+
+        const afterRevoke = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const tunnel = yield* openK3RelayTunnel(input);
+            yield* hostCall(() => host.revokeDevice(deviceId));
+            return yield* reissueK3RelaySession(tunnel.transport).pipe(Effect.flip);
+          }),
+        ).pipe(Effect.timeout("10 seconds"));
+        expect(afterRevoke._tag).toBe("K3RelayReissueError");
+      }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(layerDevice, layerWebSocketGlobal))),
+  );
+
+  it.live("the relay's signed status names an offline host, and a revoked device", () =>
+    Effect.gen(function* () {
+      const relay = yield* startRelay;
+      const host = yield* startHost(relay.url);
+      const { registration, deviceId } = yield* pairThroughOnboarding(host);
+      const input = yield* k3relayTunnelInput(registration.profile);
+      // Online: an unexplained failure stays what it was.
+      expect(yield* refineWithPresence("relay-unreachable", input)).toBe("relay-unreachable");
+      // Failures that already say why are left alone.
+      expect(yield* refineWithPresence("limit", input)).toBe("limit");
+      yield* hostCall(() => host.revokeDevice(deviceId));
+      expect(yield* refineWithPresence("relay-unreachable", input)).toBe("revoked");
+    }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(layerDevice, layerWebSocketGlobal))),
+  );
+
+  it.live("an offline host shows as offline, not as an unreachable relay", () =>
+    Effect.gen(function* () {
+      const relay = yield* startRelay;
+      const { input, stop } = yield* Effect.gen(function* () {
+        const testkit = yield* loadHostTestkit;
+        const host = yield* Effect.promise(() =>
+          testkit.startK3RelayTestHost({ relayUrl: relay.url }),
+        );
+        const { registration } = yield* pairThroughOnboarding(host);
+        return { input: yield* k3relayTunnelInput(registration.profile), stop: host.dispose };
+      });
+      yield* Effect.promise(stop);
+      expect(yield* refineWithPresence("relay-unreachable", input)).toBe("host-offline");
     }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(layerDevice, layerWebSocketGlobal))),
   );
 

@@ -1,4 +1,7 @@
-import { createK3RelayEnvironmentAtoms } from "@t3tools/client-runtime/state/k3relay";
+import {
+  createK3RelayEnvironmentAtoms,
+  hostLacksK3Relay,
+} from "@t3tools/client-runtime/state/k3relay";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -8,7 +11,7 @@ import type { EnvironmentId, K3RelayHostState, K3RelayPairingOffer } from "@t3to
 import { useMessages } from "gt-react";
 
 import { connectionAtomRuntime } from "../connection/runtime";
-import { useEnvironmentQuery } from "../state/query";
+import { useEnvironmentQuery, useEnvironmentQuerySelector } from "../state/query";
 import { serverEnvironment } from "../state/server";
 import { useAtomCommand } from "../state/use-atom-command";
 
@@ -17,17 +20,21 @@ export const k3RelayEnvironment = createK3RelayEnvironmentAtoms(connectionAtomRu
 
 export interface K3RelayHostStateView {
   readonly state: K3RelayHostState | null;
+  /** Null too for a host without the relay (an older K3 Code): its settings leave it out. */
   readonly error: string | null;
 }
 
 /** The host's live relay state. Nothing until the first state, so hosts without it show nothing. */
 export function useK3RelayHostState(environmentId: EnvironmentId | null): K3RelayHostStateView {
   const resolve = useMessages();
-  const query = useEnvironmentQuery(
-    environmentId === null ? null : k3RelayEnvironment.state({ environmentId, input: {} }),
-    resolve,
-  );
-  return { state: query.data, error: query.data === null ? query.error : null };
+  const atom =
+    environmentId === null ? null : k3RelayEnvironment.state({ environmentId, input: {} });
+  const query = useEnvironmentQuery(atom, resolve);
+  const lacksRelay = useEnvironmentQuerySelector(atom, hostLacksK3Relay);
+  return {
+    state: query.data,
+    error: query.data === null && !lacksRelay ? query.error : null,
+  };
 }
 
 /** A failed call's message, or null when it succeeded or was cut off. */
