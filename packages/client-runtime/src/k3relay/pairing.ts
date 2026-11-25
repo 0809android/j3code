@@ -396,21 +396,35 @@ export const make = Effect.gen(function* () {
       function* (input, onProgress) {
         const paired = yield* optional(runK3RelayDevicePairing(input, onProgress));
         yield* onProgress({ phase: "redeeming" });
-        const registration = yield* optional(redeemK3RelayPairing(paired)).pipe(
-          Effect.onError(() =>
-            Option.isSome(keys) ? Effect.ignore(keys.value.remove(paired.keyId)) : Effect.void,
-          ),
+        return yield* optional(saveK3RelayPairedDevice(paired)).pipe(
+          Effect.provideService(EnvironmentRegistry.EnvironmentRegistry, registry),
         );
-        yield* registry.register(registration);
-        yield* registry.setCompatibility(registration.target.environmentId, null);
-        yield* registry
-          .setEnabled(registration.target.environmentId, true)
-          .pipe(Effect.catchTags({ EnvironmentNotRegisteredError: () => Effect.void }));
-        return registration.target.environmentId;
       },
       Effect.provide(Layer.mergeAll(Layer.succeedContext(context), SecureRandom.layerWebCrypto)),
     ),
   });
+});
+
+/**
+ * Redeems an approved device and saves it as an enabled environment, after QR pairing or an
+ * account connection alike. The device key goes away if redeeming fails.
+ */
+export const saveK3RelayPairedDevice = Effect.fn("K3Relay.savePairedDevice")(function* (
+  paired: K3RelayPairedDevice,
+) {
+  const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+  const keys = yield* Effect.serviceOption(DeviceKeyStore);
+  const registration = yield* redeemK3RelayPairing(paired).pipe(
+    Effect.onError(() =>
+      Option.isSome(keys) ? Effect.ignore(keys.value.remove(paired.keyId)) : Effect.void,
+    ),
+  );
+  yield* registry.register(registration);
+  yield* registry.setCompatibility(registration.target.environmentId, null);
+  yield* registry
+    .setEnabled(registration.target.environmentId, true)
+    .pipe(Effect.catchTags({ EnvironmentNotRegisteredError: () => Effect.void }));
+  return registration.target.environmentId;
 });
 
 export const layer = Layer.effect(K3RelayOnboarding, make);

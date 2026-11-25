@@ -20,6 +20,7 @@ export {
   previewK3RelayOffer,
   redeemK3RelayPairing,
   runK3RelayDevicePairing,
+  saveK3RelayPairedDevice,
 } from "./pairing.ts";
 export {
   type K3RelayTunnel,
@@ -51,3 +52,23 @@ export {
   removeK3RelayAccountHost,
   startK3RelayAccountSignIn,
 } from "./account.ts";
+export { K3RelayAccountOnboarding } from "./accountOnboarding.ts";
+export {
+  type K3RelayAccountConnecting,
+  type K3RelayAccountHostsState,
+  type K3RelayAccountOfferState,
+  type K3RelayAccountPlatform,
+  type K3RelayAccountScreenError,
+  type K3RelayAccountScreenEvent,
+  type K3RelayAccountScreenState,
+  type K3RelayAccountSignInChoices,
+  type K3RelayAccountSignInStep,
+  initialK3RelayAccountScreen,
+  isK3RelayAccountCallback,
+  k3relayAccountCallbackMatches,
+  k3relayAccountScreenError,
+  k3relayAccountScreenErrorText,
+  k3relayAccountSignInChoices,
+  k3relayAccountWebRedirect,
+  reduceK3RelayAccountScreen,
+} from "./accountScreen.ts";
