@@ -873,9 +873,11 @@ const make = Effect.gen(function* () {
     const key = encodeFrame(settings.relay);
     if (key === appliedKey) return yield* publish;
     appliedKey = key;
+    // Tell connected devices why before their sockets go with the connection.
+    const live = [...sessions.values()];
+    for (const session of live) yield* session.close("host-policy");
     if (running !== undefined) yield* Fiber.interrupt(running);
     running = undefined;
-    for (const session of sessions.values()) yield* session.close("host-policy");
     if (!policyAllowed || !settings.relay.enabled) {
       return yield* setConnection({
         status: "disabled",

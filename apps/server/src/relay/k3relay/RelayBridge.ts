@@ -93,7 +93,8 @@ const responseHeaders = (headers: Headers): MuxHeaders => {
 
 const METHODS_WITHOUT_BODY = new Set(["GET", "HEAD"]);
 
-const relayUrl = (path: string) => new URL(path, K3_RELAY_PROVISIONAL_ORIGIN).href;
+// Concatenated, not resolved: a path like `//elsewhere/x` must stay a path on the provisional host.
+const relayUrl = (path: string) => `${K3_RELAY_PROVISIONAL_ORIGIN}${path}`;
 
 const relayedResponse = (response: Response): MuxHttpResponse<MuxStreamStateError> => {
   const body = response.body;
