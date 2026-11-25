@@ -37,6 +37,7 @@ import { leaveSettingsPage } from "../settings/settings-navigation";
 import { workspaceHasColumns } from "../layout/workspace/workspace-selection-store";
 import { m } from "../../i18n/messages";
 import { isK3RelayLink, K3RelayPairingCard } from "./K3RelayPairingCard";
+import { K3RelayAccountCard } from "./K3RelayAccountCard";
 import { pendingK3RelayLinkAtom } from "./k3relayPendingLink";
 
 type ConnectionsNewRouteParams = {
@@ -330,6 +331,20 @@ function PairingForm({
                     ))}
             </Text>
           </View>
+
+          {relayLink === null && !linked && routeFor === undefined ? (
+            <K3RelayAccountCard
+              defaultDeviceName={relayDeviceName}
+              onConnected={() => {
+                void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                if (!navigation.canGoBack()) {
+                  navigation.dispatch(StackActions.replace("Home"));
+                } else {
+                  leaveSettingsPage(navigation, workspaceHasColumns(), "SettingsEnvironments");
+                }
+              }}
+            />
+          ) : null}
 
           {hasCloudPublicConfig() ? <T3ConnectSection /> : null}
         </View>

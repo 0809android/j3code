@@ -32,7 +32,10 @@ vi.mock("@react-navigation/native", () => ({
   useNavigation: () => ({ canGoBack: () => true, goBack: vi.fn(), dispatch: vi.fn() }),
   useRoute: () => ({ name: "ConnectionsNew" }),
 }));
-vi.mock("@effect/atom-react", () => ({ useAtomValue: () => null }));
+vi.mock("@effect/atom-react", () => ({
+  useAtomValue: () => null,
+  useAtom: () => [null, vi.fn()],
+}));
 vi.mock("../cloud/CloudAuthProvider", () => ({
   useCloudAuth: () => ({ isLoaded: false, isSignedIn: false }),
 }));
@@ -81,6 +84,7 @@ vi.mock("../layout/workspace/workspace-selection-store", () => ({
 }));
 vi.mock("../cloud/publicConfig", () => ({ hasCloudPublicConfig: () => false }));
 vi.mock("./CloudEnvironmentRows", () => ({ CloudEnvironmentRows: () => null }));
+vi.mock("./K3RelayAccountCard", () => ({ K3RelayAccountCard: () => null }));
 vi.mock("./environmentSections", () => ({
   splitEnvironmentSections: () => ({ connectedCloudEnvironments: [] }),
 }));
