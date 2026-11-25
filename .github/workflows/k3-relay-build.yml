@@ -63,12 +63,12 @@ jobs:
   build:
     name: Build and attest the image
     needs: data-inventory
-    # Fork pull requests get no secrets and must not reach the self-hosted runner.
+    # Fork pull requests get no secrets and the image is built on GitHub-hosted runners (the self-hosted runner group does not serve public repositories).
     if: >-
       github.repository == 'kinocode-jp/k3code' &&
       (github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository)
-    runs-on: [self-hosted, Linux, ARM64, shared-build, oci]
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
       contents: read
@@ -87,11 +87,11 @@ jobs:
             !/.repos/
           sparse-checkout-cone-mode: false
 
-      # The runner is arm64; amd64 is built under emulation.
+      # The hosted runner is amd64; arm64 is built under emulation.
       - name: Set up QEMU
         uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
         with:
-          platforms: amd64
+          platforms: arm64
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
@@ -190,7 +190,7 @@ jobs:
     name: Rebuild and compare digests
     needs: build
     if: needs.build.outputs.pushed == 'true'
-    runs-on: [self-hosted, Linux, ARM64, shared-build, oci]
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     continue-on-error: true
     permissions:
@@ -207,7 +207,7 @@ jobs:
       - name: Set up QEMU
         uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
         with:
-          platforms: amd64
+          platforms: arm64
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1

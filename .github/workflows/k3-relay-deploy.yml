@@ -39,7 +39,7 @@ jobs:
   deploy:
     name: Deploy to the OCI VM
     if: github.repository == 'kinocode-jp/k3code'
-    runs-on: [self-hosted, Linux, ARM64, shared-build, oci]
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment:
       name: k3-relay-prod
