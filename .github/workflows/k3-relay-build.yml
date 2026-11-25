@@ -48,6 +48,7 @@ jobs:
             /pnpm-workspace.yaml
             /package.json
             /infra/k3-relay/
+            !/.repos/
           sparse-checkout-cone-mode: false
 
       - name: Setup Node.js
@@ -85,6 +86,7 @@ jobs:
           persist-credentials: false
           sparse-checkout: |
             /infra/k3-relay/
+            !/.repos/
           sparse-checkout-cone-mode: false
 
       # The runner is arm64; amd64 is built under emulation.
@@ -202,6 +204,7 @@ jobs:
           persist-credentials: false
           sparse-checkout: |
             /infra/k3-relay/
+            !/.repos/
           sparse-checkout-cone-mode: false
 
       - name: Set up QEMU

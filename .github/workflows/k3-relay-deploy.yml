@@ -114,6 +114,7 @@ jobs:
           persist-credentials: false
           sparse-checkout: |
             /infra/k3-relay/
+            !/.repos/
           sparse-checkout-cone-mode: false
 
       - name: Prepare SSH
