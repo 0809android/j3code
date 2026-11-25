@@ -1,60 +1,78 @@
-import type {
-  K3RelayHostApi,
-  K3RelayHostApiError,
-  K3RelayHostState,
-} from "@t3tools/client-runtime/k3relay";
-import type { EnvironmentId } from "@t3tools/contracts";
-import * as Effect from "effect/Effect";
-import * as Fiber from "effect/Fiber";
-import * as Stream from "effect/Stream";
-import { createContext, type ReactNode, useContext, useEffect, useState } from "react";
+import { createK3RelayEnvironmentAtoms } from "@t3tools/client-runtime/state/k3relay";
+import {
+  isAtomCommandInterrupted,
+  squashAtomCommandFailure,
+  type AtomCommandResult,
+} from "@t3tools/client-runtime/state/runtime";
+import type { EnvironmentId, K3RelayHostState, K3RelayPairingOffer } from "@t3tools/contracts";
+import { useMessages } from "gt-react";
 
-export type K3RelayHostApiResolver = (environmentId: EnvironmentId) => K3RelayHostApi | null;
+import { connectionAtomRuntime } from "../connection/runtime";
+import { useEnvironmentQuery } from "../state/query";
+import { serverEnvironment } from "../state/server";
+import { useAtomCommand } from "../state/use-atom-command";
 
-/**
- * Until the host's relay RPCs land in `packages/contracts`, no environment offers the relay and
- * the settings section stays hidden. Tests and local development provide a fake here.
- */
-const resolveNone: K3RelayHostApiResolver = () => null;
-
-const K3RelayHostApiContext = createContext<K3RelayHostApiResolver>(resolveNone);
-
-export function K3RelayHostApiProvider({
-  resolve,
-  children,
-}: {
-  readonly resolve: K3RelayHostApiResolver;
-  readonly children: ReactNode;
-}) {
-  return <K3RelayHostApiContext value={resolve}>{children}</K3RelayHostApiContext>;
-}
-
-export function useK3RelayHostApi(environmentId: EnvironmentId | null): K3RelayHostApi | null {
-  const resolve = useContext(K3RelayHostApiContext);
-  return environmentId === null ? null : resolve(environmentId);
-}
+/** The host's relay over its RPCs; on/off and the URL are server settings. */
+export const k3RelayEnvironment = createK3RelayEnvironmentAtoms(connectionAtomRuntime);
 
 export interface K3RelayHostStateView {
   readonly state: K3RelayHostState | null;
   readonly error: string | null;
 }
 
-export function useK3RelayHostState(api: K3RelayHostApi | null): K3RelayHostStateView {
-  const [view, setView] = useState<K3RelayHostStateView>({ state: null, error: null });
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- subscribes to the host's relay state stream
-  useEffect(() => {
-    if (api === null) return;
-    const fiber = Effect.runFork(
-      api.state.pipe(
-        Stream.runForEach((state) => Effect.sync(() => setView({ state, error: null }))),
-        Effect.catch((error: K3RelayHostApiError) =>
-          Effect.sync(() => setView((current) => ({ ...current, error: error.detail }))),
-        ),
-      ),
-    );
-    return () => {
-      Effect.runFork(Fiber.interrupt(fiber));
-    };
-  }, [api]);
-  return api === null ? { state: null, error: null } : view;
+/** The host's live relay state. Nothing until the first state, so hosts without it show nothing. */
+export function useK3RelayHostState(environmentId: EnvironmentId | null): K3RelayHostStateView {
+  const resolve = useMessages();
+  const query = useEnvironmentQuery(
+    environmentId === null ? null : k3RelayEnvironment.state({ environmentId, input: {} }),
+    resolve,
+  );
+  return { state: query.data, error: query.data === null ? query.error : null };
+}
+
+/** A failed call's message, or null when it succeeded or was cut off. */
+export type K3RelayHostCall<A = unknown> = Promise<
+  { readonly ok: true; readonly value: A } | { readonly ok: false; readonly error: string | null }
+>;
+
+const settle = async <A, E>(pending: Promise<AtomCommandResult<A, E>>): K3RelayHostCall<A> => {
+  const result = await pending;
+  if (result._tag === "Success") return { ok: true, value: result.value };
+  if (isAtomCommandInterrupted(result)) return { ok: false, error: null };
+  const error = squashAtomCommandFailure(result);
+  return { ok: false, error: error instanceof Error ? error.message : String(error) };
+};
+
+export interface K3RelayHostActions {
+  readonly setEnabled: (enabled: boolean) => K3RelayHostCall;
+  readonly setRelayUrl: (url: string) => K3RelayHostCall;
+  readonly createOffer: () => K3RelayHostCall<K3RelayPairingOffer>;
+  readonly cancelOffer: () => K3RelayHostCall;
+  readonly approve: (deviceId: string) => K3RelayHostCall;
+  readonly reject: () => K3RelayHostCall;
+  readonly revoke: (deviceId: string) => K3RelayHostCall;
+  readonly rename: (deviceId: string, name: string) => K3RelayHostCall;
+}
+
+export function useK3RelayHostActions(environmentId: EnvironmentId): K3RelayHostActions {
+  const options = { reportFailure: false } as const;
+  const updateSettings = useAtomCommand(serverEnvironment.updateSettings, options);
+  const createPairingOffer = useAtomCommand(k3RelayEnvironment.createPairingOffer, options);
+  const cancelPairing = useAtomCommand(k3RelayEnvironment.cancelPairing, options);
+  const approvePairing = useAtomCommand(k3RelayEnvironment.approvePairing, options);
+  const rejectPairing = useAtomCommand(k3RelayEnvironment.rejectPairing, options);
+  const revokeDevice = useAtomCommand(k3RelayEnvironment.revokeDevice, options);
+  const renameDevice = useAtomCommand(k3RelayEnvironment.renameDevice, options);
+  return {
+    setEnabled: (enabled) =>
+      settle(updateSettings({ environmentId, input: { patch: { relay: { enabled } } } })),
+    setRelayUrl: (url) =>
+      settle(updateSettings({ environmentId, input: { patch: { relay: { url } } } })),
+    createOffer: () => settle(createPairingOffer({ environmentId, input: {} })),
+    cancelOffer: () => settle(cancelPairing({ environmentId, input: {} })),
+    approve: (deviceId) => settle(approvePairing({ environmentId, input: { deviceId } })),
+    reject: () => settle(rejectPairing({ environmentId, input: {} })),
+    revoke: (deviceId) => settle(revokeDevice({ environmentId, input: { deviceId } })),
+    rename: (deviceId, name) => settle(renameDevice({ environmentId, input: { deviceId, name } })),
+  };
 }

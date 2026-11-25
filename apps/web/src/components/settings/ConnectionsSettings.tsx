@@ -1535,7 +1535,11 @@ function ConnectionsSettingsContent({
               requestRevoke={requestConnectRevoke}
             />
           ) : null}
-          <K3RelaySettings environmentId={accessEnvironmentId} canWrite={canWriteAccess} />
+          <K3RelaySettings
+            environmentId={accessEnvironmentId}
+            canWrite={canWriteAccess}
+            networkAccessEnabled={isLocalBackendNetworkAccessible}
+          />
           <RevokeConnectDeviceDialog
             request={pendingConnectRevoke}
             onClose={() => setPendingConnectRevoke(null)}

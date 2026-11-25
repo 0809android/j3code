@@ -1,4 +1,4 @@
-import type { K3RelayHostState } from "@t3tools/client-runtime/k3relay";
+import type { K3RelayHostState } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { userEvent } from "vite-plus/test/browser";
 
@@ -9,13 +9,19 @@ const NOW = 1_800_000_000_000;
 
 const baseState: K3RelayHostState = {
   enabled: true,
-  relayUrl: "https://relay.k3.kinocode.jp/",
-  status: "online",
-  statusDetail: null,
-  allowedByPolicy: true,
-  networkAccessEnabled: true,
-  offer: null,
-  pending: null,
+  policyAllowed: true,
+  transportPolicyAllowed: true,
+  relayUrl: "wss://relay.k3.kinocode.jp",
+  status: "connected",
+  error: null,
+  registered: true,
+  hostId: "h".repeat(32),
+  activeSessions: 0,
+  connectedDevices: 0,
+  maxSessions: 8,
+  reachableWhenNetworkAccessOff: true,
+  requireApproval: true,
+  pairing: { phase: "idle" },
   devices: [],
 };
 
@@ -38,12 +44,15 @@ describe("K3RelaySettingsView", () => {
       <K3RelaySettingsView
         canWrite
         busy={false}
+        offer={null}
+        networkAccessEnabled
         actions={actions}
         state={{
           ...baseState,
-          pending: {
+          pairing: {
+            phase: "awaiting-approval",
             deviceId: "d".repeat(32),
-            name: "Kino's phone",
+            deviceName: "Kino's phone",
             alg: "ed25519",
             confirmationCode: "K7QM-2XFD",
             approvalDeadline: NOW + 600_000,
@@ -60,7 +69,7 @@ describe("K3RelaySettingsView", () => {
     await screen.getByRole("button", { name: "Approve" }).click();
     expect(actions.approve).toHaveBeenCalledWith("d".repeat(32));
     await screen.getByRole("button", { name: "Reject" }).click();
-    expect(actions.reject).toHaveBeenCalledWith("d".repeat(32));
+    expect(actions.reject).toHaveBeenCalled();
   });
 
   it("warns about hijacking before showing the offer as a link", async () => {
@@ -68,11 +77,16 @@ describe("K3RelaySettingsView", () => {
       <K3RelaySettingsView
         canWrite
         busy={false}
-        actions={makeActions()}
-        state={{
-          ...baseState,
-          offer: { link: "k3relay://pair?v=1#s=secret", expiresAt: NOW + 300_000 },
+        offer={{
+          link: "k3relay://pair?v=1#s=secret",
+          relayUrl: "https://relay.k3.kinocode.jp",
+          hostId: "h".repeat(32),
+          hostIdentityKey: "k".repeat(43),
+          expiresAt: NOW + 300_000,
         }}
+        networkAccessEnabled
+        actions={makeActions()}
+        state={{ ...baseState, pairing: { phase: "open", expiresAt: NOW + 300_000 } }}
       />,
     );
     await expect.element(screen.getByTestId("k3relay-offer")).toBeVisible();
@@ -90,6 +104,8 @@ describe("K3RelaySettingsView", () => {
       <K3RelaySettingsView
         canWrite
         busy={false}
+        offer={null}
+        networkAccessEnabled
         actions={actions}
         state={{
           ...baseState,
@@ -98,17 +114,21 @@ describe("K3RelaySettingsView", () => {
               deviceId: "a".repeat(32),
               name: "Old laptop",
               alg: "ed25519",
-              approvedAt: NOW - 86_400_000,
-              revokedAt: NOW,
+              createdAt: NOW - 86_400_000,
               lastSeenAt: null,
+              status: "revoked",
+              revokedAt: NOW,
+              connectedSessions: 0,
             },
             {
               deviceId: "b".repeat(32),
               name: "Phone",
               alg: "p256",
-              approvedAt: NOW,
-              revokedAt: null,
+              createdAt: NOW,
               lastSeenAt: null,
+              status: "active",
+              revokedAt: null,
+              connectedSessions: 0,
             },
           ],
         }}
@@ -127,8 +147,15 @@ describe("K3RelaySettingsView", () => {
       <K3RelaySettingsView
         canWrite
         busy={false}
+        offer={null}
+        networkAccessEnabled={false}
         actions={makeActions()}
-        state={{ ...baseState, enabled: false, status: "disabled", networkAccessEnabled: false }}
+        state={{
+          ...baseState,
+          enabled: false,
+          status: "disabled",
+          reachableWhenNetworkAccessOff: false,
+        }}
       />,
     );
     await expect.element(screen.getByTestId("k3relay-status")).toHaveTextContent("Off");
@@ -141,8 +168,10 @@ describe("K3RelaySettingsView", () => {
       <K3RelaySettingsView
         canWrite
         busy={false}
+        offer={null}
+        networkAccessEnabled={false}
         actions={makeActions()}
-        state={{ ...baseState, networkAccessEnabled: false }}
+        state={baseState}
       />,
     );
     await expect.element(screen.getByText("Network access is off")).toBeVisible();

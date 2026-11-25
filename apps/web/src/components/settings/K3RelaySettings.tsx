@@ -1,16 +1,20 @@
 import type {
-  K3RelayHostApi,
-  K3RelayHostDevice,
+  EnvironmentId,
+  K3RelayConnectionError,
+  K3RelayConnectionStatus,
+  K3RelayDevice,
   K3RelayHostState,
-  K3RelayHostStatus,
-} from "@t3tools/client-runtime/k3relay";
-import type { EnvironmentId } from "@t3tools/contracts";
-import * as Effect from "effect/Effect";
+  K3RelayPairingOffer,
+} from "@t3tools/contracts";
 import { AlertTriangleIcon, RadioTowerIcon } from "lucide-react";
 import { T, useGT, Var } from "gt-react";
 import { useState } from "react";
 
-import { useK3RelayHostApi, useK3RelayHostState } from "~/k3relay/hostApi";
+import {
+  type K3RelayHostCall,
+  useK3RelayHostActions,
+  useK3RelayHostState,
+} from "~/k3relay/hostApi";
 import { Alert, AlertDescription } from "../ui/alert";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -23,11 +27,11 @@ import { SettingsRow, SettingsSection } from "./settingsLayout";
 
 type GT = ReturnType<typeof useGT>;
 
-function statusLabel(status: K3RelayHostStatus, gt: GT): string {
+function statusLabel(status: K3RelayConnectionStatus, gt: GT): string {
   switch (status) {
-    case "online":
+    case "connected":
       return gt("Online", { $context: "relay connection status" });
-    case "offline":
+    case "disconnected":
       return gt("Offline", { $context: "relay connection status" });
     case "connecting":
       return gt("Connecting", { $context: "relay connection status" });
@@ -38,14 +42,33 @@ function statusLabel(status: K3RelayHostStatus, gt: GT): string {
   }
 }
 
-const statusVariant = (status: K3RelayHostStatus) =>
-  status === "online"
+const statusVariant = (status: K3RelayConnectionStatus) =>
+  status === "connected"
     ? "success"
     : status === "error"
       ? "error"
-      : status === "offline"
+      : status === "disconnected"
         ? "warning"
         : "outline";
+
+function errorText(error: K3RelayConnectionError, gt: GT): string {
+  switch (error) {
+    case "policy-disallowed":
+      return gt("A managed policy does not allow relay connections on this machine.");
+    case "invalid-url":
+      return gt("The relay server address is not a valid wss:// or https:// URL.");
+    case "registration-failed":
+      return gt("The relay did not accept this machine's registration. It will try again.");
+    case "unauthorized":
+      return gt("The relay no longer recognizes this machine. It will register again.");
+    case "blocked":
+      return gt("The relay operator has blocked this machine.");
+    case "network":
+      return gt("This machine can't reach the relay. It will keep trying.");
+    case "identity-unavailable":
+      return gt("This machine's identity key could not be loaded.");
+  }
+}
 
 const formatTime = (epochMs: number) =>
   new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(epochMs);
@@ -56,7 +79,7 @@ export interface K3RelaySettingsActions {
   readonly createOffer: () => void;
   readonly cancelOffer: () => void;
   readonly approve: (deviceId: string) => void;
-  readonly reject: (deviceId: string) => void;
+  readonly reject: () => void;
   readonly revoke: (deviceId: string) => void;
   readonly rename: (deviceId: string, name: string) => void;
 }
@@ -64,11 +87,16 @@ export interface K3RelaySettingsActions {
 /** Stateless, so each state (pending approval, revoked, off) renders directly in tests. */
 export function K3RelaySettingsView({
   state,
+  offer,
+  networkAccessEnabled,
   canWrite,
   busy,
   actions,
 }: {
   readonly state: K3RelayHostState;
+  /** The link from this client's own `createPairingOffer`; the host never broadcasts the secret. */
+  readonly offer: K3RelayPairingOffer | null;
+  readonly networkAccessEnabled: boolean;
   readonly canWrite: boolean;
   readonly busy: boolean;
   readonly actions: K3RelaySettingsActions;
@@ -78,10 +106,15 @@ export function K3RelaySettingsView({
   const [showLink, setShowLink] = useState(false);
   const [renaming, setRenaming] = useState<{ deviceId: string; name: string } | null>(null);
   const disabled = !canWrite || busy;
-  const activeDevices = state.devices.filter((device) => device.revokedAt === null);
-  const revokedDevices = state.devices.filter((device) => device.revokedAt !== null);
+  const activeDevices = state.devices.filter((device) => device.status === "active");
+  const revokedDevices = state.devices.filter((device) => device.status === "revoked");
+  const pending = state.pairing.phase === "awaiting-approval" ? state.pairing : null;
+  const openOffer =
+    state.pairing.phase === "open" && offer !== null && offer.expiresAt === state.pairing.expiresAt
+      ? offer
+      : null;
 
-  const renderDevice = (device: K3RelayHostDevice) => (
+  const renderDevice = (device: K3RelayDevice) => (
     <div key={device.deviceId} className={ITEM_ROW_CLASSNAME} data-testid="k3relay-device">
       <div className={ITEM_ROW_INNER_CLASSNAME}>
         <div className="min-w-0 flex-1 space-y-0.5">
@@ -109,23 +142,23 @@ export function K3RelaySettingsView({
             <p className="truncate text-sm font-medium text-foreground">{device.name}</p>
           )}
           <p className="text-xs text-muted-foreground">
-            {device.revokedAt !== null ? (
+            {device.revokedAt !== null && device.status === "revoked" ? (
               <T>
                 Revoked <Var>{formatTime(device.revokedAt)}</Var>
               </T>
             ) : device.lastSeenAt !== null ? (
               <T>
-                Approved <Var>{formatTime(device.approvedAt)}</Var> · last seen{" "}
+                Approved <Var>{formatTime(device.createdAt)}</Var> · last seen{" "}
                 <Var>{formatTime(device.lastSeenAt)}</Var>
               </T>
             ) : (
               <T>
-                Approved <Var>{formatTime(device.approvedAt)}</Var>
+                Approved <Var>{formatTime(device.createdAt)}</Var>
               </T>
             )}
           </p>
         </div>
-        {device.revokedAt === null && renaming?.deviceId !== device.deviceId ? (
+        {device.status === "active" && renaming?.deviceId !== device.deviceId ? (
           <div className="flex shrink-0 items-center gap-2">
             <Button
               size="xs"
@@ -169,19 +202,19 @@ export function K3RelaySettingsView({
         control={
           <Switch
             checked={state.enabled}
-            disabled={disabled || !state.allowedByPolicy}
+            disabled={disabled || !state.policyAllowed}
             onCheckedChange={(checked) => actions.setEnabled(checked)}
             aria-label={gt("Turn the relay on or off")}
           />
         }
       />
-      {!state.allowedByPolicy ? (
+      {!state.policyAllowed ? (
         <SettingsRow
           title={gt("Turned off by your organization")}
           description={gt("A managed policy does not allow relay connections on this machine.")}
         />
       ) : null}
-      {state.enabled && !state.networkAccessEnabled ? (
+      {state.reachableWhenNetworkAccessOff && !networkAccessEnabled ? (
         <SettingsRow
           title={gt("Network access is off")}
           description={gt(
@@ -189,8 +222,11 @@ export function K3RelaySettingsView({
           )}
         />
       ) : null}
-      {state.status === "error" && state.statusDetail !== null ? (
-        <SettingsRow title={gt("The relay reported a problem")} description={state.statusDetail} />
+      {state.policyAllowed && state.enabled && state.error !== null ? (
+        <SettingsRow
+          title={gt("The relay reported a problem")}
+          description={errorText(state.error, gt)}
+        />
       ) : null}
       <SettingsRow
         title={gt("Relay server")}
@@ -226,15 +262,15 @@ export function K3RelaySettingsView({
 
       {state.enabled ? (
         <div className={ITEM_ROW_CLASSNAME}>
-          {state.pending !== null ? (
+          {pending !== null ? (
             <div className="space-y-3" data-testid="k3relay-pending">
               <p className="text-sm font-medium text-foreground">
                 <T>
-                  <Var>{state.pending.name}</Var> wants to connect
+                  <Var>{pending.deviceName}</Var> wants to connect
                 </T>
               </p>
               <p className="font-mono text-2xl font-semibold tracking-widest text-foreground tabular-nums">
-                {state.pending.confirmationCode}
+                {pending.confirmationCode}
               </p>
               <p className="text-xs leading-relaxed text-muted-foreground">
                 <T>
@@ -247,27 +283,27 @@ export function K3RelaySettingsView({
                   size="xs"
                   variant="destructive-outline"
                   disabled={disabled}
-                  onClick={() => actions.reject(state.pending!.deviceId)}
+                  onClick={actions.reject}
                 >
                   <T>Reject</T>
                 </Button>
                 <Button
                   size="xs"
                   disabled={disabled}
-                  onClick={() => actions.approve(state.pending!.deviceId)}
+                  onClick={() => actions.approve(pending.deviceId)}
                 >
                   <T>Approve</T>
                 </Button>
               </div>
             </div>
-          ) : state.offer !== null ? (
+          ) : openOffer !== null ? (
             <div className="space-y-3" data-testid="k3relay-offer">
               <p className="text-sm font-medium text-foreground">
                 <T>Scan with the new device</T>
               </p>
               <div className="flex justify-center rounded-xl border border-border/60 bg-muted/30 p-4">
                 <QRCodeSvg
-                  value={state.offer.link}
+                  value={openOffer.link}
                   size={148}
                   level="M"
                   marginSize={2}
@@ -276,7 +312,7 @@ export function K3RelaySettingsView({
               </div>
               <p className="text-xs text-muted-foreground">
                 <T>
-                  Valid until <Var>{formatTime(state.offer.expiresAt)}</Var>. Scanning in person is
+                  Valid until <Var>{formatTime(openOffer.expiresAt)}</Var>. Scanning in person is
                   safest.
                 </T>
               </p>
@@ -294,7 +330,7 @@ export function K3RelaySettingsView({
                   </Alert>
                   <Input
                     readOnly
-                    value={state.offer.link}
+                    value={openOffer.link}
                     onFocus={(event) => event.target.select()}
                     aria-label={gt("Relay pairing link")}
                     spellCheck={false}
@@ -335,19 +371,21 @@ export function K3RelaySettingsView({
   );
 }
 
-/** The host's relay settings, shown only where the host offers the relay (see `hostApi`). */
+/** The host's relay settings, shown once the host streams its relay state. */
 export function K3RelaySettings({
   environmentId,
   canWrite,
+  networkAccessEnabled,
 }: {
   readonly environmentId: EnvironmentId;
   readonly canWrite: boolean;
+  readonly networkAccessEnabled: boolean;
 }) {
   const gt = useGT();
-  const api = useK3RelayHostApi(environmentId);
-  const { state, error } = useK3RelayHostState(api);
+  const { state, error } = useK3RelayHostState(environmentId);
+  const host = useK3RelayHostActions(environmentId);
   const [busy, setBusy] = useState(false);
-  if (api === null) return null;
+  const [offer, setOffer] = useState<K3RelayPairingOffer | null>(null);
   if (state === null) {
     return error === null ? null : (
       <SettingsSection id="k3-relay" title={gt("Relay")}>
@@ -356,38 +394,42 @@ export function K3RelaySettings({
     );
   }
   const run =
-    <A extends ReadonlyArray<unknown>>(
+    <A extends ReadonlyArray<unknown>, B>(
       title: string,
-      action: (...args: A) => ReturnType<K3RelayHostApi["approve"]>,
+      action: (...args: A) => K3RelayHostCall<B>,
+      onSuccess?: (value: B) => void,
     ) =>
     (...args: A) => {
       setBusy(true);
-      void Effect.runPromise(
-        action(...args).pipe(
-          Effect.catch((failure) =>
-            Effect.sync(() =>
-              toastManager.add(
-                stackedThreadToast({ type: "error", title, description: failure.detail }),
-              ),
-            ),
-          ),
-          Effect.ensuring(Effect.sync(() => setBusy(false))),
-        ),
-      );
+      void action(...args)
+        .then((result) => {
+          if (result.ok) onSuccess?.(result.value);
+          else if (result.error !== null) {
+            toastManager.add(
+              stackedThreadToast({ type: "error", title, description: result.error }),
+            );
+          }
+        })
+        .finally(() => setBusy(false));
     };
   const actions = {
-    setEnabled: run(gt("Could not change the relay"), (enabled: boolean) =>
-      api.setEnabled(enabled),
-    ),
-    setRelayUrl: run(gt("Could not save the relay address"), (url: string) => api.setRelayUrl(url)),
-    createOffer: run(gt("Could not create a pairing code"), () => Effect.asVoid(api.createOffer)),
-    cancelOffer: run(gt("Could not cancel pairing"), () => api.cancelOffer),
-    approve: run(gt("Could not approve the device"), (id: string) => api.approve(id)),
-    reject: run(gt("Could not reject the device"), (id: string) => api.reject(id)),
-    revoke: run(gt("Could not revoke the device"), (id: string) => api.revokeDevice(id)),
-    rename: run(gt("Could not rename the device"), (id: string, name: string) =>
-      api.renameDevice(id, name),
-    ),
+    setEnabled: run(gt("Could not change the relay"), host.setEnabled),
+    setRelayUrl: run(gt("Could not save the relay address"), host.setRelayUrl),
+    createOffer: run(gt("Could not create a pairing code"), host.createOffer, setOffer),
+    cancelOffer: run(gt("Could not cancel pairing"), host.cancelOffer, () => setOffer(null)),
+    approve: run(gt("Could not approve the device"), host.approve),
+    reject: run(gt("Could not reject the device"), host.reject),
+    revoke: run(gt("Could not revoke the device"), host.revoke),
+    rename: run(gt("Could not rename the device"), host.rename),
   } satisfies K3RelaySettingsActions;
-  return <K3RelaySettingsView state={state} canWrite={canWrite} busy={busy} actions={actions} />;
+  return (
+    <K3RelaySettingsView
+      state={state}
+      offer={offer}
+      networkAccessEnabled={networkAccessEnabled}
+      canWrite={canWrite}
+      busy={busy}
+      actions={actions}
+    />
+  );
 }
