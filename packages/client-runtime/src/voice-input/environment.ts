@@ -16,6 +16,7 @@ import type {
 
 import * as RemoteEnvironmentAuthorization from "../authorization/service.ts";
 import type { PreparedConnection } from "../connection/model.ts";
+import { isK3RelayConnection, k3relayUnsupportedError } from "../k3relay/unsupported.ts";
 import * as ManagedRelay from "../relay/managedRelay.ts";
 import {
   makeEnvironmentHttpApiGroupClient,
@@ -161,6 +162,8 @@ export const transcribeCloudPcm = (
 };
 
 export const getEnvironmentSpeechStreamUrl = (prepared: PreparedConnection) => {
+  // Live dictation authenticates with a media ticket in the URL, which the relay never carries.
+  if (isK3RelayConnection(prepared)) return Effect.fail(k3relayUnsupportedError("voice-input"));
   let endpoint = prepared.httpBaseUrl;
   return request({
     group: "auth",

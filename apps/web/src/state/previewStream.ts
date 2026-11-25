@@ -22,7 +22,11 @@ const previewStreamAccessAtom = Atom.family((environmentId: EnvironmentId) =>
         get(environmentSession.preparedConnectionValueAtom(environmentId)),
       );
       if (prepared === null) return Effect.never;
-      return resolveDeviceHubAccess({ prepared, hubBasePath: PREVIEW_STREAM_BASE_PATH });
+      return resolveDeviceHubAccess({
+        prepared,
+        hubBasePath: PREVIEW_STREAM_BASE_PATH,
+        feature: "preview-stream",
+      });
     })
     .pipe(Atom.setIdleTTL(60_000), Atom.withLabel(`preview-stream-access:${environmentId}`)),
 );
