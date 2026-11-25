@@ -52,11 +52,15 @@ export interface K3RelayTunnel {
   readonly closed: Effect.Effect<MuxConnectionClosedError>;
 }
 
-export const k3relaySocketUrl = (relayUrl: string, hostId: string, pairing: boolean): string => {
+export const k3relaySocketUrl = (
+  relayUrl: string,
+  hostId: string,
+  entrance: boolean | "account",
+): string => {
   const url = new URL(relayUrl);
   url.protocol = url.protocol === "http:" ? "ws:" : "wss:";
   url.pathname = `${url.pathname.replace(/\/+$/u, "")}/v1/client/${hostId}`;
-  url.search = pairing ? "?pairing=1" : "";
+  url.search = entrance === "account" ? "?account=1" : entrance ? "?pairing=1" : "";
   url.hash = "";
   return url.toString();
 };
@@ -95,7 +99,11 @@ export const makeK3RelayE2eeSocket = Effect.fn("K3Relay.makeE2eeSocket")(functio
   },
 ) {
   const raw = yield* Socket.makeWebSocket(
-    k3relaySocketUrl(input.relayUrl, input.hostId, input.admission.kind === "pairing"),
+    k3relaySocketUrl(
+      input.relayUrl,
+      input.hostId,
+      input.admission.kind === "account" ? "account" : input.admission.kind === "pairing",
+    ),
     { openTimeout: RELAY_OPEN_TIMEOUT },
   );
   const socket: E2eeSocket = yield* wrapClientSocketWithE2eeV2(

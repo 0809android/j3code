@@ -1,5 +1,6 @@
 import {
   type RelayGrant,
+  accountClientSigningInput,
   decodeBase64url,
   encodeBase64url,
   relaySigningInput,
@@ -39,6 +40,13 @@ export type K3RelayAdmission =
       readonly hostId: string;
       readonly signer: E2eeDeviceSigner;
       readonly grant: RelayGrant;
+    }
+  /** Through an account (spec §20): a relay ticket instead of a grant; the host still decides. */
+  | {
+      readonly kind: "account";
+      readonly hostId: string;
+      readonly signer: E2eeDeviceSigner;
+      readonly ticket: string;
     };
 
 const readFailure = (cause: unknown) =>
@@ -121,6 +129,31 @@ export const admitK3RelaySocket = (
               alg: signer.alg,
               dk: encodeBase64url(signer.publicKey),
               grant,
+              sig: encodeBase64url(sig),
+            }),
+          );
+        }
+        if (admission.kind === "account") {
+          const challenge = yield* expect("nonce");
+          const nonce = decodeBase64url(challenge.nonce, 32);
+          if (nonce === null) {
+            return yield* admissionFailure("unauthorized", "The relay sent a malformed nonce.");
+          }
+          const { signer, hostId, ticket } = admission;
+          const deviceId = deviceIdFromPublicKey(signer.alg, signer.publicKey);
+          const sig = yield* signer
+            .sign(accountClientSigningInput(hostId, deviceId, nonce))
+            .pipe(
+              Effect.mapError(() =>
+                admissionFailure("device-key-missing", "The device key could not sign."),
+              ),
+            );
+          yield* writer.write(
+            encodeJson({
+              type: "auth",
+              alg: signer.alg,
+              dk: encodeBase64url(signer.publicKey),
+              token: ticket,
               sig: encodeBase64url(sig),
             }),
           );

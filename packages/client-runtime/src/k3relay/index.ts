@@ -31,3 +31,20 @@ export {
   overTransport,
   renewK3RelayGrant,
 } from "./broker.ts";
+export {
+  K3RelayAccountClientError,
+  K3RelayAccountFailureReason,
+  type K3RelayAccountHost,
+  type K3RelayAccountOffer,
+  type K3RelayAccountPendingSignIn,
+  type K3RelayAccountSession,
+  completeK3RelayAccountSignIn,
+  connectK3RelayAccountHost,
+  deleteK3RelayAccount,
+  fetchK3RelayAccountOffer,
+  k3relayAccountFailureText,
+  k3relayHttpOrigin,
+  listK3RelayAccountHosts,
+  removeK3RelayAccountHost,
+  startK3RelayAccountSignIn,
+} from "./account.ts";
