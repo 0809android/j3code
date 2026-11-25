@@ -1,6 +1,6 @@
 import { msg } from "gt-react";
 import { managedCapabilityDenial } from "@t3tools/client-runtime/contract-labels";
-import { useAuth } from "@clerk/react";
+import { useCloudAuth as useAuth } from "../../cloud/managedAuth";
 import { Link } from "@tanstack/react-router";
 import { AgentFeedbackMode } from "@t3tools/contracts";
 import { T, useGT, useMessages } from "gt-react";
