@@ -303,6 +303,10 @@
       "types": "./src/state/device.ts",
       "default": "./src/state/device.ts"
     },
+    "./state/k3relay": {
+      "types": "./src/state/k3relay.ts",
+      "default": "./src/state/k3relay.ts"
+    },
     "./state/deviceHubAccess": {
       "types": "./src/state/deviceHubAccess.ts",
       "default": "./src/state/deviceHubAccess.ts"
