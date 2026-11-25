@@ -1,18 +1,9 @@
 // @effect-diagnostics nodeBuiltinImport:off -- a standalone Node script: it reads the relay schema and writes Markdown.
 // @effect-diagnostics globalConsole:off
 /**
- * Writes `docs/DATA.md`, the list of everything the relay stores, from the schema in
- * `src/store.ts` (spec section 15, item 4).
- *
- *   node infra/k3-relay/scripts/generate-data-inventory.ts           # rewrite docs/DATA.md
- *   node infra/k3-relay/scripts/generate-data-inventory.ts --check   # fail when docs/DATA.md is stale
- *
- * Needs Node 22.18 or newer (it runs TypeScript directly and uses `node:sqlite`) and no
- * dependencies. The tables and columns come from SQLite itself: the script runs the real
- * `SCHEMA_SQL` against an in-memory database and reads `PRAGMA table_info`. The prose (what
- * each table is for, how long it is kept) lives in the dictionaries below. A table or column
- * with no entry, or an entry with no table or column, is an error, so the schema and this
- * document cannot drift apart without a failing build.
+ * Writes `docs/DATA.md` from the schema in `src/store.ts` (spec section 15, item 4).
+ * Run with `--check` to fail when the file is stale. Needs Node 22.18+ and `node:sqlite`.
+ * Columns come from the real `SCHEMA_SQL`; only the prose notes below are hand-written.
  */
 import * as NodeFS from "node:fs";
 import * as NodeSqlite from "node:sqlite";
