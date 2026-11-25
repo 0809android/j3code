@@ -2,6 +2,7 @@ import { EasDeviceHostConfigs, SimlockDeviceHostConfigs, SshDeviceHostConfigs } 
 import {
   AuthOrchestrationOperateScope,
   AuthAccessWriteScope,
+  AuthRelayConfigureScope,
   AuthSettingsWriteScope,
   AuthProvidersManageScope,
   type AuthEnvironmentScope,
@@ -28,6 +29,7 @@ import { SecretProviderId, SecretProviderSlug } from "./secretReference.ts";
 import { containsSecretReference, SettingsSecretValue } from "./settingsSecretValue.ts";
 import { EnvironmentMachineKind, ThreadEnvMode, WorktreeSubmodules } from "./environment.ts";
 import { KeybindingShortcut } from "./keybindings.ts";
+import { K3RelaySettings, K3RelaySettingsPatch } from "./k3Relay.ts";
 import {
   CustomModelSetting,
   DEFAULT_TEXT_GENERATION_MODEL,
@@ -1431,6 +1433,10 @@ export const ServerSettings = Schema.Struct({
   ),
   /** Application-layer E2EE for remote WebSocket clients. */
   e2eeMode: E2eeMode.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_E2EE_MODE))),
+  /** The K3 relay: this host dials out to it, so devices reach it without a public address. */
+  relay: K3RelaySettings.pipe(
+    Schema.withDecodingDefault(Effect.succeed(Schema.decodeSync(K3RelaySettings)({}))),
+  ),
 
   enableAgentBrowserAccess: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   /** Lets clients reach this machine's loopback ports over `/api/preview/tunnel`. */
@@ -1901,6 +1907,7 @@ export const ServerSettingsPatch = Schema.Struct({
   requireConnectDeviceApproval: Schema.optionalKey(Schema.Boolean),
   remoteTransportPolicy: Schema.optionalKey(RemoteTransportPolicy),
   e2eeMode: Schema.optionalKey(E2eeMode),
+  relay: Schema.optionalKey(K3RelaySettingsPatch),
   enableAgentBrowserAccess: Schema.optionalKey(Schema.Boolean),
   enablePreviewTunnel: Schema.optionalKey(Schema.Boolean),
   cloudSpeechCredentials: Schema.optionalKey(
@@ -2050,9 +2057,12 @@ export function requiredScopesForServerSettingsPatch(
   let changesProviders = false;
   let changesSettings = false;
   let changesAccess = false;
+  let changesRelay = false;
   for (const [key, value] of Object.entries(patch)) {
     if (value === undefined) continue;
-    if (key === "requireConnectDeviceApproval" || key === "enablePreviewTunnel") {
+    if (key === "relay") {
+      changesRelay = true;
+    } else if (key === "requireConnectDeviceApproval" || key === "enablePreviewTunnel") {
       changesAccess = true;
     } else if (
       key === "remoteTransportPolicy" ||
@@ -2075,9 +2085,13 @@ export function requiredScopesForServerSettingsPatch(
     changesSettings = true;
   }
   return [
-    ...(changesSettings || (!changesProviders && !changesAccess) ? [AuthSettingsWriteScope] : []),
+    ...(changesSettings || (!changesProviders && !changesAccess && !changesRelay)
+      ? [AuthSettingsWriteScope]
+      : []),
     ...(changesProviders ? [AuthProvidersManageScope] : []),
     ...(changesAccess ? [AuthAccessWriteScope] : []),
+    // The relay opens this host to devices elsewhere, as linking T3 Connect does.
+    ...(changesRelay ? [AuthRelayConfigureScope] : []),
   ];
 }
 

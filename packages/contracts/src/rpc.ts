@@ -92,6 +92,14 @@ import {
   AuthAccessStreamEvent,
   EnvironmentAuthorizationError,
 } from "./auth.ts";
+import {
+  K3RelayDevice,
+  K3RelayDeviceInput,
+  K3RelayError,
+  K3RelayHostState,
+  K3RelayPairingOffer,
+  K3RelayRenameDeviceInput,
+} from "./k3Relay.ts";
 import { ClientActivityReportInput } from "./background.ts";
 import {
   FilesystemGetMetadataInput,
@@ -749,6 +757,15 @@ export const WS_METHODS = {
   subscribeServerLifecycle: "subscribeServerLifecycle",
   subscribeAuthAccess: "subscribeAuthAccess",
   subscribeResourceTelemetry: "subscribeResourceTelemetry",
+
+  // K3 relay host
+  k3RelaySubscribe: "k3relay.subscribe",
+  k3RelayCreatePairingOffer: "k3relay.createPairingOffer",
+  k3RelayCancelPairing: "k3relay.cancelPairing",
+  k3RelayApprovePairing: "k3relay.approvePairing",
+  k3RelayRejectPairing: "k3relay.rejectPairing",
+  k3RelayRevokeDevice: "k3relay.revokeDevice",
+  k3RelayRenameDevice: "k3relay.renameDevice",
 } as const;
 
 const WsServerUpsertKeybindingRpc = Rpc.make(WS_METHODS.serverUpsertKeybinding, {
@@ -2476,6 +2493,50 @@ const WsSubscribeAuthAccessRpc = Rpc.make(WS_METHODS.subscribeAuthAccess, {
   stream: true,
 });
 
+const K3RelayRpcError = Schema.Union([K3RelayError, EnvironmentAuthorizationError]);
+
+const WsK3RelaySubscribeRpc = Rpc.make(WS_METHODS.k3RelaySubscribe, {
+  payload: Schema.Struct({}),
+  success: K3RelayHostState,
+  error: EnvironmentAuthorizationError,
+  stream: true,
+});
+
+const WsK3RelayCreatePairingOfferRpc = Rpc.make(WS_METHODS.k3RelayCreatePairingOffer, {
+  payload: Schema.Struct({}),
+  success: K3RelayPairingOffer,
+  error: K3RelayRpcError,
+});
+
+const WsK3RelayCancelPairingRpc = Rpc.make(WS_METHODS.k3RelayCancelPairing, {
+  payload: Schema.Struct({}),
+  error: K3RelayRpcError,
+});
+
+/** Names the device the user compared codes for, so a newer claim is never approved by accident. */
+const WsK3RelayApprovePairingRpc = Rpc.make(WS_METHODS.k3RelayApprovePairing, {
+  payload: K3RelayDeviceInput,
+  success: K3RelayDevice,
+  error: K3RelayRpcError,
+});
+
+const WsK3RelayRejectPairingRpc = Rpc.make(WS_METHODS.k3RelayRejectPairing, {
+  payload: Schema.Struct({}),
+  error: K3RelayRpcError,
+});
+
+const WsK3RelayRevokeDeviceRpc = Rpc.make(WS_METHODS.k3RelayRevokeDevice, {
+  payload: K3RelayDeviceInput,
+  success: K3RelayDevice,
+  error: K3RelayRpcError,
+});
+
+const WsK3RelayRenameDeviceRpc = Rpc.make(WS_METHODS.k3RelayRenameDevice, {
+  payload: K3RelayRenameDeviceInput,
+  success: K3RelayDevice,
+  error: K3RelayRpcError,
+});
+
 const WsSubscribeResourceTelemetryRpc = Rpc.make(WS_METHODS.subscribeResourceTelemetry, {
   payload: Schema.Struct({}),
   success: ResourceTelemetrySnapshot,
@@ -2726,6 +2787,13 @@ export const WsRpcGroup = RpcGroup.make(
   WsSubscribeServerLifecycleRpc,
   WsSubscribeAuthAccessRpc,
   WsSubscribeResourceTelemetryRpc,
+  WsK3RelaySubscribeRpc,
+  WsK3RelayCreatePairingOfferRpc,
+  WsK3RelayCancelPairingRpc,
+  WsK3RelayApprovePairingRpc,
+  WsK3RelayRejectPairingRpc,
+  WsK3RelayRevokeDeviceRpc,
+  WsK3RelayRenameDeviceRpc,
   WsOrchestrationV2DispatchCommandRpc,
   WsOrchestrationV2GetWorkflowScriptRpc,
   WsOrchestrationV2GetNativeChildWorkRpc,

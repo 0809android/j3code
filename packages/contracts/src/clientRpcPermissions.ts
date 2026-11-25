@@ -7,6 +7,7 @@ import {
   AuthOrchestrationReadScope,
   AuthPreviewOperateScope,
   AuthProvidersManageScope,
+  AuthRelayConfigureScope,
   AuthSettingsWriteScope,
   AuthSourceControlWriteScope,
   AuthTerminalOperateScope,
@@ -17,6 +18,13 @@ import { WS_METHODS } from "./rpc.ts";
 
 /** Incremental client enforcement; the server still authorizes every request. */
 export const CLIENT_GUARDED_RPC_SCOPES = {
+  // Who may reach this host through the K3 relay is the owner's call, as linking T3 Connect is.
+  [WS_METHODS.k3RelayCreatePairingOffer]: AuthRelayConfigureScope,
+  [WS_METHODS.k3RelayCancelPairing]: AuthRelayConfigureScope,
+  [WS_METHODS.k3RelayApprovePairing]: AuthRelayConfigureScope,
+  [WS_METHODS.k3RelayRejectPairing]: AuthRelayConfigureScope,
+  [WS_METHODS.k3RelayRevokeDevice]: AuthRelayConfigureScope,
+  [WS_METHODS.k3RelayRenameDevice]: AuthRelayConfigureScope,
   [WS_METHODS.providerAuthRemoveMethod]: AuthProvidersManageScope,
   // An MCP sign-in stores a credential for the agent, as an account sign-in does.
   [WS_METHODS.providerMcpSignInStart]: AuthProvidersManageScope,
