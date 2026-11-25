@@ -78,7 +78,8 @@ export interface K3RelaySettingsActions {
   readonly setRelayUrl: (relayUrl: string) => void;
   readonly createOffer: () => void;
   readonly cancelOffer: () => void;
-  readonly approve: (deviceId: string) => void;
+  /** With the compared code, or without one when the host offered one tap. */
+  readonly approve: (deviceId: string, confirmationCode?: string) => void;
   readonly reject: () => void;
   readonly revoke: (deviceId: string) => void;
   readonly rename: (deviceId: string, name: string) => void;
