@@ -77,17 +77,31 @@ const hostedSegment = (id: string) =>
     (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
   );
 
+const resolveHostedOrigin = (origin: string | null | undefined) =>
+  origin === undefined ? hostedOrigin : hostedAppOrigin(origin);
+
 /**
- * What a person copies to share a thread. With a hosted app (`origin`, else the registered one) it
- * is that app's link, which offers the desktop app, the mobile app, or itself. Without one it is
- * the `t3-thread://` link, which only K3 Code clients open. It never names a service nobody set up.
+ * The thread's link on a hosted app: `origin`, else the registered one. Without a hosted app it is
+ * the `t3-thread://` link, which only K3 Code clients open; it never names a service nobody set up.
  */
 export function hostedThreadLink(ref: ScopedThreadRef, origin?: string | null): string {
-  const hosted = origin === undefined ? hostedOrigin : hostedAppOrigin(origin);
-  if (hosted === undefined)
+  const hosted = resolveHostedOrigin(origin);
+  if (hosted === undefined) {
     return threadLinkHref({ environmentId: ref.environmentId, threadId: ref.threadId });
+  }
   const path = `/threads/${hostedSegment(ref.environmentId)}/${hostedSegment(ref.threadId)}`;
   return new URL(path, hosted).toString();
+}
+
+/**
+ * What Copy thread puts on the clipboard as text: the hosted app's link, which offers the desktop
+ * app, the mobile app, or itself; without a hosted app, a `t3-thread://` autolink. Either one
+ * pastes back into a K3 Code composer as a thread chip.
+ */
+export function copiedThreadLink(ref: ScopedThreadRef, origin?: string | null): string {
+  return resolveHostedOrigin(origin) === undefined
+    ? formatThreadLink(ref)
+    : hostedThreadLink(ref, origin);
 }
 
 const HOSTED_PATH = new RegExp(`^(${HOSTED_SEGMENT})/(${HOSTED_SEGMENT})$`);
@@ -183,16 +197,16 @@ export function formatThreadLink(ref: ThreadLink, label?: string): string {
   return cleaned ? `[${cleaned}](${destination})` : `<${href}>`;
 }
 
-/** What a person copies out of K3 Code: a Markdown link to the thread, see `hostedThreadLink`. */
+/** A Markdown link to the thread, as `copiedThreadLink` chooses its destination. */
 export function formatHostedThreadLink(
   ref: ScopedThreadRef,
   label: string,
   origin?: string,
 ): string {
+  if (resolveHostedOrigin(origin) === undefined) return formatThreadLink(ref, label);
   const href = hostedThreadLink(ref, origin);
   const cleaned = linkLabel(label);
-  const destination = /[()]/.test(href) ? `<${href}>` : href;
-  return cleaned ? `[${cleaned}](${destination})` : href;
+  return cleaned ? `[${cleaned}](${href})` : href;
 }
 
 export function hasThreadLinks(markdown: string): boolean {

@@ -4,6 +4,7 @@ import { mFallback } from "gt-i18n";
 import type { MFunctionType } from "gt-i18n/types";
 
 import {
+  copiedThreadLink,
   formatHostedThreadLink,
   formatThreadLink,
   guessThreadLinkRef,
@@ -327,7 +328,11 @@ describe("thread links without a hosted app", () => {
     expect(formatHostedThreadLink(thread, "Fix [ci]")).toBe(
       "[Fix ci](t3-thread://v2/env-1/thread-1)",
     );
-    expect(formatHostedThreadLink(thread, " ")).toBe("t3-thread://v2/env-1/thread-1");
+    expect(formatHostedThreadLink(thread, " ")).toBe("<t3-thread://v2/env-1/thread-1>");
+    expect(copiedThreadLink(thread)).toBe("<t3-thread://v2/env-1/thread-1>");
+    expect(copiedThreadLink(thread, "https://preview.example.test")).toBe(
+      "https://preview.example.test/threads/env-1/thread-1",
+    );
     expect(formatHostedThreadLink(ref("e", "a(b)"), "x")).toBe("[x](<t3-thread://v2/e/a(b)>)");
     expect(hostedThreadLink(thread, "https://preview.example.test/")).toBe(
       "https://preview.example.test/threads/env-1/thread-1",

@@ -4,7 +4,7 @@ import type {
   ThreadPullRequestLink,
 } from "@t3tools/contracts";
 import { threadContextRecord } from "@t3tools/shared/composerContextReferences";
-import { hostedThreadLink } from "@t3tools/shared/threadLinks";
+import { copiedThreadLink } from "@t3tools/shared/threadLinks";
 
 import { resolveThreadCurrentPullRequestLink } from "./threadPullRequests.ts";
 import { mFallback, msg } from "gt-i18n";
@@ -12,7 +12,7 @@ import type { MFunctionType } from "gt-i18n/types";
 
 export interface ThreadReferenceCopyTarget {
   readonly kind: "pull-request" | "thread";
-  /** The plain text: a PR URL, or a link to the thread (a `t3-thread://` link without a hosted app). */
+  /** The plain text: a PR URL, or a link to the thread (a `t3-thread://` autolink without a hosted app). */
   readonly value: string;
   /** What a toast or palette row shows for the copy. */
   readonly description: string;
@@ -25,7 +25,7 @@ export interface ThreadReferenceCopyTarget {
 
 /**
  * A link to the thread through `hostedAppUrl`, this build's hosted app, if it has one; otherwise
- * the `t3-thread://` link. The clipboard fragment pastes back as a chip into any composer whose
+ * a `t3-thread://` autolink. Either pastes back as a chip into any composer whose
  * agent reads that thread's machine.
  */
 export function threadChipCopyTarget(
@@ -37,7 +37,7 @@ export function threadChipCopyTarget(
   const record = threadContextRecord(threadRef, title);
   return {
     kind: "thread",
-    value: hostedThreadLink(threadRef, hostedAppUrl),
+    value: copiedThreadLink(threadRef, hostedAppUrl),
     description: record.title,
     fragment: { version: 1, source: { environmentId: threadRef.environmentId }, records: [record] },
     clipboardTarget: "thread",
@@ -54,7 +54,7 @@ export function resolveThreadReferenceCopyTarget(
     readonly openPanelPullRequestUrl?: string | null | undefined;
     readonly pullRequests?: ReadonlyArray<ThreadPullRequestLink> | undefined;
     readonly linkedPullRequestUrl?: string | null;
-    readonly hostedAppUrl?: string;
+    readonly hostedAppUrl?: string | undefined;
   },
   resolve: MFunctionType = mFallback,
 ): ThreadReferenceCopyTarget | null {

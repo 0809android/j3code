@@ -101,10 +101,13 @@ describe("resolveThreadReferenceCopyTarget", () => {
         }),
       ],
     });
-    // With no hosted app the plain text is the t3-thread link, and the clipboard fragment above
-    // is what pastes back as a chip.
-    expect(target!.value).toBe("t3-thread://v2/env-1/thread-1");
+    // With no hosted app the plain text is a t3-thread autolink, which pastes back as the chip.
+    expect(target!.value).toBe("<t3-thread://v2/env-1/thread-1>");
     expect(target!.value).not.toContain("t3.codes");
+    expect(threadLinkContextReferences(target!.value, pasted!.records, () => undefined)).toEqual({
+      text: `[Fix the login flow](t3-context://v1/thread/${pasted!.records[0]!.contextId})`,
+      records: pasted!.records,
+    });
   });
 
   it("copies a link through the hosted app and pastes it back as the copied record's chip", () => {
