@@ -3,9 +3,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { ProviderDriverKind } from "@t3tools/contracts";
 import * as ModelCatalog from "@t3tools/provider-core/server/ModelCatalog";
 import * as Effect from "effect/Effect";
-import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
-import * as Path from "effect/Path";
 import * as TestClock from "effect/testing/TestClock";
 import { HttpClient, HttpClientResponse } from "effect/http";
 
@@ -174,79 +172,6 @@ const REMOTE_CLAUDE_MANIFEST: ModelManifest.ModelManifestData = {
     },
   },
 };
-
-const remoteClaudeManifestWithCompatibility = (
-  compatibility: unknown,
-): ModelManifest.ModelManifestData => ({
-  ...REMOTE_CLAUDE_MANIFEST,
-  providers: {
-    claudeAgent: {
-      profiles: REMOTE_CLAUDE_MANIFEST.providers!.claudeAgent!.profiles,
-      models: REMOTE_CLAUDE_MANIFEST.providers!.claudeAgent!.models.map((model) => ({
-        ...model,
-        adapter: { claudeCode: compatibility },
-      })),
-    },
-  },
-});
-
-const INVALID_REMOTE_MANIFESTS: ReadonlyArray<ModelManifest.ModelManifestData> = [
-  {
-    ...REMOTE_CLAUDE_MANIFEST,
-    providers: {
-      claudeAgent: {
-        profiles: {
-          synthetic: {
-            adapter: { claudeCode: { effortMap: { extreme: 123 } } },
-          },
-        },
-        models: REMOTE_CLAUDE_MANIFEST.providers!.claudeAgent!.models,
-      },
-    },
-  },
-  {
-    ...REMOTE_CLAUDE_MANIFEST,
-    providers: {
-      claudeAgent: {
-        profiles: {},
-        models: REMOTE_CLAUDE_MANIFEST.providers!.claudeAgent!.models,
-      },
-    },
-  },
-  {
-    ...REMOTE_CLAUDE_MANIFEST,
-    providers: {
-      claudeAgent: {
-        profiles: REMOTE_CLAUDE_MANIFEST.providers!.claudeAgent!.profiles,
-        models: [
-          ...REMOTE_CLAUDE_MANIFEST.providers!.claudeAgent!.models,
-          {
-            slug: "remote-only-model",
-            name: "Duplicate Remote Model",
-            status: "current",
-            profile: "synthetic",
-          },
-        ],
-      },
-    },
-  },
-  {
-    ...REMOTE_CLAUDE_MANIFEST,
-    providers: {
-      claudeAgent: {
-        defaults: { chat: "absent-model" },
-        profiles: REMOTE_CLAUDE_MANIFEST.providers!.claudeAgent!.profiles,
-        models: REMOTE_CLAUDE_MANIFEST.providers!.claudeAgent!.models,
-      },
-    },
-  },
-  remoteClaudeManifestWithCompatibility({ minVersion: "2.x" }),
-  remoteClaudeManifestWithCompatibility({ maxVersionExclusive: "2.x" }),
-  remoteClaudeManifestWithCompatibility({
-    minVersion: "2.2",
-    maxVersionExclusive: "2.1",
-  }),
-];
 
 const layerHttpClient = (handler: () => Response) =>
   Layer.succeed(
