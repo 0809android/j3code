@@ -31,6 +31,10 @@
       "types": "./src/socketFrameParts.ts",
       "import": "./src/socketFrameParts.ts"
     },
+    "./mux": {
+      "types": "./src/mux/index.ts",
+      "import": "./src/mux/index.ts"
+    },
     "./socketE2ee": {
       "types": "./src/socketE2ee.ts",
       "import": "./src/socketE2ee.ts"
