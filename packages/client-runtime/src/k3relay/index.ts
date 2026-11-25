@@ -8,6 +8,7 @@ export * from "./relayUpload.ts";
 export * from "./status.ts";
 export * from "./unsupported.ts";
 export {
+  type K3RelayIntroducedOutcome,
   K3RelayOnboarding,
   K3RelayPairingError,
   K3RelayPairingFailureReason,
@@ -74,3 +75,21 @@ export {
   k3relayAccountWebRedirect,
   reduceK3RelayAccountScreen,
 } from "./accountScreen.ts";
+export {
+  type K3RelayIntroducedHostResult,
+  type K3RelayIntroducedProgress,
+  type K3RelayIntroducerHost,
+  type K3RelayIntroductionApproval,
+  type K3RelayIntroductionClaims,
+  K3RelayIntroductionError,
+  K3RelayIntroductionFailureReason,
+  type K3RelayIntroductionSession,
+  type K3RelayIntroductionWindow,
+  approveK3RelayIntroduction,
+  cancelK3RelayIntroduction,
+  collectK3RelayIntroductionClaims,
+  k3relayIntroductionFailureText,
+  openK3RelayIntroduction,
+  revokeK3RelayDeviceAsIntroducer,
+  runK3RelayIntroducedPairing,
+} from "./introduction.ts";

@@ -17,7 +17,9 @@ import { encodeBase64url } from "@t3tools/shared/relay";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as SecureRandom from "effect/crypto/SecureRandom";
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -42,6 +44,7 @@ import * as ManagedRelay from "../relay/managedRelay.ts";
 import { findK3RelayFailureReason } from "./admission.ts";
 import { overTransport } from "./broker.ts";
 import { DeviceKeyStore } from "./deviceKeyStore.ts";
+import { type K3RelayIntroducedProgress, runK3RelayIntroducedPairing } from "./introduction.ts";
 import { makeK3RelayE2eeSocket, openK3RelayTunnel } from "./tunnel.ts";
 
 /**
@@ -361,6 +364,10 @@ export function k3relayPairingFailureText(
 
 // ── Service ─────────────────────────────────────────────────────────────────
 
+export type K3RelayIntroducedOutcome =
+  | { readonly hostId: string; readonly ok: true; readonly environmentId: EnvironmentId }
+  | { readonly hostId: string; readonly ok: false; readonly reason: K3RelayPairingFailureReason };
+
 export class K3RelayOnboarding extends Context.Service<
   K3RelayOnboarding,
   {
@@ -372,6 +379,14 @@ export class K3RelayOnboarding extends Context.Service<
       EnvironmentId,
       K3RelayPairingError | ConnectionAttemptError | Persistence.ConnectionPersistenceError
     >;
+    /**
+     * Joins every host an introduction link names (spec §18.2) and saves each one that approved.
+     * Hosts are reported one by one: one refusing does not undo the others.
+     */
+    readonly introduce: (
+      input: K3RelayPairingInput,
+      onProgress: (progress: K3RelayIntroducedProgress) => Effect.Effect<void>,
+    ) => Effect.Effect<ReadonlyArray<K3RelayIntroducedOutcome>, K3RelayPairingError>;
   }
 >()("@t3tools/client-runtime/k3relay/pairing/K3RelayOnboarding") {}
 
@@ -398,6 +413,41 @@ export const make = Effect.gen(function* () {
         yield* onProgress({ phase: "redeeming" });
         return yield* optional(saveK3RelayPairedDevice(paired)).pipe(
           Effect.provideService(EnvironmentRegistry.EnvironmentRegistry, registry),
+        );
+      },
+      Effect.provide(Layer.mergeAll(Layer.succeedContext(context), SecureRandom.layerWebCrypto)),
+    ),
+    introduce: Effect.fn("K3RelayOnboarding.introduce")(
+      function* (input, onProgress) {
+        const hosts = yield* optional(runK3RelayIntroducedPairing(input, onProgress));
+        if (hosts.some((host) => Exit.isSuccess(host.result))) {
+          yield* onProgress({ phase: "redeeming" });
+        }
+        return yield* Effect.forEach(hosts, (host) =>
+          Exit.isFailure(host.result)
+            ? Effect.succeed<K3RelayIntroducedOutcome>({
+                hostId: host.hostId,
+                ok: false,
+                reason: Option.match(Cause.findErrorOption(host.result.cause), {
+                  onNone: () => "invalid-reply" as const,
+                  onSome: (error) => error.reason,
+                }),
+              })
+            : optional(saveK3RelayPairedDevice(host.result.value)).pipe(
+                Effect.provideService(EnvironmentRegistry.EnvironmentRegistry, registry),
+                Effect.match({
+                  onFailure: (): K3RelayIntroducedOutcome => ({
+                    hostId: host.hostId,
+                    ok: false,
+                    reason: "redeem-failed",
+                  }),
+                  onSuccess: (environmentId): K3RelayIntroducedOutcome => ({
+                    hostId: host.hostId,
+                    ok: true,
+                    environmentId,
+                  }),
+                }),
+              ),
         );
       },
       Effect.provide(Layer.mergeAll(Layer.succeedContext(context), SecureRandom.layerWebCrypto)),
