@@ -1,9 +1,11 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
+  AttachmentCreateUploadUrlInput,
   EnvironmentHttpApi,
   type K3RelayDevice,
   type K3RelayDeviceAlgorithm,
+  K3RelayError,
   type K3RelayHostState,
   K3RelayHostState as K3RelayHostStateSchema,
   type K3RelayPairingOffer,
@@ -61,7 +63,11 @@ import {
   layerAttachmentUploadRoute,
   layerServerEnvironmentHttpApi,
 } from "../../http.ts";
+import * as Orchestrator from "../../orchestration-v2/Orchestrator.ts";
+import * as ProjectFaviconResolver from "../../project/ProjectFaviconResolver.ts";
+import * as RepositoryIdentityResolver from "../../project/RepositoryIdentityResolver.ts";
 import * as DocumentText from "../../provider/DocumentText.ts";
+import * as SourceControlDrivers from "../../sourceControl/builtInDrivers.ts";
 import * as WorkspacePaths from "../../workspace/WorkspacePaths.ts";
 import * as SqlitePersistence from "../../persistence/Sqlite.ts";
 import * as ManagedPolicy from "../../policy/ManagedPolicy.ts";
@@ -98,11 +104,7 @@ export const RelayProbeRpcs = RpcGroup.make(
   }),
   /** `attachments.createUploadUrl`, as `ws.ts` issues it to this socket's caller. */
   Rpc.make("relayProbe.uploadUrl", {
-    payload: Schema.Struct({
-      name: Schema.String,
-      mimeType: Schema.String,
-      sizeBytes: Schema.Number,
-    }),
+    payload: AttachmentCreateUploadUrlInput,
     success: RelayProbeIssued,
     error: Schema.String,
   }),
@@ -110,6 +112,11 @@ export const RelayProbeRpcs = RpcGroup.make(
     payload: Schema.Struct({}),
     success: K3RelayHostStateSchema,
     stream: true,
+  }),
+  /** As `ws.ts` serves it: the session's own device, whatever the payload says. */
+  Rpc.make(WS_METHODS.k3RelayForgetThisDevice, {
+    payload: Schema.Struct({}),
+    error: K3RelayError,
   }),
 );
 
@@ -121,7 +128,25 @@ type AssetServices =
   | DocumentText.DocumentText
   | WorkspacePaths.WorkspacePaths
   | NativeAppIconResolver.NativeAppIconResolver
-  | WorkspacePreviewRevisions.WorkspacePreviewRevisions;
+  | WorkspacePreviewRevisions.WorkspacePreviewRevisions
+  | ProjectFaviconResolver.ProjectFaviconResolver
+  | RepositoryIdentityResolver.RepositoryIdentityResolver
+  | SourceControlDrivers.SourceControlDrivers
+  | Orchestrator.OrchestratorV2;
+
+/**
+ * Services the asset routes reach only for kinds these tests never serve (tool output, project
+ * icons, source-control media): present for the types, failing loudly if a test ever calls them.
+ */
+const unavailable = <S>(name: string) =>
+  new Proxy(
+    {},
+    {
+      get: () => {
+        throw new Error(`The relay test host has no ${name}.`);
+      },
+    },
+  ) as S;
 
 const layerAssets = Layer.mergeAll(
   AssetSigner.layer,
@@ -129,6 +154,24 @@ const layerAssets = Layer.mergeAll(
   WorkspacePaths.layer,
   NativeAppIconResolver.layer,
   WorkspacePreviewRevisions.layer,
+  Layer.succeed(
+    Orchestrator.OrchestratorV2,
+    unavailable<Orchestrator.OrchestratorV2["Service"]>("orchestrator"),
+  ),
+  Layer.succeed(
+    ProjectFaviconResolver.ProjectFaviconResolver,
+    unavailable<ProjectFaviconResolver.ProjectFaviconResolver["Service"]>("project icons"),
+  ),
+  Layer.succeed(
+    RepositoryIdentityResolver.RepositoryIdentityResolver,
+    unavailable<RepositoryIdentityResolver.RepositoryIdentityResolver["Service"]>(
+      "repository identities",
+    ),
+  ),
+  Layer.succeed(
+    SourceControlDrivers.SourceControlDrivers,
+    unavailable<SourceControlDrivers.SourceControlDrivers["Service"]>("source control"),
+  ),
 );
 
 const layerRpcRoute = HttpRouter.add(
@@ -179,6 +222,8 @@ const layerRpcRoute = HttpRouter.add(
               Effect.provideContext(assetContext),
             ),
           [WS_METHODS.k3RelaySubscribe]: () => connector.changes,
+          [WS_METHODS.k3RelayForgetThisDevice]: () =>
+            connector.forgetSessionDevice({ subject: session.success.subject, relayDeviceId }),
         }),
       ),
       Effect.forkScoped,

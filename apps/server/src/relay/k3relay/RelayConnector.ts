@@ -276,6 +276,15 @@ export class RelayConnector extends Context.Service<
     ) => Effect.Effect<K3RelayDevice, K3RelayError>;
     readonly rejectPairing: Effect.Effect<void, K3RelayError>;
     readonly revokeDevice: (deviceId: string) => Effect.Effect<K3RelayDevice, K3RelayError>;
+    /**
+     * A relayed device takes itself off the ledger. The device is the session's own, never one a
+     * caller names: a session that is not a relay device's, or that arrived as another device's
+     * channel, removes nothing.
+     */
+    readonly forgetSessionDevice: (session: {
+      readonly subject: string;
+      readonly relayDeviceId: string | undefined;
+    }) => Effect.Effect<void, K3RelayError>;
     readonly renameDevice: (
       deviceId: string,
       name: string,
@@ -1027,6 +1036,20 @@ const make = Effect.gen(function* () {
     return toDevice(device, sessions.values());
   });
 
+  const forgetSessionDevice = Effect.fn("RelayConnector.forgetSessionDevice")(function* (session: {
+    readonly subject: string;
+    readonly relayDeviceId: string | undefined;
+  }) {
+    const deviceId = EnvironmentAuth.relayPairedDeviceIdOf(session.subject);
+    if (
+      deviceId === undefined ||
+      (session.relayDeviceId !== undefined && session.relayDeviceId !== deviceId)
+    ) {
+      return yield* relayError("not-a-relay-device");
+    }
+    yield* revokeDevice(deviceId);
+  });
+
   return RelayConnector.of({
     state: SubscriptionRef.get(output),
     changes: SubscriptionRef.changes(output),
@@ -1036,6 +1059,7 @@ const make = Effect.gen(function* () {
     rejectPairing: rejectPendingPairing,
     revokeDevice,
     renameDevice,
+    forgetSessionDevice,
   });
 });
 

@@ -9,6 +9,7 @@ import {
   AuthEnvironmentBootstrapTokenType,
   AuthTokenExchangeGrantType,
   type K3RelayHostState,
+  WS_METHODS,
 } from "@t3tools/contracts";
 import { assert, describe, expect, it } from "@effect/vitest";
 import * as Clock from "effect/Clock";
@@ -745,6 +746,54 @@ describe("RelayConnector routes through the mux (spec §12)", () => {
           expect(stolen).toBe(404);
         }).pipe(Effect.provide(layerHost({ relayUrl: url })));
       }).pipe(Effect.provide(layerTest)),
+  );
+});
+
+describe("RelayConnector: a device removes itself", () => {
+  it.live("only its own entry, whatever it names, and never another session's device", () =>
+    Effect.gen(function* () {
+      const { url } = yield* startRelay;
+      yield* Effect.gen(function* () {
+        const host = yield* hostView(url);
+        const connector = yield* RelayConnector.RelayConnector;
+        const ledger = yield* RelayDeviceLedger.RelayDeviceLedger;
+        const phone = yield* newDevice;
+        const laptop = yield* newDevice;
+        const pairedPhone = yield* pairDevice(host, phone, "Phone");
+        yield* pairDevice(host, laptop, "Laptop");
+        const phoneId = relayDeviceId(phone.alg, phone.publicKey);
+        const laptopId = relayDeviceId(laptop.alg, laptop.publicKey);
+
+        // Sessions that are not a relay device's, or a channel of another device: nothing goes.
+        const cli = yield* connector
+          .forgetSessionDevice({ subject: "cli-issued-session", relayDeviceId: undefined })
+          .pipe(Effect.flip);
+        expect(cli.failure).toBe("not-a-relay-device");
+        const crossed = yield* connector
+          .forgetSessionDevice({
+            subject: EnvironmentAuth.relayPairedDeviceSubject(phoneId),
+            relayDeviceId: laptopId,
+          })
+          .pipe(Effect.flip);
+        expect(crossed.failure).toBe("not-a-relay-device");
+        expect((yield* ledger.get(phoneId))?.status).toBe("active");
+
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const { client } = yield* openDeviceSession(host, phone, pairedPhone.record.grant);
+            const { rpc } = yield* signInAndCallRpc(client, pairedPhone.bootstrapToken);
+            // The payload names the laptop; the host goes by the session.
+            yield* rpc[WS_METHODS.k3RelayForgetThisDevice]({ deviceId: laptopId } as never).pipe(
+              Effect.ignore,
+            );
+          }),
+        );
+        const state = yield* awaitState((next) =>
+          next.devices.some((device) => device.deviceId === phoneId && device.status === "revoked"),
+        );
+        expect(state.devices.find((device) => device.deviceId === laptopId)?.status).toBe("active");
+      }).pipe(Effect.provide(layerHost({ relayUrl: url })));
+    }).pipe(Effect.provide(layerTest)),
   );
 });
 

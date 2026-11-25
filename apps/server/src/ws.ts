@@ -1,8 +1,4 @@
-import {
-  GitCommandError,
-  K3RelayError,
-  OrchestrationDispatchCommandError,
-} from "@t3tools/contracts";
+import { GitCommandError, OrchestrationDispatchCommandError } from "@t3tools/contracts";
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- A synchronous digest inside the pure provider mapping.
 import * as NodeCrypto from "node:crypto";
 import * as FeatureFlags from "@t3tools/shared/FeatureFlags";
@@ -3659,13 +3655,8 @@ export const layerWsRpc = (
         [WS_METHODS.k3RelayRenameDevice]: (input) =>
           relayConnector.renameDevice(input.deviceId, input.name),
         // The device is the session's, never the payload's: a device removes itself and no other.
-        [WS_METHODS.k3RelayForgetThisDevice]: (_input) => {
-          const deviceId = EnvironmentAuth.relayPairedDeviceIdOf(currentSession.subject);
-          return deviceId === undefined ||
-            (relayDeviceId !== undefined && relayDeviceId !== deviceId)
-            ? Effect.fail(new K3RelayError({ failure: "not-a-relay-device" }))
-            : relayConnector.revokeDevice(deviceId).pipe(Effect.asVoid);
-        },
+        [WS_METHODS.k3RelayForgetThisDevice]: (_input) =>
+          relayConnector.forgetSessionDevice({ subject: currentSession.subject, relayDeviceId }),
       });
       const splitHandlers: Pick<typeof handlers, SplitWsRpc["_tag"]> = handlers;
       const otherHandlers: Pick<typeof handlers, Exclude<ServerWsRpc, SplitWsRpc>["_tag"]> =
