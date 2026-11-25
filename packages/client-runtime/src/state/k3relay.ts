@@ -1,12 +1,22 @@
 import { WS_METHODS } from "@t3tools/contracts";
+import type { AccountProvider } from "@t3tools/shared/relay";
 import * as Cause from "effect/Cause";
+import * as Effect from "effect/Effect";
 import type { AsyncResult, Atom } from "effect/reactivity";
 
 import type { EnvironmentRegistry } from "../connection/registry.ts";
+import type {
+  K3RelayAccountHost,
+  K3RelayAccountPendingSignIn,
+  K3RelayAccountSession,
+} from "../k3relay/account.ts";
+import { K3RelayAccountOnboarding } from "../k3relay/accountOnboarding.ts";
+import type { K3RelayPairingProgress } from "../k3relay/pairing.ts";
 import {
   createAtomCommandScheduler,
   createEnvironmentRpcCommand,
   createEnvironmentRpcSubscriptionAtomFamily,
+  createRuntimeCommand,
 } from "./runtime.ts";
 
 const UNKNOWN_RPC = /Unknown request tag/u;
@@ -117,6 +127,82 @@ export function createK3RelayEnvironmentAtoms<R, E>(
     forgetThisDevice: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:k3relay:forget-this-device",
       tag: WS_METHODS.k3RelayForgetThisDevice,
+    }),
+  };
+}
+
+/**
+ * The device's own account at a relay (spec §20), as commands its sign-in screen runs. Unlike
+ * the host atoms above, these talk to the relay directly, not to an environment.
+ */
+export function createK3RelayAccountCommands<R, E>(
+  runtime: Atom.AtomRuntime<K3RelayAccountOnboarding | R, E>,
+  label: string,
+) {
+  const scheduler = createAtomCommandScheduler();
+  return {
+    offer: createRuntimeCommand(runtime, {
+      label: `${label}:offer`,
+      execute: (input: { readonly relayUrl: string }) =>
+        K3RelayAccountOnboarding.pipe(Effect.flatMap((accounts) => accounts.offer(input.relayUrl))),
+    }),
+    startSignIn: createRuntimeCommand(runtime, {
+      label: `${label}:start-sign-in`,
+      execute: (input: {
+        readonly relayUrl: string;
+        readonly provider: AccountProvider;
+        readonly redirect: string;
+      }) =>
+        K3RelayAccountOnboarding.pipe(Effect.flatMap((accounts) => accounts.startSignIn(input))),
+    }),
+    completeSignIn: createRuntimeCommand(runtime, {
+      label: `${label}:complete-sign-in`,
+      scheduler,
+      // The browser can hand the same callback back twice; its code is redeemed once.
+      concurrency: {
+        mode: "singleFlight",
+        key: (input: { readonly pending: K3RelayAccountPendingSignIn }) => input.pending.keyId,
+      },
+      execute: (input: {
+        readonly pending: K3RelayAccountPendingSignIn;
+        readonly callbackUrl: string;
+      }) =>
+        K3RelayAccountOnboarding.pipe(
+          Effect.flatMap((accounts) => accounts.completeSignIn(input.pending, input.callbackUrl)),
+        ),
+    }),
+    forget: createRuntimeCommand(runtime, {
+      label: `${label}:forget`,
+      execute: (input: { readonly keyId: string }) =>
+        K3RelayAccountOnboarding.pipe(Effect.flatMap((accounts) => accounts.forget(input.keyId))),
+    }),
+    listHosts: createRuntimeCommand(runtime, {
+      label: `${label}:list-hosts`,
+      execute: (input: { readonly session: K3RelayAccountSession }) =>
+        K3RelayAccountOnboarding.pipe(
+          Effect.flatMap((accounts) => accounts.listHosts(input.session)),
+        ),
+    }),
+    connectHost: createRuntimeCommand(runtime, {
+      label: `${label}:connect-host`,
+      scheduler,
+      concurrency: {
+        mode: "singleFlight",
+        key: (input: { readonly host: K3RelayAccountHost }) => input.host.hostId,
+      },
+      execute: (input: {
+        readonly session: K3RelayAccountSession;
+        readonly host: K3RelayAccountHost;
+        readonly deviceName: string;
+        readonly onProgress: (progress: K3RelayPairingProgress) => void;
+      }) =>
+        K3RelayAccountOnboarding.pipe(
+          Effect.flatMap((accounts) =>
+            accounts.connectHost(input, (progress) =>
+              Effect.sync(() => input.onProgress(progress)),
+            ),
+          ),
+        ),
     }),
   };
 }
