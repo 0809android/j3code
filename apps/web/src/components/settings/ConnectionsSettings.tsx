@@ -49,6 +49,7 @@ import { useSearchableSetting } from "./settingsSearch";
 import { ConnectDeviceApprovalSettings } from "./ConnectDeviceApprovalSettings";
 import { EnvironmentIconMenu } from "./EnvironmentIconPicker";
 import { FoldedSettingsSection } from "./FoldedSettingsSection";
+import { K3RelayAccountSettings } from "./K3RelayAccountSettings";
 import { K3RelaySettings } from "./K3RelaySettings";
 import { EnvironmentsMap } from "./EnvironmentsMap";
 import { LinkedEnvironmentsSettings } from "./LinkedEnvironmentsSettings";
@@ -1540,6 +1541,7 @@ function ConnectionsSettingsContent({
             canWrite={canWriteAccess}
             networkAccessEnabled={isLocalBackendNetworkAccessible}
           />
+          <K3RelayAccountSettings environmentId={accessEnvironmentId} canWrite={canWriteAccess} />
           <RevokeConnectDeviceDialog
             request={pendingConnectRevoke}
             onClose={() => setPendingConnectRevoke(null)}

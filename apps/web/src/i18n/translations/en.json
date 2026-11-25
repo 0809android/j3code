@@ -572,6 +572,18 @@
   "0108edbdb5f27c83": "This browser cannot decode this device's stream (WebCodecs unavailable).",
   "eabffa063b9244f8": "Your DNS or firewall may be blocking T3 Connect. Try another network, such as a different Wi-Fi or mobile data.",
   "c039a54c8238eafe": "It may be overloaded, asleep, or off the network.",
+  "555cc5e6788599d0": "This relay does not offer sign-in. Pair with a QR code instead.",
+  "1be623dcf047ae41": "This relay does not offer that sign-in.",
+  "c3b69c7b7c44877b": "This device can't reach the relay.",
+  "8e999d89d9bb3dbb": "Signing in was cancelled.",
+  "7172f526c0db33f5": "Signing in did not finish. Try again.",
+  "0f65f0efba30ede2": "The sign-in expired. Sign in again.",
+  "342703452fa3470d": "This device cannot store a key for the relay.",
+  "12dddf616e75a16d": "The host is offline or not connected to the relay.",
+  "96c3a2057cb8d041": "The host answered with a different key than the account lists. Someone may be intercepting the connection. Nothing was sent.",
+  "f4102ca67774c059": "The host did not let this device in.",
+  "c3b058f64dc037f9": "Nobody approved this device in time. Try again.",
+  "3d23d78796f87cde": "The answer could not be verified. Nothing was saved.",
   "9035f3b00a02914b": "{host} revoked this device. Pair it again to reconnect.",
   "b44dad73f71851ee": "{host} does not know this device. Pair it again to reconnect.",
   "0870f851747a7b65": "{host} answered with a different key than the one saved at pairing. This device did not connect.",
@@ -582,7 +594,6 @@
   "95922b6ea4091293": "{host} is offline or not connected to the relay.",
   "8c9f8bb3f95a350a": "The relay operator blocked {host}.",
   "1e237c9f12e5b797": "The relay did not accept this device for {host}.",
-  "c3b69c7b7c44877b": "This device can't reach the relay.",
   "3eeadeb828b0c31c": "This device's key for {host} is missing. Pair it again to reconnect.",
   "6afca3a8d73b671d": "On {host}, open Settings > Relay, create a pairing link, and pair this device again.",
   "e7c36bdbdca6ec37": "If {host} was reinstalled or its key was reset, remove it here and pair again. Otherwise, do not connect: someone may be intercepting the relay.",
@@ -599,10 +610,7 @@
   "ac6b0483b53340e8": "The host refused the pairing request. The link may have been altered or reused.",
   "6699ad2ab21fc3d9": "The host rejected this device.",
   "c350437e14fa54b3": "The host's answer could not be verified. Nothing was saved.",
-  "c3b058f64dc037f9": "Nobody approved this device in time. Try again.",
-  "12dddf616e75a16d": "The host is offline or not connected to the relay.",
   "1d41fee6f3635408": "The host answered with a different key than the pairing link. Someone may be intercepting the connection. Nothing was sent.",
-  "342703452fa3470d": "This device cannot store a key for the relay.",
   "cc2cd1ee2cddcc14": "This device cannot create a sign-in key for the host.",
   "20cae5304a573f04": "The host approved this device, but signing in failed. Pair again.",
   "3c4391a7f6421455": "{host} did not confirm the message within 60 seconds.",
@@ -3244,10 +3252,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "on the computer that opened this page"
-      ]
+      "c": [" ", "on the computer that opened this page"]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3259,10 +3264,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "· whoever runs it gets this access"
-      ]
+      "c": [" ", "· whoever runs it gets this access"]
     }
   ],
   "c54cc9c75db9dc58": "Only approve a sign-in you just started.",
@@ -8811,6 +8813,35 @@
   "9eae463720500113": "Stored on the server.",
   "b6e27ab2537ef874": "Create one",
   "6d8e4ebc889bace9": "Add account",
+  "324f39a0f72bea9d": "Relay account",
+  "360ccb63d10b455d": "Signed in with {provider}",
+  "5b58695ff607b1e2": "Find this machine by signing in",
+  "166d7a40259881cc": "Optional. Devices signed in to the same account see this machine and can ask to connect. They still need your approval. Pairing with a QR code works without an account.",
+  "1d81038c7e181caf": "Sign in with {provider}",
+  "aba2c54f6de43086": "Finish signing in in your browser",
+  "a200b327853476e3": "The browser comes back to this machine only, so sign in on the computer that runs K3 Code.",
+  "1bf03d9bdce29658": "Sign-in problem",
+  "cb6d000f58bbd65d": "A managed policy does not allow relay connections on this machine.",
+  "b27d092ab76d5158": "Turn on the relay before signing in.",
+  "19b23262e1dec2fa": "This machine is not registered with the relay yet. Wait until it is online.",
+  "42f0b5f11db93a97": "The relay does not offer this sign-in.",
+  "e2dbb0318a7acc83": "This machine can't reach the relay.",
+  "85d7fb6148794e53": "Turning approval off needs the risk acknowledged.",
+  "8a87f66fb2cfbd64": "The relay could not complete the request.",
+  "6b8bd875c9f52a84": "Approve new devices",
+  "56d4b5384b337305": "On. A device that signs in to your account waits until you compare codes and approve it here. Recommended.",
+  "fb8a2c4ad960ffb8": "Off. Any device signed in to your account connects without asking. If the relay or your account were taken over, someone could reach this machine.",
+  "d824094eaa04f9ff": "Let account devices in without asking?",
+  "a75ac532028340c3": "With approval off, this machine trusts the relay to say which devices belong to your account. A compromised relay, a leaked relay key, a hijacked GitHub, Google or Apple account, or a provider's mistake would let someone run code on this machine. Keep approval on unless you accept that risk. Turn on two-factor sign-in at your provider either way.",
+  "b259f103e7d5b165": "Could not start signing in",
+  "83ce5ef1a3e36282": "Could not sign out",
+  "bf36e1775f461aad": "Could not change approval",
+  "78a1a02732fc74e8": "Sign out",
+  "ce2df756a70ae8af": "The device waiting above came through your account, and you just added a device: approve it if it is the one in your hands.",
+  "730362718c7b9919": "The device waiting above came through your account: this connection trusts the relay. Approve only if a new device is in your hands and shows the same code.",
+  "7c35e58f3ebc3a67": "Devices you paired with a QR code are not affected. They always compare codes.",
+  "c810a1f7f7469c82": "Keep approval on",
+  "31e43ec2575c4bab": "I understand, turn it off",
   "6729d1b990f464b3": "Connecting to the relay…",
   "f71b09879b8b3741": "Signing in…",
   "1f81bd4fbe1359ed": "Pair through the relay",
@@ -8847,7 +8878,6 @@
   "7df48ed9aecdc54b": "Off",
   "64ce22f54953b0c6": "Turn the relay on or off",
   "09b4396773ea2312": "Turned off by your organization",
-  "cb6d000f58bbd65d": "A managed policy does not allow relay connections on this machine.",
   "ae6cd09b6d85ee45": "Network access is off",
   "edf237fde1015136": "Devices paired through the relay can still reach this machine. Revoke them below to stop that.",
   "4402486cbce7d0b0": "The relay reported a problem",
@@ -9468,7 +9498,6 @@
   "366e370da9d8b04c": "Open browser",
   "50c877d9fa8db3ec": "Copy sign-in link",
   "663df6ba60de573b": "Open docs",
-  "78a1a02732fc74e8": "Sign out",
   "e53ca6f665197e44": [
     "Enter code",
     " ",

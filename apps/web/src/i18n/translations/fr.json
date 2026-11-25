@@ -572,6 +572,18 @@
   "0108edbdb5f27c83": "Ce navigateur ne peut pas décoder le flux de cet appareil (WebCodecs indisponible).",
   "eabffa063b9244f8": "Votre DNS ou votre pare-feu bloque peut-être T3 Connect. Essayez un autre réseau, comme un autre Wi-Fi ou les données mobiles.",
   "c039a54c8238eafe": "Il est peut-être surchargé, en veille ou hors réseau.",
+  "555cc5e6788599d0": "Ce relais ne propose pas la connexion. Associez plutôt avec un code QR.",
+  "1be623dcf047ae41": "Ce relais ne propose pas cette connexion.",
+  "c3b69c7b7c44877b": "Cet appareil ne parvient pas à joindre le relais.",
+  "8e999d89d9bb3dbb": "La connexion a été annulée.",
+  "7172f526c0db33f5": "La connexion n’a pas abouti. Réessayez.",
+  "0f65f0efba30ede2": "La connexion a expiré. Reconnectez-vous.",
+  "342703452fa3470d": "Cet appareil ne peut pas enregistrer de clé pour le relais.",
+  "12dddf616e75a16d": "L'hôte est hors ligne ou non connecté au relais.",
+  "96c3a2057cb8d041": "L’hôte a répondu avec une autre clé que celle indiquée par le compte. Quelqu’un intercepte peut-être la connexion. Rien n’a été envoyé.",
+  "f4102ca67774c059": "L’hôte n’a pas laissé entrer cet appareil.",
+  "c3b058f64dc037f9": "Personne n'a approuvé cet appareil à temps. Réessayez.",
+  "3d23d78796f87cde": "La réponse n’a pas pu être vérifiée. Rien n’a été enregistré.",
   "9035f3b00a02914b": "{host} a révoqué cet appareil. Associez-le à nouveau pour vous reconnecter.",
   "b44dad73f71851ee": "{host} ne connaît pas cet appareil. Associez-le à nouveau pour vous reconnecter.",
   "0870f851747a7b65": "{host} a répondu avec une clé différente de celle enregistrée lors de l'association. Cet appareil ne s'est pas connecté.",
@@ -582,7 +594,6 @@
   "95922b6ea4091293": "{host} est hors ligne ou non connecté au relais.",
   "8c9f8bb3f95a350a": "L'opérateur du relais a bloqué {host}.",
   "1e237c9f12e5b797": "Le relais n'a pas accepté cet appareil pour {host}.",
-  "c3b69c7b7c44877b": "Cet appareil ne parvient pas à joindre le relais.",
   "3eeadeb828b0c31c": "La clé de cet appareil pour {host} est introuvable. Associez-le à nouveau pour vous reconnecter.",
   "6afca3a8d73b671d": "Sur {host}, ouvrez Réglages > Relais, créez un lien d'association et associez à nouveau cet appareil.",
   "e7c36bdbdca6ec37": "Si {host} a été réinstallé ou sa clé réinitialisée, supprimez-le ici et associez-le à nouveau. Sinon, ne vous connectez pas : quelqu'un intercepte peut-être le relais.",
@@ -599,10 +610,7 @@
   "ac6b0483b53340e8": "L'hôte a refusé la demande d'association. Le lien a peut-être été modifié ou réutilisé.",
   "6699ad2ab21fc3d9": "L'hôte a rejeté cet appareil.",
   "c350437e14fa54b3": "La réponse de l'hôte n'a pas pu être vérifiée. Rien n'a été enregistré.",
-  "c3b058f64dc037f9": "Personne n'a approuvé cet appareil à temps. Réessayez.",
-  "12dddf616e75a16d": "L'hôte est hors ligne ou non connecté au relais.",
   "1d41fee6f3635408": "L'hôte a répondu avec une clé différente de celle du lien d'association. Quelqu'un intercepte peut-être la connexion. Rien n'a été envoyé.",
-  "342703452fa3470d": "Cet appareil ne peut pas enregistrer de clé pour le relais.",
   "cc2cd1ee2cddcc14": "Cet appareil ne peut pas créer de clé de connexion pour l'hôte.",
   "20cae5304a573f04": "L'hôte a approuvé cet appareil, mais la connexion a échoué. Associez-le à nouveau.",
   "3c4391a7f6421455": "{host} n’a pas confirmé le message dans les 60 secondes.",
@@ -3244,10 +3252,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "sur l’ordinateur qui a ouvert cette page"
-      ]
+      "c": [" ", "sur l’ordinateur qui a ouvert cette page"]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3259,10 +3264,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "· quiconque l’exécute obtient cet accès"
-      ]
+      "c": [" ", "· quiconque l’exécute obtient cet accès"]
     }
   ],
   "c54cc9c75db9dc58": "N’approuvez qu’une connexion que vous venez de lancer.",
@@ -8802,6 +8804,35 @@
   "9eae463720500113": "Stocké sur le serveur.",
   "b6e27ab2537ef874": "En créer un",
   "6d8e4ebc889bace9": "Ajouter un compte",
+  "324f39a0f72bea9d": "Compte du relais",
+  "360ccb63d10b455d": "Connecté avec {provider}",
+  "5b58695ff607b1e2": "Rendre cette machine visible en vous connectant",
+  "166d7a40259881cc": "Facultatif. Les appareils connectés au même compte voient cette machine et peuvent demander à s’y connecter. Ils ont tout de même besoin de votre approbation. L’association par code QR fonctionne sans compte.",
+  "1d81038c7e181caf": "Se connecter avec {provider}",
+  "aba2c54f6de43086": "Terminez la connexion dans votre navigateur",
+  "a200b327853476e3": "Le navigateur ne revient qu’à cette machine : connectez-vous sur l’ordinateur qui exécute K3 Code.",
+  "1bf03d9bdce29658": "Problème de connexion",
+  "cb6d000f58bbd65d": "Une politique gérée n'autorise pas les connexions par relais sur cette machine.",
+  "b27d092ab76d5158": "Activez le relais avant de vous connecter.",
+  "19b23262e1dec2fa": "Cette machine n’est pas encore enregistrée auprès du relais. Attendez qu’elle soit en ligne.",
+  "42f0b5f11db93a97": "Le relais ne propose pas cette connexion.",
+  "e2dbb0318a7acc83": "Cette machine ne parvient pas à joindre le relais.",
+  "85d7fb6148794e53": "Désactiver l’approbation nécessite d’accepter le risque.",
+  "8a87f66fb2cfbd64": "Le relais n’a pas pu traiter la demande.",
+  "6b8bd875c9f52a84": "Approuver les nouveaux appareils",
+  "56d4b5384b337305": "Activé. Un appareil qui se connecte à votre compte attend que vous compariez les codes et l’approuviez ici. Recommandé.",
+  "fb8a2c4ad960ffb8": "Désactivé. Tout appareil connecté à votre compte se connecte sans demander. Si le relais ou votre compte étaient piratés, quelqu’un pourrait accéder à cette machine.",
+  "d824094eaa04f9ff": "Laisser entrer les appareils du compte sans demander ?",
+  "a75ac532028340c3": "Sans approbation, cette machine croit le relais sur les appareils qui appartiennent à votre compte. Un relais compromis, une clé du relais divulguée, un compte GitHub, Google ou Apple piraté ou une erreur du fournisseur permettraient à quelqu’un d’exécuter du code sur cette machine. Gardez l’approbation activée sauf si vous acceptez ce risque. Activez dans tous les cas la connexion en deux étapes chez votre fournisseur.",
+  "b259f103e7d5b165": "Impossible de démarrer la connexion",
+  "83ce5ef1a3e36282": "Impossible de se déconnecter",
+  "bf36e1775f461aad": "Impossible de modifier l’approbation",
+  "78a1a02732fc74e8": "Se déconnecter",
+  "ce2df756a70ae8af": "L’appareil en attente ci-dessus est arrivé par votre compte, et vous venez d’ajouter un appareil : approuvez-le si c’est celui que vous avez en main.",
+  "730362718c7b9919": "L’appareil en attente ci-dessus est arrivé par votre compte : cette connexion fait confiance au relais. Approuvez-le seulement si vous avez en main un nouvel appareil qui affiche le même code.",
+  "7c35e58f3ebc3a67": "Les appareils associés par code QR ne sont pas concernés. Ils comparent toujours les codes.",
+  "c810a1f7f7469c82": "Garder l’approbation activée",
+  "31e43ec2575c4bab": "Je comprends, la désactiver",
   "6729d1b990f464b3": "Connexion au relais…",
   "f71b09879b8b3741": "Connexion en cours…",
   "1f81bd4fbe1359ed": "Associer via le relais",
@@ -8837,7 +8868,6 @@
   "7df48ed9aecdc54b": "Désactivé",
   "64ce22f54953b0c6": "Activer ou désactiver le relais",
   "09b4396773ea2312": "Désactivé par votre organisation",
-  "cb6d000f58bbd65d": "Une politique gérée n'autorise pas les connexions par relais sur cette machine.",
   "ae6cd09b6d85ee45": "L'accès réseau est désactivé",
   "edf237fde1015136": "Les appareils associés via le relais peuvent toujours joindre cette machine. Révoquez-les ci-dessous pour l'empêcher.",
   "4402486cbce7d0b0": "Le relais a signalé un problème",
@@ -9458,7 +9488,6 @@
   "366e370da9d8b04c": "Ouvrir le navigateur",
   "50c877d9fa8db3ec": "Copier le lien de connexion",
   "663df6ba60de573b": "Ouvrir la documentation",
-  "78a1a02732fc74e8": "Se déconnecter",
   "e53ca6f665197e44": [
     "Saisissez le code",
     " ",

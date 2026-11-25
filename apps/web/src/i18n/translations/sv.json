@@ -572,6 +572,18 @@
   "0108edbdb5f27c83": "Den här webbläsaren kan inte avkoda enhetens ström (WebCodecs är inte tillgängligt).",
   "eabffa063b9244f8": "Din DNS eller brandvägg kanske blockerar T3 Connect. Prova ett annat nätverk, till exempel ett annat wifi eller mobildata.",
   "c039a54c8238eafe": "Den kan vara överbelastad, i viloläge eller utanför nätverket.",
+  "555cc5e6788599d0": "Den här reläservern erbjuder inte inloggning. Para ihop med en QR-kod i stället.",
+  "1be623dcf047ae41": "Den här reläservern erbjuder inte den inloggningen.",
+  "c3b69c7b7c44877b": "Den här enheten når inte reläet.",
+  "8e999d89d9bb3dbb": "Inloggningen avbröts.",
+  "7172f526c0db33f5": "Inloggningen slutfördes inte. Försök igen.",
+  "0f65f0efba30ede2": "Inloggningen har gått ut. Logga in igen.",
+  "342703452fa3470d": "Den här enheten kan inte lagra en nyckel för reläet.",
+  "12dddf616e75a16d": "Värden är offline eller inte ansluten till reläet.",
+  "96c3a2057cb8d041": "Värden svarade med en annan nyckel än kontot anger. Någon kan avlyssna anslutningen. Inget skickades.",
+  "f4102ca67774c059": "Värden släppte inte in den här enheten.",
+  "c3b058f64dc037f9": "Ingen godkände enheten i tid. Försök igen.",
+  "3d23d78796f87cde": "Svaret kunde inte verifieras. Inget sparades.",
   "9035f3b00a02914b": "{host} har återkallat den här enheten. Para ihop den igen för att återansluta.",
   "b44dad73f71851ee": "{host} känner inte igen den här enheten. Para ihop den igen för att återansluta.",
   "0870f851747a7b65": "{host} svarade med en annan nyckel än den som sparades vid ihopparningen. Enheten anslöt inte.",
@@ -582,7 +594,6 @@
   "95922b6ea4091293": "{host} är offline eller inte ansluten till reläet.",
   "8c9f8bb3f95a350a": "Reläoperatören har blockerat {host}.",
   "1e237c9f12e5b797": "Reläet godkände inte den här enheten för {host}.",
-  "c3b69c7b7c44877b": "Den här enheten når inte reläet.",
   "3eeadeb828b0c31c": "Enhetens nyckel för {host} saknas. Para ihop den igen för att återansluta.",
   "6afca3a8d73b671d": "På {host}: öppna Inställningar > Relä, skapa en ihopparningslänk och para ihop enheten igen.",
   "e7c36bdbdca6ec37": "Om {host} har installerats om eller fått ny nyckel, ta bort den här och para ihop igen. Annars ska du inte ansluta: någon kan avlyssna reläet.",
@@ -599,10 +610,7 @@
   "ac6b0483b53340e8": "Värden avvisade ihopparningsbegäran. Länken kan ha ändrats eller återanvänts.",
   "6699ad2ab21fc3d9": "Värden avvisade den här enheten.",
   "c350437e14fa54b3": "Värdens svar kunde inte verifieras. Inget sparades.",
-  "c3b058f64dc037f9": "Ingen godkände enheten i tid. Försök igen.",
-  "12dddf616e75a16d": "Värden är offline eller inte ansluten till reläet.",
   "1d41fee6f3635408": "Värden svarade med en annan nyckel än ihopparningslänken. Någon kan avlyssna anslutningen. Inget skickades.",
-  "342703452fa3470d": "Den här enheten kan inte lagra en nyckel för reläet.",
   "cc2cd1ee2cddcc14": "Den här enheten kan inte skapa en inloggningsnyckel för värden.",
   "20cae5304a573f04": "Värden godkände enheten, men inloggningen misslyckades. Para ihop igen.",
   "3c4391a7f6421455": "{host} bekräftade inte meddelandet inom 60 sekunder.",
@@ -3244,10 +3252,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "på datorn som öppnade den här sidan"
-      ]
+      "c": [" ", "på datorn som öppnade den här sidan"]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3259,10 +3264,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "· den som kör den får den här åtkomsten"
-      ]
+      "c": [" ", "· den som kör den får den här åtkomsten"]
     }
   ],
   "c54cc9c75db9dc58": "Godkänn bara en inloggning som du själv precis har startat.",
@@ -8809,6 +8811,35 @@
   "9eae463720500113": "Lagras på servern.",
   "b6e27ab2537ef874": "Skapa en",
   "6d8e4ebc889bace9": "Lägg till konto",
+  "324f39a0f72bea9d": "Reläkonto",
+  "360ccb63d10b455d": "Inloggad med {provider}",
+  "5b58695ff607b1e2": "Gör den här datorn hittbar genom att logga in",
+  "166d7a40259881cc": "Valfritt. Enheter som är inloggade på samma konto ser den här datorn och kan be om att ansluta. De behöver ändå ditt godkännande. Ihopparning med QR-kod fungerar utan konto.",
+  "1d81038c7e181caf": "Logga in med {provider}",
+  "aba2c54f6de43086": "Slutför inloggningen i webbläsaren",
+  "a200b327853476e3": "Webbläsaren kommer bara tillbaka till den här datorn, så logga in på datorn som kör K3 Code.",
+  "1bf03d9bdce29658": "Problem med inloggningen",
+  "cb6d000f58bbd65d": "En hanterad policy tillåter inte reläanslutningar på den här datorn.",
+  "b27d092ab76d5158": "Slå på reläet innan du loggar in.",
+  "19b23262e1dec2fa": "Den här datorn är inte registrerad hos reläet än. Vänta tills den är online.",
+  "42f0b5f11db93a97": "Reläet erbjuder inte den här inloggningen.",
+  "e2dbb0318a7acc83": "Den här datorn når inte reläet.",
+  "85d7fb6148794e53": "För att stänga av godkännande måste risken bekräftas.",
+  "8a87f66fb2cfbd64": "Reläet kunde inte slutföra begäran.",
+  "6b8bd875c9f52a84": "Godkänn nya enheter",
+  "56d4b5384b337305": "På. En enhet som loggar in på ditt konto väntar tills du jämför koderna och godkänner den här. Rekommenderas.",
+  "fb8a2c4ad960ffb8": "Av. Alla enheter som är inloggade på ditt konto ansluter utan att fråga. Om reläet eller ditt konto togs över kunde någon komma åt den här datorn.",
+  "d824094eaa04f9ff": "Släppa in kontots enheter utan att fråga?",
+  "a75ac532028340c3": "Utan godkännande litar den här datorn på reläet när det gäller vilka enheter som hör till ditt konto. Ett komprometterat relä, en läckt relänyckel, ett kapat GitHub-, Google- eller Apple-konto eller ett misstag hos leverantören skulle låta någon köra kod på den här datorn. Låt godkännandet vara på om du inte accepterar den risken. Slå i vilket fall på tvåstegsinloggning hos din leverantör.",
+  "b259f103e7d5b165": "Kunde inte börja logga in",
+  "83ce5ef1a3e36282": "Kunde inte logga ut",
+  "bf36e1775f461aad": "Kunde inte ändra godkännandet",
+  "78a1a02732fc74e8": "Logga ut",
+  "ce2df756a70ae8af": "Enheten som väntar ovan kom via ditt konto, och du har just lagt till en enhet: godkänn den om det är den du har i handen.",
+  "730362718c7b9919": "Enheten som väntar ovan kom via ditt konto: den här anslutningen litar på reläet. Godkänn bara om du har en ny enhet i handen som visar samma kod.",
+  "7c35e58f3ebc3a67": "Enheter som parats ihop med QR-kod påverkas inte. De jämför alltid koder.",
+  "c810a1f7f7469c82": "Behåll godkännandet på",
+  "31e43ec2575c4bab": "Jag förstår, stäng av",
   "6729d1b990f464b3": "Ansluter till reläet…",
   "f71b09879b8b3741": "Loggar in…",
   "1f81bd4fbe1359ed": "Para ihop via reläet",
@@ -8844,7 +8875,6 @@
   "7df48ed9aecdc54b": "Av",
   "64ce22f54953b0c6": "Slå på eller av reläet",
   "09b4396773ea2312": "Avstängt av din organisation",
-  "cb6d000f58bbd65d": "En hanterad policy tillåter inte reläanslutningar på den här datorn.",
   "ae6cd09b6d85ee45": "Nätverksåtkomst är av",
   "edf237fde1015136": "Enheter som parats ihop via reläet når fortfarande den här datorn. Återkalla dem nedan för att stoppa det.",
   "4402486cbce7d0b0": "Reläet rapporterade ett problem",
@@ -9464,7 +9494,6 @@
   "366e370da9d8b04c": "Öppna webbläsare",
   "50c877d9fa8db3ec": "Kopiera inloggningslänk",
   "663df6ba60de573b": "Öppna dokumentation",
-  "78a1a02732fc74e8": "Logga ut",
   "e53ca6f665197e44": [
     "Ange koden",
     " ",

@@ -572,6 +572,18 @@
   "0108edbdb5f27c83": "Dieser Browser kann den Stream dieses Geräts nicht decodieren (WebCodecs nicht verfügbar).",
   "eabffa063b9244f8": "Dein DNS oder deine Firewall blockiert möglicherweise T3 Connect. Versuche ein anderes Netzwerk, etwa ein anderes WLAN oder mobile Daten.",
   "c039a54c8238eafe": "Er ist möglicherweise überlastet, im Ruhezustand oder nicht im Netzwerk.",
+  "555cc5e6788599d0": "Dieses Relay bietet keine Anmeldung an. Kopple stattdessen per QR-Code.",
+  "1be623dcf047ae41": "Dieses Relay bietet diese Anmeldung nicht an.",
+  "c3b69c7b7c44877b": "Dieses Gerät erreicht das Relay nicht.",
+  "8e999d89d9bb3dbb": "Die Anmeldung wurde abgebrochen.",
+  "7172f526c0db33f5": "Die Anmeldung wurde nicht abgeschlossen. Versuche es erneut.",
+  "0f65f0efba30ede2": "Die Anmeldung ist abgelaufen. Melde dich erneut an.",
+  "342703452fa3470d": "Dieses Gerät kann keinen Schlüssel für das Relay speichern.",
+  "12dddf616e75a16d": "Der Host ist offline oder nicht mit dem Relay verbunden.",
+  "96c3a2057cb8d041": "Der Host hat mit einem anderen Schlüssel geantwortet, als das Konto angibt. Möglicherweise fängt jemand die Verbindung ab. Es wurde nichts gesendet.",
+  "f4102ca67774c059": "Der Host hat dieses Gerät nicht zugelassen.",
+  "c3b058f64dc037f9": "Niemand hat dieses Gerät rechtzeitig bestätigt. Versuche es erneut.",
+  "3d23d78796f87cde": "Die Antwort konnte nicht überprüft werden. Es wurde nichts gespeichert.",
   "9035f3b00a02914b": "{host} hat dieses Gerät widerrufen. Kopple es erneut, um wieder zu verbinden.",
   "b44dad73f71851ee": "{host} kennt dieses Gerät nicht. Kopple es erneut, um wieder zu verbinden.",
   "0870f851747a7b65": "{host} hat mit einem anderen Schlüssel geantwortet als dem beim Koppeln gespeicherten. Dieses Gerät hat sich nicht verbunden.",
@@ -582,7 +594,6 @@
   "95922b6ea4091293": "{host} ist offline oder nicht mit dem Relay verbunden.",
   "8c9f8bb3f95a350a": "Der Relay-Betreiber hat {host} gesperrt.",
   "1e237c9f12e5b797": "Das Relay hat dieses Gerät für {host} nicht akzeptiert.",
-  "c3b69c7b7c44877b": "Dieses Gerät erreicht das Relay nicht.",
   "3eeadeb828b0c31c": "Der Schlüssel dieses Geräts für {host} fehlt. Kopple es erneut, um wieder zu verbinden.",
   "6afca3a8d73b671d": "Öffne auf {host} Einstellungen > Relay, erstelle einen Kopplungslink und kopple dieses Gerät erneut.",
   "e7c36bdbdca6ec37": "Wenn {host} neu installiert oder sein Schlüssel zurückgesetzt wurde, entferne es hier und kopple es erneut. Andernfalls verbinde dich nicht: Jemand könnte das Relay abfangen.",
@@ -599,10 +610,7 @@
   "ac6b0483b53340e8": "Der Host hat die Kopplungsanfrage abgelehnt. Der Link wurde vielleicht verändert oder wiederverwendet.",
   "6699ad2ab21fc3d9": "Der Host hat dieses Gerät abgelehnt.",
   "c350437e14fa54b3": "Die Antwort des Hosts konnte nicht überprüft werden. Nichts wurde gespeichert.",
-  "c3b058f64dc037f9": "Niemand hat dieses Gerät rechtzeitig bestätigt. Versuche es erneut.",
-  "12dddf616e75a16d": "Der Host ist offline oder nicht mit dem Relay verbunden.",
   "1d41fee6f3635408": "Der Host hat mit einem anderen Schlüssel als im Kopplungslink geantwortet. Jemand könnte die Verbindung abfangen. Es wurde nichts gesendet.",
-  "342703452fa3470d": "Dieses Gerät kann keinen Schlüssel für das Relay speichern.",
   "cc2cd1ee2cddcc14": "Dieses Gerät kann keinen Anmeldeschlüssel für den Host erstellen.",
   "20cae5304a573f04": "Der Host hat dieses Gerät bestätigt, aber die Anmeldung ist fehlgeschlagen. Kopple es erneut.",
   "3c4391a7f6421455": "{host} hat die Nachricht nicht innerhalb von 60 Sekunden bestätigt.",
@@ -3245,10 +3253,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "auf dem Computer, der diese Seite geöffnet hat"
-      ]
+      "c": [" ", "auf dem Computer, der diese Seite geöffnet hat"]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3260,10 +3265,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "· wer es ausführt, erhält diesen Zugriff"
-      ]
+      "c": [" ", "· wer es ausführt, erhält diesen Zugriff"]
     }
   ],
   "c54cc9c75db9dc58": "Genehmige nur eine Anmeldung, die du gerade selbst gestartet hast.",
@@ -8803,6 +8805,35 @@
   "9eae463720500113": "Auf dem Server gespeichert.",
   "b6e27ab2537ef874": "Erstellen",
   "6d8e4ebc889bace9": "Konto hinzufügen",
+  "324f39a0f72bea9d": "Relay-Konto",
+  "360ccb63d10b455d": "Angemeldet mit {provider}",
+  "5b58695ff607b1e2": "Diesen Rechner per Anmeldung auffindbar machen",
+  "166d7a40259881cc": "Optional. Geräte, die mit demselben Konto angemeldet sind, sehen diesen Rechner und können eine Verbindung anfragen. Sie brauchen trotzdem deine Freigabe. Die Kopplung per QR-Code funktioniert ohne Konto.",
+  "1d81038c7e181caf": "Mit {provider} anmelden",
+  "aba2c54f6de43086": "Schließe die Anmeldung im Browser ab",
+  "a200b327853476e3": "Der Browser kehrt nur zu diesem Rechner zurück. Melde dich deshalb auf dem Computer an, auf dem K3 Code läuft.",
+  "1bf03d9bdce29658": "Problem bei der Anmeldung",
+  "cb6d000f58bbd65d": "Eine verwaltete Richtlinie erlaubt auf diesem Rechner keine Relay-Verbindungen.",
+  "b27d092ab76d5158": "Schalte das Relay ein, bevor du dich anmeldest.",
+  "19b23262e1dec2fa": "Dieser Rechner ist noch nicht beim Relay registriert. Warte, bis er online ist.",
+  "42f0b5f11db93a97": "Das Relay bietet diese Anmeldung nicht an.",
+  "e2dbb0318a7acc83": "Dieser Rechner erreicht das Relay nicht.",
+  "85d7fb6148794e53": "Zum Ausschalten der Freigabe muss das Risiko bestätigt werden.",
+  "8a87f66fb2cfbd64": "Das Relay konnte die Anfrage nicht abschließen.",
+  "6b8bd875c9f52a84": "Neue Geräte freigeben",
+  "56d4b5384b337305": "Ein. Ein Gerät, das sich mit deinem Konto anmeldet, wartet, bis du hier die Codes vergleichst und es freigibst. Empfohlen.",
+  "fb8a2c4ad960ffb8": "Aus. Jedes mit deinem Konto angemeldete Gerät verbindet sich ohne Nachfrage. Würden das Relay oder dein Konto übernommen, könnte jemand auf diesen Rechner zugreifen.",
+  "d824094eaa04f9ff": "Kontogeräte ohne Nachfrage zulassen?",
+  "a75ac532028340c3": "Ohne Freigabe vertraut dieser Rechner dem Relay, welche Geräte zu deinem Konto gehören. Ein kompromittiertes Relay, ein geleakter Relay-Schlüssel, ein übernommenes GitHub-, Google- oder Apple-Konto oder ein Fehler des Anbieters würde es jemandem erlauben, Code auf diesem Rechner auszuführen. Lass die Freigabe eingeschaltet, sofern du dieses Risiko nicht akzeptierst. Aktiviere in jedem Fall die Zwei-Faktor-Anmeldung bei deinem Anbieter.",
+  "b259f103e7d5b165": "Anmeldung konnte nicht gestartet werden",
+  "83ce5ef1a3e36282": "Abmelden fehlgeschlagen",
+  "bf36e1775f461aad": "Freigabe konnte nicht geändert werden",
+  "78a1a02732fc74e8": "Abmelden",
+  "ce2df756a70ae8af": "Das oben wartende Gerät kam über dein Konto, und du hast gerade ein Gerät hinzugefügt: Gib es frei, wenn es das Gerät in deiner Hand ist.",
+  "730362718c7b9919": "Das oben wartende Gerät kam über dein Konto: Diese Verbindung vertraut dem Relay. Gib es nur frei, wenn du ein neues Gerät in der Hand hast, das denselben Code zeigt.",
+  "7c35e58f3ebc3a67": "Per QR-Code gekoppelte Geräte sind nicht betroffen. Sie vergleichen immer Codes.",
+  "c810a1f7f7469c82": "Freigabe eingeschaltet lassen",
+  "31e43ec2575c4bab": "Ich verstehe, ausschalten",
   "6729d1b990f464b3": "Verbindung zum Relay wird hergestellt…",
   "f71b09879b8b3741": "Anmeldung läuft…",
   "1f81bd4fbe1359ed": "Über das Relay koppeln",
@@ -8838,7 +8869,6 @@
   "7df48ed9aecdc54b": "Aus",
   "64ce22f54953b0c6": "Relay ein- oder ausschalten",
   "09b4396773ea2312": "Von deiner Organisation ausgeschaltet",
-  "cb6d000f58bbd65d": "Eine verwaltete Richtlinie erlaubt auf diesem Rechner keine Relay-Verbindungen.",
   "ae6cd09b6d85ee45": "Netzwerkzugriff ist aus",
   "edf237fde1015136": "Über das Relay gekoppelte Geräte erreichen diesen Rechner trotzdem. Widerrufe sie unten, um das zu beenden.",
   "4402486cbce7d0b0": "Das Relay hat ein Problem gemeldet",
@@ -9458,7 +9488,6 @@
   "366e370da9d8b04c": "Browser öffnen",
   "50c877d9fa8db3ec": "Anmeldelink kopieren",
   "663df6ba60de573b": "Dokumentation öffnen",
-  "78a1a02732fc74e8": "Abmelden",
   "e53ca6f665197e44": [
     "Gib den Code",
     " ",

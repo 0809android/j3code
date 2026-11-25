@@ -572,6 +572,18 @@
   "0108edbdb5f27c83": "Este navegador no puede decodificar la transmisión de este dispositivo (WebCodecs no disponible).",
   "eabffa063b9244f8": "Puede que tu DNS o tu firewall estén bloqueando T3 Connect. Prueba con otra red, como otra Wi-Fi o datos móviles.",
   "c039a54c8238eafe": "Puede que esté sobrecargado, en reposo o fuera de la red.",
+  "555cc5e6788599d0": "Este relé no ofrece inicio de sesión. Empareja con un código QR.",
+  "1be623dcf047ae41": "Este relé no ofrece ese inicio de sesión.",
+  "c3b69c7b7c44877b": "Este dispositivo no puede llegar al relé.",
+  "8e999d89d9bb3dbb": "Se canceló el inicio de sesión.",
+  "7172f526c0db33f5": "El inicio de sesión no terminó. Inténtalo de nuevo.",
+  "0f65f0efba30ede2": "La sesión caducó. Inicia sesión de nuevo.",
+  "342703452fa3470d": "Este dispositivo no puede guardar una clave para el relé.",
+  "12dddf616e75a16d": "El host está sin conexión o no conectado al relé.",
+  "96c3a2057cb8d041": "El host respondió con una clave distinta de la que indica la cuenta. Puede que alguien esté interceptando la conexión. No se envió nada.",
+  "f4102ca67774c059": "El host no dejó entrar a este dispositivo.",
+  "c3b058f64dc037f9": "Nadie aprobó este dispositivo a tiempo. Inténtalo de nuevo.",
+  "3d23d78796f87cde": "No se pudo verificar la respuesta. No se guardó nada.",
   "9035f3b00a02914b": "{host} revocó este dispositivo. Vuelve a emparejarlo para reconectar.",
   "b44dad73f71851ee": "{host} no reconoce este dispositivo. Vuelve a emparejarlo para reconectar.",
   "0870f851747a7b65": "{host} respondió con una clave distinta de la guardada al emparejar. Este dispositivo no se conectó.",
@@ -582,7 +594,6 @@
   "95922b6ea4091293": "{host} está sin conexión o no conectado al relé.",
   "8c9f8bb3f95a350a": "El operador del relé bloqueó {host}.",
   "1e237c9f12e5b797": "El relé no aceptó este dispositivo para {host}.",
-  "c3b69c7b7c44877b": "Este dispositivo no puede llegar al relé.",
   "3eeadeb828b0c31c": "Falta la clave de este dispositivo para {host}. Vuelve a emparejarlo para reconectar.",
   "6afca3a8d73b671d": "En {host}, abre Ajustes > Relé, crea un enlace de emparejamiento y vuelve a emparejar este dispositivo.",
   "e7c36bdbdca6ec37": "Si {host} se reinstaló o se restableció su clave, quítalo aquí y vuelve a emparejarlo. Si no, no te conectes: alguien podría estar interceptando el relé.",
@@ -599,10 +610,7 @@
   "ac6b0483b53340e8": "El host rechazó la solicitud de emparejamiento. Puede que el enlace se haya alterado o reutilizado.",
   "6699ad2ab21fc3d9": "El host rechazó este dispositivo.",
   "c350437e14fa54b3": "No se pudo verificar la respuesta del host. No se guardó nada.",
-  "c3b058f64dc037f9": "Nadie aprobó este dispositivo a tiempo. Inténtalo de nuevo.",
-  "12dddf616e75a16d": "El host está sin conexión o no conectado al relé.",
   "1d41fee6f3635408": "El host respondió con una clave distinta de la del enlace. Alguien podría estar interceptando la conexión. No se envió nada.",
-  "342703452fa3470d": "Este dispositivo no puede guardar una clave para el relé.",
   "cc2cd1ee2cddcc14": "Este dispositivo no puede crear una clave de inicio de sesión para el host.",
   "20cae5304a573f04": "El host aprobó este dispositivo, pero el inicio de sesión falló. Vuelve a emparejarlo.",
   "3c4391a7f6421455": "{host} no confirmó el mensaje en 60 segundos.",
@@ -3244,10 +3252,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "en el ordenador que abrió esta página"
-      ]
+      "c": [" ", "en el ordenador que abrió esta página"]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3259,10 +3264,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "· quien lo ejecute obtiene este acceso"
-      ]
+      "c": [" ", "· quien lo ejecute obtiene este acceso"]
     }
   ],
   "c54cc9c75db9dc58": "Aprueba solo un inicio de sesión que acabes de iniciar.",
@@ -8801,6 +8803,35 @@
   "9eae463720500113": "Guardado en el servidor.",
   "b6e27ab2537ef874": "Crear uno",
   "6d8e4ebc889bace9": "Añadir cuenta",
+  "324f39a0f72bea9d": "Cuenta del relé",
+  "360ccb63d10b455d": "Sesión iniciada con {provider}",
+  "5b58695ff607b1e2": "Encuentra esta máquina iniciando sesión",
+  "166d7a40259881cc": "Opcional. Los dispositivos con sesión en la misma cuenta ven esta máquina y pueden pedir conectarse. Aun así necesitan tu aprobación. El emparejamiento con código QR funciona sin cuenta.",
+  "1d81038c7e181caf": "Iniciar sesión con {provider}",
+  "aba2c54f6de43086": "Termina de iniciar sesión en el navegador",
+  "a200b327853476e3": "El navegador solo vuelve a esta máquina, así que inicia sesión en el equipo donde se ejecuta K3 Code.",
+  "1bf03d9bdce29658": "Problema al iniciar sesión",
+  "cb6d000f58bbd65d": "Una política administrada no permite conexiones por relé en este equipo.",
+  "b27d092ab76d5158": "Activa el relé antes de iniciar sesión.",
+  "19b23262e1dec2fa": "Esta máquina aún no está registrada en el relé. Espera a que esté en línea.",
+  "42f0b5f11db93a97": "El relé no ofrece este inicio de sesión.",
+  "e2dbb0318a7acc83": "Esta máquina no puede llegar al relé.",
+  "85d7fb6148794e53": "Para desactivar la aprobación hay que aceptar el riesgo.",
+  "8a87f66fb2cfbd64": "El relé no pudo completar la solicitud.",
+  "6b8bd875c9f52a84": "Aprobar dispositivos nuevos",
+  "56d4b5384b337305": "Activado. Un dispositivo que inicia sesión en tu cuenta espera hasta que compares los códigos y lo apruebes aquí. Recomendado.",
+  "fb8a2c4ad960ffb8": "Desactivado. Cualquier dispositivo con sesión en tu cuenta se conecta sin preguntar. Si alguien se apoderara del relé o de tu cuenta, podría acceder a esta máquina.",
+  "d824094eaa04f9ff": "¿Dejar entrar a los dispositivos de la cuenta sin preguntar?",
+  "a75ac532028340c3": "Sin aprobación, esta máquina confía en lo que el relé diga sobre qué dispositivos son de tu cuenta. Un relé comprometido, una clave del relé filtrada, una cuenta de GitHub, Google o Apple secuestrada o un error del proveedor permitirían a alguien ejecutar código en esta máquina. Mantén la aprobación activada salvo que aceptes ese riesgo. En cualquier caso, activa la verificación en dos pasos en tu proveedor.",
+  "b259f103e7d5b165": "No se pudo iniciar la sesión",
+  "83ce5ef1a3e36282": "No se pudo cerrar la sesión",
+  "bf36e1775f461aad": "No se pudo cambiar la aprobación",
+  "78a1a02732fc74e8": "Cerrar sesión",
+  "ce2df756a70ae8af": "El dispositivo que espera arriba llegó a través de tu cuenta y acabas de añadir un dispositivo: apruébalo si es el que tienes en la mano.",
+  "730362718c7b9919": "El dispositivo que espera arriba llegó a través de tu cuenta: esta conexión confía en el relé. Apruébalo solo si tienes en la mano un dispositivo nuevo que muestra el mismo código.",
+  "7c35e58f3ebc3a67": "Los dispositivos emparejados con un código QR no se ven afectados. Siempre comparan códigos.",
+  "c810a1f7f7469c82": "Mantener la aprobación activada",
+  "31e43ec2575c4bab": "Lo entiendo, desactivarla",
   "6729d1b990f464b3": "Conectando con el relé…",
   "f71b09879b8b3741": "Iniciando sesión…",
   "1f81bd4fbe1359ed": "Emparejar a través del relé",
@@ -8836,7 +8867,6 @@
   "7df48ed9aecdc54b": "Desactivado",
   "64ce22f54953b0c6": "Activar o desactivar el relé",
   "09b4396773ea2312": "Desactivado por tu organización",
-  "cb6d000f58bbd65d": "Una política administrada no permite conexiones por relé en este equipo.",
   "ae6cd09b6d85ee45": "El acceso de red está desactivado",
   "edf237fde1015136": "Los dispositivos emparejados por el relé aún pueden acceder a este equipo. Revócalos abajo para impedirlo.",
   "4402486cbce7d0b0": "El relé informó de un problema",
@@ -9456,7 +9486,6 @@
   "366e370da9d8b04c": "Abrir navegador",
   "50c877d9fa8db3ec": "Copiar enlace de inicio de sesión",
   "663df6ba60de573b": "Abrir documentación",
-  "78a1a02732fc74e8": "Cerrar sesión",
   "e53ca6f665197e44": [
     "Introduce el código",
     " ",

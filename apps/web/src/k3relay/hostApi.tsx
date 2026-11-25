@@ -4,7 +4,13 @@ import {
   squashAtomCommandFailure,
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
-import type { EnvironmentId, K3RelayHostState, K3RelayPairingOffer } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  K3RelayAccountProvider,
+  K3RelayAccountState,
+  K3RelayHostState,
+  K3RelayPairingOffer,
+} from "@t3tools/contracts";
 import { useMessages } from "gt-react";
 
 import { connectionAtomRuntime } from "../connection/runtime";
@@ -74,5 +80,43 @@ export function useK3RelayHostActions(environmentId: EnvironmentId): K3RelayHost
     reject: () => settle(rejectPairing({ environmentId, input: {} })),
     revoke: (deviceId) => settle(revokeDevice({ environmentId, input: { deviceId } })),
     rename: (deviceId, name) => settle(renameDevice({ environmentId, input: { deviceId, name } })),
+  };
+}
+
+export interface K3RelayAccountStateView {
+  readonly state: K3RelayAccountState | null;
+  readonly error: string | null;
+}
+
+/** The host's account at the relay and its approval policy (spec §20). Null on older hosts. */
+export function useK3RelayAccountState(
+  environmentId: EnvironmentId | null,
+): K3RelayAccountStateView {
+  const resolve = useMessages();
+  const query = useEnvironmentQuery(
+    environmentId === null ? null : k3RelayEnvironment.accountState({ environmentId, input: {} }),
+    resolve,
+  );
+  return { state: query.data, error: query.data === null ? query.error : null };
+}
+
+export interface K3RelayAccountActions {
+  readonly signIn: (
+    provider: K3RelayAccountProvider,
+  ) => K3RelayHostCall<{ readonly authorizeUrl: string }>;
+  readonly signOut: () => K3RelayHostCall;
+  readonly setApproval: (requireApproval: boolean, acknowledgedRisk: boolean) => K3RelayHostCall;
+}
+
+export function useK3RelayAccountActions(environmentId: EnvironmentId): K3RelayAccountActions {
+  const options = { reportFailure: false } as const;
+  const signIn = useAtomCommand(k3RelayEnvironment.accountSignIn, options);
+  const signOut = useAtomCommand(k3RelayEnvironment.accountSignOut, options);
+  const setApproval = useAtomCommand(k3RelayEnvironment.accountSetApproval, options);
+  return {
+    signIn: (provider) => settle(signIn({ environmentId, input: { provider } })),
+    signOut: () => settle(signOut({ environmentId, input: {} })),
+    setApproval: (requireApproval, acknowledgedRisk) =>
+      settle(setApproval({ environmentId, input: { requireApproval, acknowledgedRisk } })),
   };
 }

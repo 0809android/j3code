@@ -572,6 +572,18 @@
   "0108edbdb5f27c83": "Este navegador não consegue decodificar o stream deste dispositivo (WebCodecs indisponível).",
   "eabffa063b9244f8": "Seu DNS ou firewall pode estar bloqueando o T3 Connect. Tente outra rede, como outro Wi-Fi ou dados móveis.",
   "c039a54c8238eafe": "Ele pode estar sobrecarregado, em repouso ou fora da rede.",
+  "555cc5e6788599d0": "Este relay não oferece login. Pareie com um código QR.",
+  "1be623dcf047ae41": "Este relay não oferece esse login.",
+  "c3b69c7b7c44877b": "Este dispositivo não consegue alcançar o relay.",
+  "8e999d89d9bb3dbb": "O login foi cancelado.",
+  "7172f526c0db33f5": "O login não terminou. Tente de novo.",
+  "0f65f0efba30ede2": "O login expirou. Entre de novo.",
+  "342703452fa3470d": "Este dispositivo não consegue guardar uma chave para o relay.",
+  "12dddf616e75a16d": "O host está offline ou não conectado ao relay.",
+  "96c3a2057cb8d041": "O host respondeu com uma chave diferente da que a conta lista. Alguém pode estar interceptando a conexão. Nada foi enviado.",
+  "f4102ca67774c059": "O host não deixou este dispositivo entrar.",
+  "c3b058f64dc037f9": "Ninguém aprovou este dispositivo a tempo. Tente novamente.",
+  "3d23d78796f87cde": "Não foi possível verificar a resposta. Nada foi salvo.",
   "9035f3b00a02914b": "{host} revogou este dispositivo. Emparelhe-o novamente para reconectar.",
   "b44dad73f71851ee": "{host} não reconhece este dispositivo. Emparelhe-o novamente para reconectar.",
   "0870f851747a7b65": "{host} respondeu com uma chave diferente da salva no emparelhamento. Este dispositivo não se conectou.",
@@ -582,7 +594,6 @@
   "95922b6ea4091293": "{host} está offline ou não conectado ao relay.",
   "8c9f8bb3f95a350a": "O operador do relay bloqueou {host}.",
   "1e237c9f12e5b797": "O relay não aceitou este dispositivo para {host}.",
-  "c3b69c7b7c44877b": "Este dispositivo não consegue alcançar o relay.",
   "3eeadeb828b0c31c": "A chave deste dispositivo para {host} está faltando. Emparelhe-o novamente para reconectar.",
   "6afca3a8d73b671d": "Em {host}, abra Configurações > Relay, crie um link de emparelhamento e emparelhe este dispositivo novamente.",
   "e7c36bdbdca6ec37": "Se {host} foi reinstalado ou teve a chave redefinida, remova-o aqui e emparelhe novamente. Caso contrário, não conecte: alguém pode estar interceptando o relay.",
@@ -599,10 +610,7 @@
   "ac6b0483b53340e8": "O host recusou o pedido de emparelhamento. O link pode ter sido alterado ou reutilizado.",
   "6699ad2ab21fc3d9": "O host rejeitou este dispositivo.",
   "c350437e14fa54b3": "Não foi possível verificar a resposta do host. Nada foi salvo.",
-  "c3b058f64dc037f9": "Ninguém aprovou este dispositivo a tempo. Tente novamente.",
-  "12dddf616e75a16d": "O host está offline ou não conectado ao relay.",
   "1d41fee6f3635408": "O host respondeu com uma chave diferente da do link. Alguém pode estar interceptando a conexão. Nada foi enviado.",
-  "342703452fa3470d": "Este dispositivo não consegue guardar uma chave para o relay.",
   "cc2cd1ee2cddcc14": "Este dispositivo não consegue criar uma chave de login para o host.",
   "20cae5304a573f04": "O host aprovou este dispositivo, mas o login falhou. Emparelhe novamente.",
   "3c4391a7f6421455": "{host} não confirmou a mensagem em 60 segundos.",
@@ -3244,10 +3252,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "no computador que abriu esta página"
-      ]
+      "c": [" ", "no computador que abriu esta página"]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3259,10 +3264,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "· quem executar recebe este acesso"
-      ]
+      "c": [" ", "· quem executar recebe este acesso"]
     }
   ],
   "c54cc9c75db9dc58": "Aprove apenas um login que você acabou de iniciar.",
@@ -8801,6 +8803,35 @@
   "9eae463720500113": "Armazenado no servidor.",
   "b6e27ab2537ef874": "Criar um",
   "6d8e4ebc889bace9": "Adicionar conta",
+  "324f39a0f72bea9d": "Conta do relay",
+  "360ccb63d10b455d": "Conectado com {provider}",
+  "5b58695ff607b1e2": "Encontre esta máquina entrando na sua conta",
+  "166d7a40259881cc": "Opcional. Dispositivos conectados à mesma conta veem esta máquina e podem pedir para se conectar. Eles ainda precisam da sua aprovação. O pareamento com código QR funciona sem conta.",
+  "1d81038c7e181caf": "Entrar com {provider}",
+  "aba2c54f6de43086": "Termine o login no navegador",
+  "a200b327853476e3": "O navegador volta só para esta máquina, então entre no computador que executa o K3 Code.",
+  "1bf03d9bdce29658": "Problema no login",
+  "cb6d000f58bbd65d": "Uma política gerenciada não permite conexões por relay nesta máquina.",
+  "b27d092ab76d5158": "Ative o relay antes de entrar.",
+  "19b23262e1dec2fa": "Esta máquina ainda não está registrada no relay. Aguarde até ela ficar online.",
+  "42f0b5f11db93a97": "O relay não oferece este login.",
+  "e2dbb0318a7acc83": "Esta máquina não consegue alcançar o relay.",
+  "85d7fb6148794e53": "Desativar a aprovação exige aceitar o risco.",
+  "8a87f66fb2cfbd64": "O relay não conseguiu concluir a solicitação.",
+  "6b8bd875c9f52a84": "Aprovar novos dispositivos",
+  "56d4b5384b337305": "Ativado. Um dispositivo que entra na sua conta espera até você comparar os códigos e aprová-lo aqui. Recomendado.",
+  "fb8a2c4ad960ffb8": "Desativado. Qualquer dispositivo conectado à sua conta se conecta sem perguntar. Se o relay ou sua conta fossem tomados, alguém poderia acessar esta máquina.",
+  "d824094eaa04f9ff": "Deixar dispositivos da conta entrarem sem perguntar?",
+  "a75ac532028340c3": "Sem aprovação, esta máquina confia no relay para dizer quais dispositivos pertencem à sua conta. Um relay comprometido, uma chave do relay vazada, uma conta do GitHub, Google ou Apple sequestrada ou um erro do provedor permitiriam a alguém executar código nesta máquina. Mantenha a aprovação ativada, a menos que aceite esse risco. De qualquer forma, ative a verificação em duas etapas no seu provedor.",
+  "b259f103e7d5b165": "Não foi possível iniciar o login",
+  "83ce5ef1a3e36282": "Não foi possível sair",
+  "bf36e1775f461aad": "Não foi possível alterar a aprovação",
+  "78a1a02732fc74e8": "Sair",
+  "ce2df756a70ae8af": "O dispositivo esperando acima veio pela sua conta e você acabou de adicionar um dispositivo: aprove se for o que está na sua mão.",
+  "730362718c7b9919": "O dispositivo esperando acima veio pela sua conta: esta conexão confia no relay. Aprove só se um dispositivo novo estiver na sua mão mostrando o mesmo código.",
+  "7c35e58f3ebc3a67": "Dispositivos pareados com código QR não são afetados. Eles sempre comparam códigos.",
+  "c810a1f7f7469c82": "Manter a aprovação ativada",
+  "31e43ec2575c4bab": "Entendo, desativar",
   "6729d1b990f464b3": "Conectando ao relay…",
   "f71b09879b8b3741": "Entrando…",
   "1f81bd4fbe1359ed": "Emparelhar pelo relay",
@@ -8836,7 +8867,6 @@
   "7df48ed9aecdc54b": "Desativado",
   "64ce22f54953b0c6": "Ativar ou desativar o relay",
   "09b4396773ea2312": "Desativado pela sua organização",
-  "cb6d000f58bbd65d": "Uma política gerenciada não permite conexões por relay nesta máquina.",
   "ae6cd09b6d85ee45": "O acesso à rede está desativado",
   "edf237fde1015136": "Dispositivos emparelhados pelo relay ainda alcançam esta máquina. Revogue-os abaixo para impedir.",
   "4402486cbce7d0b0": "O relay relatou um problema",
@@ -9458,7 +9488,6 @@
   "366e370da9d8b04c": "Abrir navegador",
   "50c877d9fa8db3ec": "Copiar link de login",
   "663df6ba60de573b": "Abrir documentação",
-  "78a1a02732fc74e8": "Sair",
   "e53ca6f665197e44": [
     "Digite o código",
     " ",
