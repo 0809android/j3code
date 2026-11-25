@@ -1,0 +1,37 @@
+# TLS terminates here. The relay itself never sees a certificate.
+#
+# No access log: Caddy writes none unless a `log` directive exists, and this file must never
+# contain one inside a site block (src/ops.test.ts checks it). The global logger is limited
+# to errors, which is what ACME and startup problems need.
+{
+	admin off
+	log {
+		output stderr
+		level ERROR
+	}
+}
+
+{$RELAY_DOMAIN:relay.k3.kinocode.jp} {
+	# Metrics are for the machine itself, never for the internet.
+	@metrics path /metrics
+	respond @metrics 404
+
+	request_body {
+		max_size 16KB
+	}
+
+	header {
+		-Server
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+	}
+
+	reverse_proxy relay:8080 {
+		# Replace whatever the client sent; the relay (TRUST_PROXY=1) reads only this value.
+		header_up X-Forwarded-For {remote_host}
+		flush_interval -1
+		transport http {
+			versions 1.1
+		}
+	}
+}

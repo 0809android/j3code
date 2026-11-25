@@ -1,0 +1,21 @@
+{
+  "name": "@t3tools/k3-relay",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "start": "node src/main.ts",
+    "invite": "node src/cli.ts invite",
+    "test": "vp test run --config ../../vite.config.ts --dir .",
+    "typecheck": "effect-tsgo tsrs --noEmit"
+  },
+  "dependencies": {
+    "ws": "8.22.0"
+  },
+  "devDependencies": {
+    "@noble/curves": "catalog:",
+    "@types/node": "catalog:",
+    "@types/ws": "8.18.2",
+    "vite-plus": "catalog:"
+  }
+}

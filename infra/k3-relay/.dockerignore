@@ -1,0 +1,9 @@
+node_modules
+**/*.test.ts
+src/relay.testkit.ts
+tsconfig.json
+README.md
+Dockerfile
+Caddyfile
+docker-compose*.yml
+*.sqlite*
