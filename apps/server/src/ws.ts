@@ -245,10 +245,7 @@ import * as EventLoopMonitor from "./observability/EventLoopMonitor.ts";
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import * as ServerE2eeIdentity from "./auth/ServerE2eeIdentity.ts";
-import {
-  classifyRequestTransport,
-  transportAllowedByPolicy,
-} from "./auth/transportSecurity.ts";
+import { classifyRequestTransport, transportAllowedByPolicy } from "./auth/transportSecurity.ts";
 import { requiredScopeForDeviceList, rpcAuthorizationError } from "./auth/RpcAuthorization.ts";
 import * as RpcAuthorization from "./auth/RpcAuthorization.ts";
 import { RpcInstrumentation, rpcInstrumentationLayer } from "./observability/RpcInstrumentation.ts";
@@ -1496,21 +1493,20 @@ export const layerWsRpc = (
         never,
         never
       > = Option.isSome(e2eeIdentity)
-        ? Effect.map(
-            Effect.result(e2eeIdentity.value.getDescriptor),
-            (outcome) =>
-              Result.isSuccess(outcome)
-                ? {
-                    identityPublicKey: outcome.success.publicKeyBase64Url,
-                    identityPublicKeyFingerprint: outcome.success.fingerprint,
-                  }
-                : undefined,
+        ? Effect.map(Effect.result(e2eeIdentity.value.getDescriptor), (outcome) =>
+            Result.isSuccess(outcome)
+              ? {
+                  identityPublicKey: outcome.success.publicKeyBase64Url,
+                  identityPublicKeyFingerprint: outcome.success.fingerprint,
+                }
+              : undefined,
           )
         : Effect.succeed<
-            Pick<
-              import("@t3tools/contracts").TransportSecurity,
-              "identityPublicKey" | "identityPublicKeyFingerprint"
-            > | undefined
+            | Pick<
+                import("@t3tools/contracts").TransportSecurity,
+                "identityPublicKey" | "identityPublicKeyFingerprint"
+              >
+            | undefined
           >(undefined);
       const secretResolver = yield* SecretResolver.SecretResolver;
       const peerLinks = yield* PeerLinks.PeerLinks;
@@ -3711,10 +3707,7 @@ export const layer = Layer.unwrap(
         const e2eeIdentity = yield* Effect.serviceOption(ServerE2eeIdentity.ServerE2eeIdentity);
         // A client asking for E2EE the server cannot offer must fail loudly:
         // silently continuing in plaintext would defeat its pinned key.
-        if (
-          e2eeRequested &&
-          (currentSettings.e2eeMode === "off" || Option.isNone(e2eeIdentity))
-        ) {
+        if (e2eeRequested && (currentSettings.e2eeMode === "off" || Option.isNone(e2eeIdentity))) {
           return HttpServerResponse.jsonUnsafe(
             {
               code: "E2EE_NOT_SUPPORTED",

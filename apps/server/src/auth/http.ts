@@ -36,10 +36,7 @@ import { HttpServerRequest, HttpServerResponse } from "effect/http";
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 
 import * as EnvironmentAuth from "./EnvironmentAuth.ts";
-import {
-  classifyRequestTransport,
-  transportAllowedByPolicy,
-} from "./transportSecurity.ts";
+import { classifyRequestTransport, transportAllowedByPolicy } from "./transportSecurity.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as SessionStore from "./SessionStore.ts";
 import { traceAuthenticatedRelayRequest, traceRelayRequest } from "../cloud/traceRelayRequest.ts";

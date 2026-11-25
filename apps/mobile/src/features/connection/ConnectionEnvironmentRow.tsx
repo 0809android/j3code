@@ -26,10 +26,7 @@ import { environmentPresentations } from "../../state/presentation";
 import { ConnectionDiagnosisDetails, useConnectionDiagnosis } from "./ConnectionDiagnosisDetails";
 import { ConnectionFormField } from "./ConnectionFormField";
 import { ConnectionStatusDot } from "./ConnectionStatusDot";
-import {
-  connectionSecuritySummaryText,
-  environmentStatusText,
-} from "./environmentStatusText";
+import { connectionSecuritySummaryText, environmentStatusText } from "./environmentStatusText";
 import type { MessageResolver } from "../../i18n/messages";
 
 function connectionStatusLabel(

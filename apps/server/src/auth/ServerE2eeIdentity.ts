@@ -54,9 +54,8 @@ export const make = Effect.gen(function* () {
     publicKey: identityPublicKeyFromSeed(seed),
   });
 
-  const loadKeypair = Effect.map(
-    secrets.getOrCreateRandom(IDENTITY_SECRET_NAME, 32),
-    (stored) => keypairFromSeed(Uint8Array.from(stored)),
+  const loadKeypair = Effect.map(secrets.getOrCreateRandom(IDENTITY_SECRET_NAME, 32), (stored) =>
+    keypairFromSeed(Uint8Array.from(stored)),
   );
 
   const descriptorFromKeypair = (keypair: E2eeIdentityKeypair): E2eeIdentityDescriptor => ({
@@ -69,9 +68,7 @@ export const make = Effect.gen(function* () {
     const keypair = keypairFromSeed(seed);
     yield* secrets.set(IDENTITY_SECRET_NAME, keypair.seed);
     return descriptorFromKeypair(keypair);
-  }).pipe(
-    Effect.mapError((cause) => new ServerE2eeIdentityError({ operation: "rotate", cause })),
-  );
+  }).pipe(Effect.mapError((cause) => new ServerE2eeIdentityError({ operation: "rotate", cause })));
 
   return ServerE2eeIdentity.of({
     getKeypair: loadKeypair.pipe(

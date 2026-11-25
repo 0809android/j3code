@@ -4,8 +4,6 @@ import { WebSocket } from "@effect/platform-node/NodeWS";
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- Bind an isolated WebSocket negotiation fixture.
 import * as NodeHttp from "node:http";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
-import * as Option from "effect/Option";
-import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
@@ -981,8 +979,8 @@ it.live.each([
         Layer.mock(RemoteOpenTargets.RemoteOpenTargets)({}),
         Layer.mock(DirectEndpoints.DirectEndpoints)({}),
         Layer.mock(ServerEnvironment.ServerEnvironment)({
-      getEnvironmentId: Effect.succeed(EnvironmentId.make("ws-policy-test")),
-    }),
+          getEnvironmentId: Effect.succeed(EnvironmentId.make("ws-policy-test")),
+        }),
         Layer.mock(VcsProcess.VcsProcess)({
           run: (input) =>
             Effect.fail(
@@ -1343,8 +1341,8 @@ it.effect("access changes made while the snapshot loads reach the client after i
               }),
               Layer.mock(ScratchThreadPromotion.ScratchThreadPromotion)({}),
               Layer.mock(ServerEnvironment.ServerEnvironment)({
-      getEnvironmentId: Effect.succeed(EnvironmentId.make("ws-policy-test")),
-    }),
+                getEnvironmentId: Effect.succeed(EnvironmentId.make("ws-policy-test")),
+              }),
               Layer.mock(EnvironmentAuth.EnvironmentAuth)({
                 listPairingLinks: () => Effect.succeed([]),
                 listConnectDevices: () => Effect.succeed([]),
@@ -1880,8 +1878,8 @@ it.effect("a missing thread worktree gets its project's skills in the cwd snapsh
       }),
       Layer.mock(ScratchThreadPromotion.ScratchThreadPromotion)({}),
       Layer.mock(ServerEnvironment.ServerEnvironment)({
-      getEnvironmentId: Effect.succeed(EnvironmentId.make("ws-policy-test")),
-    }),
+        getEnvironmentId: Effect.succeed(EnvironmentId.make("ws-policy-test")),
+      }),
       Layer.mock(EnvironmentAuth.EnvironmentAuth)({}),
     );
     const server = yield* RpcServer.makeNoSerialization(
@@ -1967,8 +1965,8 @@ it.effect("a git action that fails partway still refreshes the repository status
       Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({ namedProjectsRoot: "/unused" }),
       Layer.mock(ScratchThreadPromotion.ScratchThreadPromotion)({}),
       Layer.mock(ServerEnvironment.ServerEnvironment)({
-      getEnvironmentId: Effect.succeed(EnvironmentId.make("ws-policy-test")),
-    }),
+        getEnvironmentId: Effect.succeed(EnvironmentId.make("ws-policy-test")),
+      }),
       Layer.mock(EnvironmentAuth.EnvironmentAuth)({}),
     );
     const server = yield* RpcServer.makeNoSerialization(WsRpcGroup, {
@@ -2048,8 +2046,8 @@ it.effect("a publish whose push fails still refreshes the new remote", () =>
       Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({ namedProjectsRoot: "/unused" }),
       Layer.mock(ScratchThreadPromotion.ScratchThreadPromotion)({}),
       Layer.mock(ServerEnvironment.ServerEnvironment)({
-      getEnvironmentId: Effect.succeed(EnvironmentId.make("ws-policy-test")),
-    }),
+        getEnvironmentId: Effect.succeed(EnvironmentId.make("ws-policy-test")),
+      }),
       Layer.mock(EnvironmentAuth.EnvironmentAuth)({}),
     );
     const server = yield* RpcServer.makeNoSerialization(WsRpcGroup, {
@@ -2549,8 +2547,8 @@ it.effect("ACP session RPCs list a thread missing its history and repair it on i
       Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({ namedProjectsRoot: "/unused" }),
       Layer.mock(ScratchThreadPromotion.ScratchThreadPromotion)({}),
       Layer.mock(ServerEnvironment.ServerEnvironment)({
-      getEnvironmentId: Effect.succeed(EnvironmentId.make("ws-policy-test")),
-    }),
+        getEnvironmentId: Effect.succeed(EnvironmentId.make("ws-policy-test")),
+      }),
       Layer.mock(EnvironmentAuth.EnvironmentAuth)({}),
       Layer.mock(ProjectService.ProjectService)({
         getById: () =>

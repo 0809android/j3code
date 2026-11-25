@@ -137,7 +137,9 @@ const makeBearerBroker = Effect.fn("clientRuntime.connection.broker.makeBearer")
         actual: profile.environmentId,
       });
     }
-    const e2eePin = { ...(profile.serverIdentityKey ? { e2eeServerIdentityKey: profile.serverIdentityKey } : {}) };
+    const e2eePin = profile.serverIdentityKey
+      ? { e2eeServerIdentityKey: profile.serverIdentityKey }
+      : {};
     if (profile.authorization === "t3-connect") {
       const authorized = yield* remote.authorizeDpop({
         expectedEnvironmentId: target.environmentId,

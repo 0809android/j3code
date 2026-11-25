@@ -23,10 +23,7 @@ import {
 import { codexPlanLabel } from "../provider/CodexProvider.ts";
 import { codexRateLimitsToLimits } from "../provider/codexUsageLimits.ts";
 import { claudeUsageResponseToLimits } from "../provider/claudeUsageLimits.ts";
-import {
-  makeUnavailableUsageLimits,
-  makeUsageLimits,
-} from "@t3tools/provider-core/server/usageLimits";
+import { makeUnavailableUsageLimits } from "@t3tools/provider-core/server/usageLimits";
 
 /** A hub with its management key already read from wherever the setting keeps it. */
 export interface CliproxyHub {
@@ -123,7 +120,6 @@ const decodeCreditList = Schema.decodeUnknownEffect(Schema.fromJsonString(Credit
 const decodeClaudeUsage = Schema.decodeUnknownEffect(Schema.fromJsonString(ClaudeUsage));
 const decodeCodexUsage = Schema.decodeUnknownEffect(Schema.fromJsonString(CodexUsage));
 const decodeGrokUsage = Schema.decodeUnknownEffect(Schema.fromJsonString(GrokUsageResponse));
-const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown));
 const isUsageLimitSourceError = Schema.is(UsageLimitSourceError);
 
 // Extra CAs can fix untrusted chains; expiry/hostname failures report codes only.

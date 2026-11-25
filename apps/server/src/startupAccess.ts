@@ -11,10 +11,7 @@ import {
 } from "@t3tools/shared/hostClassification";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { QrCode } from "@t3tools/shared/qrCode";
-import {
-  buildPairingAppLink,
-  setPairingServerKeyOnUrl,
-} from "@t3tools/shared/remote";
+import { buildPairingAppLink, setPairingServerKeyOnUrl } from "@t3tools/shared/remote";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import { HttpServer } from "effect/http";
@@ -286,4 +283,5 @@ export const issueHeadlessServeAccessInfo = Effect.fn("issueHeadlessServeAccessI
     connectionString,
     token: issued.credential,
     pairingUrl: buildPairingUrl(connectionString, issued.credential),
-  } satisfies HeadlessServeAccessInfo;});
+  } satisfies HeadlessServeAccessInfo;
+});

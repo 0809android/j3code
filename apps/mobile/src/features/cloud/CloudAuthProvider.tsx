@@ -5,6 +5,7 @@ import { deactivateCloudRelayAccount } from "./cloudAccountService";
 // Clerk has been removed from this fork; drop any persisted cloud registration.
 deactivateCloudRelayAccount();
 
+// oxlint-disable-next-line t3code/no-hookless-use-function -- Clerk was removed; this stub keeps the hook-shaped API for its callers.
 export function useCloudAuth(_options?: { readonly treatPendingAsSignedOut?: boolean }) {
   return {
     isLoaded: true as const,
@@ -14,6 +15,7 @@ export function useCloudAuth(_options?: { readonly treatPendingAsSignedOut?: boo
   };
 }
 
+// oxlint-disable-next-line t3code/no-hookless-use-function -- Clerk was removed; this stub keeps the hook-shaped API for its callers.
 export function useCloudUser() {
   return {
     isLoaded: true as const,

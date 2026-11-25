@@ -16,7 +16,9 @@ export type RequestTransportKind = "loopback" | "tailscale" | "tunnel" | "lan-or
 
 const TUNNEL_HEADERS = ["cf-connecting-ip", "cf-ray"] as const;
 
-const firstForwardedFor = (headers: HttpServerRequest.HttpServerRequest["headers"]): string | undefined => {
+const firstForwardedFor = (
+  headers: HttpServerRequest.HttpServerRequest["headers"],
+): string | undefined => {
   const forwarded = headers["x-forwarded-for"];
   if (typeof forwarded !== "string") return undefined;
   return forwarded

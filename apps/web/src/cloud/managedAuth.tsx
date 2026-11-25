@@ -18,6 +18,7 @@ export function activateManagedRelayAuthentication(
 }
 
 /** Clerk has been removed from this fork; cloud auth is permanently signed out. */
+// oxlint-disable-next-line t3code/no-hookless-use-function -- Clerk was removed; this stub keeps the hook-shaped API for its callers.
 export function useCloudAuth(_options?: { readonly treatPendingAsSignedOut?: boolean }) {
   return {
     isLoaded: true as const,
@@ -27,6 +28,7 @@ export function useCloudAuth(_options?: { readonly treatPendingAsSignedOut?: boo
   };
 }
 
+// oxlint-disable-next-line t3code/no-hookless-use-function -- Clerk was removed; this stub keeps the hook-shaped API for its callers.
 export function useCloudClient() {
   return {
     status: "ready" as const,

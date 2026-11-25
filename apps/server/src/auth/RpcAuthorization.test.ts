@@ -487,7 +487,7 @@ describe("settings mutation authorization", () => {
         const client = yield* RpcTest.makeClient(group).pipe(
           Effect.provide(
             Layer.mergeAll(
-                group.toLayerHandler(WS_METHODS.serverUpdateSettings, () =>
+              group.toLayerHandler(WS_METHODS.serverUpdateSettings, () =>
                 Effect.sync(() => {
                   handled = true;
                   return DEFAULT_SERVER_SETTINGS;

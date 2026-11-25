@@ -173,7 +173,7 @@ describe("ElectronProtocol", () => {
           yield* protocol.registerDesktopProtocol({
             scheme: "k3code",
             targetOrigin: new URL("http://127.0.0.1:3773/"),
-              });
+          });
           return yield* Effect.promise(() => handler!(new Request("k3code://other/")));
         }),
       );

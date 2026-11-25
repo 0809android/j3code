@@ -922,7 +922,7 @@ export function TransportSecurityRows({
                 )
               : transportSecurity.e2eeMode === "prefer"
                 ? gt(
-                    "Updated clients encrypt the session itself and verify this fingerprint: {fingerprint}. The official mobile app still connects without it.",
+                    "Updated clients encrypt the session itself and verify this fingerprint: {fingerprint}. Clients without E2EE support still connect without it.",
                     { fingerprint: transportSecurity.fingerprint },
                   )
                 : gt(

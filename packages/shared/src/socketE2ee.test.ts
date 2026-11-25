@@ -9,7 +9,6 @@ import * as Queue from "effect/Queue";
 import * as Cause from "effect/Cause";
 import * as Exit from "effect/Exit";
 import * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
 import * as Socket from "effect/socket/Socket";
 
 import {
@@ -96,11 +95,14 @@ const queueRecordingSocket = (
           ? Effect.andThen(Queue.offer(captured, chunk), writer.write(chunk))
           : writer.write(chunk),
       writeAll: (chunks) =>
-        Effect.forEach(chunks, (chunk) =>
-          chunk instanceof Uint8Array
-            ? Effect.andThen(Queue.offer(captured, chunk), writer.write(chunk))
-            : writer.write(chunk),
-        { discard: true }),
+        Effect.forEach(
+          chunks,
+          (chunk) =>
+            chunk instanceof Uint8Array
+              ? Effect.andThen(Queue.offer(captured, chunk), writer.write(chunk))
+              : writer.write(chunk),
+          { discard: true },
+        ),
     })),
   });
 
@@ -111,7 +113,10 @@ const e2eeCause = (error: unknown): unknown => {
     return (error as { readonly cause?: unknown }).cause;
   }
   const reason = (error as { readonly reason?: { readonly _tag?: string } | undefined })?.reason;
-  if (reason !== undefined && (reason._tag === "SocketReadError" || reason._tag === "SocketWriteError")) {
+  if (
+    reason !== undefined &&
+    (reason._tag === "SocketReadError" || reason._tag === "SocketWriteError")
+  ) {
     return (reason as { readonly cause?: unknown }).cause;
   }
   return undefined;
@@ -241,7 +246,10 @@ describe("socketE2ee", () => {
           );
           const frames = yield* Deferred.await(received);
           assert.equal(frames.length, count);
-          assert.deepEqual([...frames].sort(), Array.from({ length: count }, (_, i) => `frame-${i}`).sort());
+          assert.deepEqual(
+            [...frames].sort(),
+            Array.from({ length: count }, (_, i) => `frame-${i}`).sort(),
+          );
         }),
       );
       yield* Fiber.interrupt(serverFiber);
@@ -372,7 +380,7 @@ describe("socketE2ee", () => {
           for (let round = 0; round < 4; round += 1) {
             yield* Effect.scoped(
               Effect.gen(function* () {
-                const reader = yield* wrapped.reader;
+                yield* wrapped.reader;
                 const writer = yield* wrapped.writer;
                 yield* writer.write("record-zero");
                 yield* writer.write("record-one");
@@ -564,6 +572,4 @@ describe("socketE2ee", () => {
   );
 });
 
-const layerE2eeCrypto = Aead.layerWebCrypto.pipe(
-  Layer.provideMerge(SecureRandom.layerWebCrypto),
-);
+const layerE2eeCrypto = Aead.layerWebCrypto.pipe(Layer.provideMerge(SecureRandom.layerWebCrypto));

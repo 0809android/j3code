@@ -261,27 +261,28 @@ export const make = Effect.fn("RpcSessionFactory.make")(function* (
       connection.e2eeServerIdentityKey !== undefined
         ? decodeIdentityKey(connection.e2eeServerIdentityKey)
         : undefined;
-    if (
-      connection.e2eeServerIdentityKey !== undefined &&
-      e2eeServerIdentityKey === undefined
-    ) {
+    if (connection.e2eeServerIdentityKey !== undefined && e2eeServerIdentityKey === undefined) {
       return yield* new ConnectionBlockedError({
         reason: "configuration",
-        ...translatableDetail(msg("The saved end-to-end encryption key is invalid. Re-pair this environment.")),
+        ...translatableDetail(
+          msg("The saved end-to-end encryption key is invalid. Re-pair this environment."),
+        ),
       });
     }
     // Optional so runtimes without the crypto layer keep working for
     // non-pinned environments; a pinned one fails closed below.
-    const e2eeAead = e2eeServerIdentityKey === undefined
-      ? Option.none()
-      : yield* Effect.serviceOption(Aead.Aead);
+    const e2eeAead =
+      e2eeServerIdentityKey === undefined ? Option.none() : yield* Effect.serviceOption(Aead.Aead);
     if (e2eeServerIdentityKey !== undefined && Option.isNone(e2eeAead)) {
       return yield* new ConnectionBlockedError({
         reason: "configuration",
         ...translatableDetail(
-          msg("This app build cannot run end-to-end encryption. Update the app to connect to {host}.", {
-            host: connection.label,
-          }),
+          msg(
+            "This app build cannot run end-to-end encryption. Update the app to connect to {host}.",
+            {
+              host: connection.label,
+            },
+          ),
         ),
       });
     }

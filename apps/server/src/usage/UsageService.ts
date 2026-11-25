@@ -25,7 +25,6 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
-import { HttpClient, HttpClientResponse } from "effect/http";
 
 import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
 import { formatMalformedUsageWarning } from "@t3tools/shared/usageFormat";
@@ -71,8 +70,6 @@ import {
 
 const LOCAL_RATES_SOURCE = "local-cache";
 
-const RATES_TTL_MS = 24 * 60 * 60 * 1000;
-
 const RATES_REFRESH_FLOOR_MS = 60 * 1000;
 
 // mtime slack includes writes just before local midnight on the window's first day.
@@ -115,7 +112,6 @@ const RatesCacheFile = Schema.Struct({
   document: Schema.Unknown,
 });
 const decodeRatesCache = Schema.decodeUnknownEffect(Schema.fromJsonString(RatesCacheFile));
-const encodeRatesCache = Schema.encodeEffect(Schema.fromJsonString(RatesCacheFile));
 
 const ScanCacheJson = Schema.fromJsonString(Schema.Unknown);
 const decodeScanCacheFile = Schema.decodeUnknownEffect(ScanCacheJson);
@@ -171,7 +167,6 @@ export const make = Effect.gen(function* () {
   const path = yield* Path.Path;
   const config = yield* ServerConfig.ServerConfig;
   const settingsService = yield* ServerSettings.ServerSettingsService;
-  const httpClient = yield* HttpClient.HttpClient;
   const hostEnvironment = yield* HostProcess.Environment;
   const hostPlatform = yield* HostProcess.Platform;
   const hostScope = hostEnvironment[DESKTOP_HOST_SCOPE_ENV]?.trim();
@@ -255,7 +250,6 @@ export const make = Effect.gen(function* () {
     ));
   let rates: RateTable = new Map();
   let ratesFetchedAtMs: number | null = null;
-  let ratesLastFailedAtMs: number | null = null;
   let ratesStatus: UsagePricing["status"] = "unavailable";
   const ratesLock = yield* Semaphore.make(1);
 
