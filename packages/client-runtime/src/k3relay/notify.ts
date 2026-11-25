@@ -12,12 +12,14 @@ import {
 } from "@t3tools/shared/relay";
 import { type E2eeDeviceSigner, deviceIdFromPublicKey } from "@t3tools/shared/socketE2ee";
 import * as Clock from "effect/Clock";
+import * as Context from "effect/Context";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 import type { ConnectionTransport } from "../connection/model.ts";
 import { NotificationKeyStore, type OpenedNotification } from "./notificationKeyStore.ts";
+import type { K3RelayTunnelInput } from "./tunnel.ts";
 import { k3relayEndpointUrl } from "./status.ts";
 
 /**
@@ -214,4 +216,81 @@ export const openK3RelayPush = Effect.fn("K3RelayNotify.openPush")(function* (en
   if (bytes === null) return { ok: false, reason: "malformed" } satisfies OpenedNotification;
   const store = yield* NotificationKeyStore;
   return yield* store.open(bytes);
+});
+
+/** What this device wants from relay notifications right now; `null` when they are off here. */
+export interface K3RelayNotificationChoice {
+  readonly kinds: K3RelayNotifyKinds;
+  /** `null` until the platform hands out a push token (permission not granted yet). */
+  readonly push: { readonly platform: K3RelayPushPlatform; readonly token: string } | null;
+}
+
+/** Provided by apps that can receive pushes (mobile). Without it, nothing is registered. */
+export class K3RelayNotificationSource extends Context.Service<
+  K3RelayNotificationSource,
+  { readonly current: Effect.Effect<K3RelayNotificationChoice | null> }
+>()("@t3tools/client-runtime/k3relay/notify/K3RelayNotificationSource") {}
+
+const sameKinds = (left: K3RelayNotifyKinds | null, right: K3RelayNotifyKinds) =>
+  left !== null &&
+  left.approval === right.approval &&
+  left.input === right.input &&
+  left.completed === right.completed &&
+  left.failed === right.failed;
+
+// Reconnects are frequent and the relay limits registrations; a token it has is not sent again.
+const registeredTokens = new Map<string, string>();
+
+/**
+ * Brings one host and the relay in line with this device's choice, after a relay connection
+ * opens: the key and kinds to the host, the push token to the relay, or both withdrawn when the
+ * device turned notifications off. Best effort; the next connection tries again.
+ */
+export const syncK3RelayNotifications = Effect.fn("K3RelayNotify.sync")(function* (input: {
+  readonly tunnel: K3RelayTunnelInput;
+  readonly transport: ConnectionTransport;
+  readonly environmentId: string;
+  readonly hostLabel: string | null;
+  readonly source: K3RelayNotificationSource["Service"];
+  readonly keys: NotificationKeyStore["Service"];
+}) {
+  const { tunnel, transport } = input;
+  const deviceId = deviceIdFromPublicKey(tunnel.signer.alg, tunnel.signer.publicKey);
+  const cacheKey = `${tunnel.hostId}:${deviceId}`;
+  const relayInput = {
+    relayUrl: tunnel.relayUrl,
+    hostId: tunnel.hostId,
+    signer: tunnel.signer,
+    grant: tunnel.grant,
+  };
+  const choice = yield* input.source.current;
+  if (choice === null) {
+    const status = yield* readK3RelayNotificationStatus(transport);
+    if (status.registered) yield* unregisterK3RelayNotificationKey(transport);
+    if (registeredTokens.has(cacheKey)) {
+      yield* registerK3RelayPushToken({ ...relayInput, push: null });
+      registeredTokens.delete(cacheKey);
+    }
+    return;
+  }
+  if (choice.push === null) return;
+  const key = yield* input.keys
+    .ensure({
+      hostId: tunnel.hostId,
+      environmentId: input.environmentId,
+      hostLabel: input.hostLabel,
+    })
+    .pipe(Effect.mapError(() => new K3RelayNotifyError({ reason: "unavailable" })));
+  const status = yield* readK3RelayNotificationStatus(transport);
+  if (!status.registered || status.keyId !== key.keyId || !sameKinds(status.kinds, choice.kinds)) {
+    yield* registerK3RelayNotificationKey(transport, {
+      publicKey: key.publicKey,
+      kinds: choice.kinds,
+    });
+  }
+  const tokenKey = `${choice.push.platform}:${choice.push.token}`;
+  if (registeredTokens.get(cacheKey) !== tokenKey) {
+    yield* registerK3RelayPushToken({ ...relayInput, push: choice.push });
+    registeredTokens.set(cacheKey, tokenKey);
+  }
 });

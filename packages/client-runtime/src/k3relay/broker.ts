@@ -31,6 +31,8 @@ import * as ConnectionCredentialStore from "../connection/credentialStore.ts";
 import * as ConnectionProfileStore from "../connection/profileStore.ts";
 import { credentialConnectionId } from "../connection/routes.ts";
 import { DeviceKeyStore } from "./deviceKeyStore.ts";
+import { NotificationKeyStore } from "./notificationKeyStore.ts";
+import { K3RelayNotificationSource, syncK3RelayNotifications } from "./notify.ts";
 import { k3relayConnectionError } from "./failure.ts";
 import { authorizeWithReissue, reissueK3RelaySession } from "./reissue.ts";
 import { K3RelayTunnels } from "./tunnels.ts";
@@ -165,6 +167,8 @@ export const makeK3RelayBroker = Effect.fn("clientRuntime.connection.broker.make
   function* () {
     const tunnels = yield* Effect.serviceOption(K3RelayTunnels);
     const keys = yield* Effect.serviceOption(DeviceKeyStore);
+    const notificationSource = yield* Effect.serviceOption(K3RelayNotificationSource);
+    const notificationKeys = yield* Effect.serviceOption(NotificationKeyStore);
     const profiles = yield* ConnectionProfileStore.ConnectionProfileStore;
     const remote = yield* RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization;
     const credentials = yield* ConnectionCredentialStore.ConnectionCredentialStore;
@@ -218,6 +222,23 @@ export const makeK3RelayBroker = Effect.fn("clientRuntime.connection.broker.make
           ),
         ),
       });
+      if (Option.isSome(notificationSource) && Option.isSome(notificationKeys)) {
+        // In the background: a slow or older host must not hold up the connection.
+        yield* syncK3RelayNotifications({
+          tunnel: input,
+          transport: tunnel.transport,
+          environmentId: profile.environmentId,
+          hostLabel: profile.label,
+          source: notificationSource.value,
+          keys: notificationKeys.value,
+        }).pipe(
+          Effect.catch((error) =>
+            Effect.logDebug("Relay notifications not synced.", { reason: error.reason }),
+          ),
+          Effect.provide(SecureRandom.layerWebCrypto),
+          Effect.forkDetach,
+        );
+      }
       const renewed = yield* renewK3RelayGrant({
         record: pairingRecordOf(profile, input.grant),
         signer: input.signer,

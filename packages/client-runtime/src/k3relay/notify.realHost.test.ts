@@ -21,7 +21,9 @@ import {
   readK3RelayNotificationStatus,
   registerK3RelayNotificationKey,
   registerK3RelayPushToken,
+  type K3RelayNotificationChoice,
   sendK3RelayTestNotification,
+  syncK3RelayNotifications,
   unregisterK3RelayNotificationKey,
 } from "./notify.ts";
 import { runK3RelayDevicePairing } from "./pairing.ts";
@@ -296,5 +298,46 @@ describe("K3 relay notifications, end to end", () => {
         notifications: false,
       });
     }).pipe(Effect.scoped, Effect.provide(layerDevice)),
+  );
+
+  it.live(
+    "syncing after a connection registers both halves, and withdraws both when turned off",
+    () =>
+      Effect.gen(function* () {
+        const { apns, host, token } = yield* startStack;
+        const { paired } = yield* pair(host);
+        const record = paired.record;
+        const tunnelInput = {
+          relayUrl: record.relayUrl,
+          hostId: record.hostId,
+          hostIdentityKey: decodeBase64url(record.hostIdentityKey, 32)!,
+          signer: paired.signer,
+          grant: record.grant,
+        };
+        const tunnel = yield* openK3RelayTunnel(tunnelInput);
+        let choice: K3RelayNotificationChoice | null = {
+          kinds: DEFAULT_NOTIFY_KINDS,
+          push: { platform: "ios", token },
+        };
+        const sync = syncK3RelayNotifications({
+          tunnel: tunnelInput,
+          transport: tunnel.transport,
+          environmentId: host.environmentId,
+          hostLabel: "Studio Mac",
+          source: { current: Effect.sync(() => choice) },
+          keys: yield* NotificationKeyStore,
+        });
+        yield* sync;
+        expect(yield* Effect.promise(() => host.notify("input", THREAD_ID))).toEqual(["sent"]);
+        const opened = yield* openK3RelayPush(apns.requests[0]!.body.k3);
+        assert(opened.ok);
+        expect(opened.payload.kind).toBe("input");
+
+        choice = null;
+        yield* sync;
+        expect((yield* readK3RelayNotificationStatus(tunnel.transport)).registered).toBe(false);
+        expect(yield* Effect.promise(() => host.notify("input", THREAD_ID))).toEqual([]);
+        expect(apns.requests).toHaveLength(1);
+      }).pipe(Effect.scoped, Effect.provide(layerDevice)),
   );
 });
