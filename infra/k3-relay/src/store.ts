@@ -51,6 +51,23 @@ CREATE TABLE IF NOT EXISTS blocked_hosts (
   host_id TEXT PRIMARY KEY,
   blocked_at INTEGER NOT NULL
 ) STRICT;
+CREATE TABLE IF NOT EXISTS accounts (
+  owner_id TEXT PRIMARY KEY,
+  created_day INTEGER NOT NULL
+) STRICT;
+CREATE TABLE IF NOT EXISTS identities (
+  provider TEXT NOT NULL,
+  subject_mac BLOB NOT NULL,
+  owner_id TEXT NOT NULL,
+  created_day INTEGER NOT NULL,
+  PRIMARY KEY (provider, subject_mac)
+) STRICT;
+CREATE TABLE IF NOT EXISTS account_hosts (
+  owner_id TEXT NOT NULL,
+  host_id TEXT NOT NULL,
+  added_day INTEGER NOT NULL,
+  PRIMARY KEY (owner_id, host_id)
+) STRICT;
 `;
 
 export const SCHEMA_HASH = NodeCrypto.createHash("sha256").update(SCHEMA_SQL).digest("hex");
@@ -78,6 +95,7 @@ export interface PurgeResult {
   readonly revocations: number;
   readonly invites: number;
   readonly usage: number;
+  readonly accountHosts: number;
 }
 
 type Row = Record<string, NodeSqlite.SQLOutputValue>;
@@ -243,6 +261,82 @@ export class RelayStore {
       .map((row) => String(row.host_id));
   }
 
+  // ── Accounts (spec section 20.5). The account id is random; a provider identifier is only
+  // ever stored as an HMAC whose key is outside the database. Nothing else about a person. ──
+
+  /** The account for a provider identifier's HMAC, created on first sign-in. */
+  findAccount(provider: string, subjectMac: Uint8Array): string | undefined {
+    const row = this.#stmt(
+      "SELECT owner_id FROM identities WHERE provider = ? AND subject_mac = ?",
+    ).get(provider, subjectMac);
+    return row ? String(row.owner_id) : undefined;
+  }
+
+  createAccount(accountId: string, provider: string, subjectMac: Uint8Array, day: number): void {
+    this.transaction(() => {
+      this.#stmt("INSERT INTO accounts (owner_id, created_day) VALUES (?, ?)").run(accountId, day);
+      this.#stmt(
+        "INSERT INTO identities (provider, subject_mac, owner_id, created_day) VALUES (?, ?, ?, ?)",
+      ).run(provider, subjectMac, accountId, day);
+    });
+  }
+
+  accountExists(accountId: string): boolean {
+    return (
+      this.#stmt("SELECT 1 AS ok FROM accounts WHERE owner_id = ?").get(accountId) !== undefined
+    );
+  }
+
+  /** Removes the account, its identities and its host list. Returns true when it existed. */
+  deleteAccount(accountId: string): boolean {
+    let existed = false;
+    this.transaction(() => {
+      this.#stmt("DELETE FROM account_hosts WHERE owner_id = ?").run(accountId);
+      this.#stmt("DELETE FROM identities WHERE owner_id = ?").run(accountId);
+      existed =
+        Number(this.#stmt("DELETE FROM accounts WHERE owner_id = ?").run(accountId).changes) > 0;
+    });
+    return existed;
+  }
+
+  accountHostIds(accountId: string): string[] {
+    return this.#stmt("SELECT host_id FROM account_hosts WHERE owner_id = ? ORDER BY host_id")
+      .all(accountId)
+      .map((row) => String(row.host_id));
+  }
+
+  accountHasHost(accountId: string, hostId: string): boolean {
+    return (
+      this.#stmt("SELECT 1 AS ok FROM account_hosts WHERE owner_id = ? AND host_id = ?").get(
+        accountId,
+        hostId,
+      ) !== undefined
+    );
+  }
+
+  accountHostCount(accountId: string): number {
+    return Number(
+      this.#stmt("SELECT COUNT(*) AS n FROM account_hosts WHERE owner_id = ?").get(accountId)?.n ??
+        0,
+    );
+  }
+
+  /** Returns true when the host was not on the list before. */
+  addAccountHost(accountId: string, hostId: string, day: number): boolean {
+    const result = this.#stmt(
+      "INSERT OR IGNORE INTO account_hosts (owner_id, host_id, added_day) VALUES (?, ?, ?)",
+    ).run(accountId, hostId, day);
+    return Number(result.changes) > 0;
+  }
+
+  removeAccountHost(accountId: string, hostId: string): boolean {
+    const result = this.#stmt("DELETE FROM account_hosts WHERE owner_id = ? AND host_id = ?").run(
+      accountId,
+      hostId,
+    );
+    return Number(result.changes) > 0;
+  }
+
   getUsage(hostId: string, month: string): number {
     const row = this.#stmt("SELECT bytes FROM usage WHERE host_id = ? AND month = ?").get(
       hostId,
@@ -305,13 +399,23 @@ export class RelayStore {
     },
   ): PurgeResult {
     const count = (result: NodeSqlite.StatementResultingChanges) => Number(result.changes);
-    let result: PurgeResult = { hosts: 0, grants: 0, revocations: 0, invites: 0, usage: 0 };
+    let result: PurgeResult = {
+      hosts: 0,
+      grants: 0,
+      revocations: 0,
+      invites: 0,
+      usage: 0,
+      accountHosts: 0,
+    };
     this.transaction(() => {
       const idleBefore = Math.floor(now / DAY_MS) - retention.hostIdleDays;
       const idleHosts = "SELECT host_id FROM hosts WHERE last_seen_day < ?";
       this.#stmt(`DELETE FROM grants WHERE host_id IN (${idleHosts})`).run(idleBefore);
       this.#stmt(`DELETE FROM revocations WHERE host_id IN (${idleHosts})`).run(idleBefore);
       this.#stmt(`DELETE FROM usage WHERE host_id IN (${idleHosts})`).run(idleBefore);
+      const accountHosts = count(
+        this.#stmt(`DELETE FROM account_hosts WHERE host_id IN (${idleHosts})`).run(idleBefore),
+      );
       const hosts = count(this.#stmt("DELETE FROM hosts WHERE last_seen_day < ?").run(idleBefore));
 
       const revocationBefore = now - retention.revocationDays * DAY_MS;
@@ -340,7 +444,7 @@ export class RelayStore {
       const usage = count(
         this.#stmt("DELETE FROM usage WHERE month < ?").run(monthKey(now - 62 * DAY_MS)),
       );
-      result = { hosts, grants, revocations, invites, usage };
+      result = { hosts, grants, revocations, invites, usage, accountHosts };
     });
     return result;
   }

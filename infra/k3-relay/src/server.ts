@@ -7,6 +7,7 @@ import type * as NodeStream from "node:stream";
 
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 
+import { AccountHttpError, AccountService, ACCOUNT_LABELS, bindSigningInput } from "./account.ts";
 import { base64url, decodeBase64url } from "./bytes.ts";
 import { publicLimits, type RelayConfig } from "./config.ts";
 import {
@@ -53,6 +54,14 @@ const NONCE_BYTES = 32;
 const HOST_ID_PATH = /^\/v1\/client\/([a-z2-7]{32})$/u;
 const STATUS_PATH = /^\/v1\/client\/([a-z2-7]{32})\/status$/u;
 const DATA_PATH = /^\/v1\/host\/data\/([0-9a-f]{32})$/u;
+const ACCOUNT_OAUTH_PATH = /^\/v1\/account\/oauth\/([a-z]{1,16})\/(start|callback)$/u;
+const ACCOUNT_API_PATHS: Readonly<Record<string, ReadonlyArray<string>>> = {
+  "/v1/account/hosts": [],
+  "/v1/account/hosts/add": [],
+  "/v1/account/hosts/remove": ["hostId"],
+  "/v1/account/hosts/token": ["hostId", "dalg", "dk", "dsig"],
+  "/v1/account/delete": [],
+};
 const CLIENT_NONCE = /^[A-Za-z0-9_-]{16,64}$/u;
 
 // WebSocket close codes the relay itself sends (4xxx is application space).
@@ -115,7 +124,7 @@ interface Control {
 interface Session {
   readonly id: string;
   readonly hostId: string;
-  readonly kind: "client" | "pairing";
+  readonly kind: "client" | "pairing" | "account";
   readonly deviceId: string | null;
   readonly token: Buffer;
   tokenSpent: boolean;
@@ -246,6 +255,9 @@ class RelayServer implements Relay {
   readonly #timers: NodeJS.Timeout[] = [];
   readonly #sockets = new Set<NodeNet.Socket>();
   readonly #webSockets = new Set<WebSocket>();
+  /** Null when no sign-in provider is configured: every account route answers 404 then. */
+  readonly #accounts: AccountService | null;
+  readonly #accountAdmissions: SlidingWindow;
   #closing = false;
 
   constructor(options: RelayOptions) {
@@ -331,6 +343,22 @@ class RelayServer implements Relay {
       ? NodeCrypto.createHash("sha256").update(config.powSecret).digest()
       : NodeCrypto.randomBytes(32);
     this.#blocked = new Set([...config.blockedHosts, ...this.store.blockedHosts()]);
+    this.#accounts =
+      config.accountProviders.length > 0
+        ? new AccountService({
+            config,
+            store: this.store,
+            fetch: options.fetch ?? fetch,
+            now,
+            onProviderError: (provider, step) =>
+              this.#logger.error("account-provider-failed", { provider, step }),
+          })
+        : null;
+    this.#accountAdmissions = new SlidingWindow(
+      HOUR_MS,
+      config.accountAdmissionsPerHostPerHour,
+      now,
+    );
 
     this.#wss = new WebSocketServer({
       noServer: true,
@@ -479,6 +507,8 @@ class RelayServer implements Relay {
     this.#statusNonces.sweep();
     this.#powUsed.sweep();
     this.#throttle.sweep();
+    this.#accounts?.sweep();
+    this.#accountAdmissions.sweep();
     const now = this.#now();
     for (const [hostId, state] of this.#pairing) {
       state.attempts = state.attempts.filter((at) => at > now - HOUR_MS);
@@ -582,6 +612,15 @@ class RelayServer implements Relay {
           imageDigest: this.#config.imageDigest,
           schemaHash: SCHEMA_HASH,
           limits: publicLimits(this.#config),
+          ...(this.#accounts
+            ? {
+                accounts: {
+                  providers: this.#accounts.providerKinds(),
+                  issuer: this.#accounts.issuer,
+                  key: base64url(this.#accounts.tokens.publicKey),
+                },
+              }
+            : {}),
         }),
       );
       return;
@@ -610,7 +649,154 @@ class RelayServer implements Relay {
       await this.#status(req, res, status[1]);
       return;
     }
+    if (path.startsWith("/v1/account/") && this.#accounts) {
+      await this.#accountRoute(this.#accounts, req, res, method, path, key);
+      return;
+    }
     throw new HttpError(404, JSON.stringify({ error: "not-found" }));
+  }
+
+  /** Accounts (spec section 20). Only reached when at least one provider is configured. */
+  async #accountRoute(
+    accounts: AccountService,
+    req: NodeHttp.IncomingMessage,
+    res: NodeHttp.ServerResponse,
+    method: string,
+    path: string,
+    key: string,
+  ): Promise<void> {
+    const notFound = () => new HttpError(404, JSON.stringify({ error: "not-found" }));
+    const wrap = async (work: () => Promise<void>) => {
+      try {
+        await work();
+      } catch (error) {
+        if (error instanceof AccountHttpError) throw new HttpError(error.status, error.body);
+        throw error;
+      }
+    };
+    if (method === "GET" && path === "/v1/account/providers") {
+      sendJson(res, 200, JSON.stringify({ providers: accounts.providerKinds() }));
+      return;
+    }
+    const oauth = ACCOUNT_OAUTH_PATH.exec(path);
+    if (oauth) {
+      const [, provider = "", step] = oauth;
+      if (!accounts.hasProvider(provider)) throw notFound();
+      if (step === "start" && method === "POST") {
+        this.#admitRequest(key);
+        const body = await this.#readJson(req);
+        await wrap(async () => {
+          const authorizeUrl = accounts.start(provider, body, key);
+          sendJson(res, 200, JSON.stringify({ authorizeUrl }));
+        });
+        return;
+      }
+      if (step === "callback" && method === "GET") {
+        this.#admitRequest(key);
+        const query = new URL(req.url ?? "/", "http://relay.invalid").searchParams;
+        const result = await accounts.callback(provider, query);
+        if (result.kind === "redirect") {
+          res.writeHead(302, {
+            Location: result.location,
+            "Cache-Control": "no-store",
+            "Referrer-Policy": "no-referrer",
+          });
+          res.end();
+        } else {
+          res.writeHead(400, {
+            "Content-Type": "text/plain; charset=utf-8",
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+            "Referrer-Policy": "no-referrer",
+          });
+          res.end("Sign-in failed. Go back to K3 Code and try again.\n");
+        }
+        return;
+      }
+      throw notFound();
+    }
+    if (method === "POST" && path === "/v1/account/token") {
+      this.#admitRequest(key);
+      const body = await this.#readJson(req);
+      await wrap(async () => sendJson(res, 200, JSON.stringify(accounts.redeem(body))));
+      return;
+    }
+    const params = ACCOUNT_API_PATHS[path];
+    if (method !== "POST" || params === undefined) throw notFound();
+    this.#admitRequest(key);
+    const body = await this.#readJson(req);
+    await wrap(async () => {
+      const caller = accounts.authenticate(path, body, params);
+      sendJson(res, 200, JSON.stringify(this.#accountCall(accounts, path, caller)));
+    });
+  }
+
+  #accountCall(
+    accounts: AccountService,
+    path: string,
+    caller: ReturnType<AccountService["authenticate"]>,
+  ): Record<string, unknown> {
+    const forbidden = () => new AccountHttpError(403, "forbidden");
+    const day = Math.floor(this.#now() / DAY_MS);
+    switch (path) {
+      case "/v1/account/hosts": {
+        // A host's own session (from the host's sign-in) registers it; only devices list hosts.
+        if (caller.use !== "device") throw forbidden();
+        const hosts = this.store
+          .accountHostIds(caller.accountId)
+          .map((hostId) => this.store.getHost(hostId))
+          .filter((host) => host !== undefined)
+          .map((host) => ({ hostId: host.hostId, hk: base64url(host.hk) }));
+        return { hosts };
+      }
+      case "/v1/account/hosts/add": {
+        if (caller.use !== "host") throw forbidden();
+        const hostId = caller.boundId;
+        if (!this.store.getHost(hostId)) throw new AccountHttpError(409, "host-not-registered");
+        if (
+          !this.store.accountHasHost(caller.accountId, hostId) &&
+          this.store.accountHostCount(caller.accountId) >= this.#config.maxHostsPerAccount
+        ) {
+          throw new AccountHttpError(429, "limit");
+        }
+        this.store.addAccountHost(caller.accountId, hostId, day);
+        return { hostId };
+      }
+      case "/v1/account/hosts/remove": {
+        const [hostId = ""] = caller.values;
+        if (!isId(hostId)) throw new AccountHttpError(400, "bad-request");
+        // A host can take itself off the list; a device can take any host off its own list.
+        if (caller.use === "host" && hostId !== caller.boundId) throw forbidden();
+        this.store.removeAccountHost(caller.accountId, hostId);
+        return { ok: true };
+      }
+      case "/v1/account/hosts/token": {
+        if (caller.use !== "device") throw forbidden();
+        const [hostId = "", dalg = "", dk = "", dsig = ""] = caller.values;
+        const host = isId(hostId) ? this.store.getHost(hostId) : undefined;
+        if (!host || !this.store.accountHasHost(caller.accountId, hostId)) {
+          throw new AccountHttpError(404, "not-found");
+        }
+        if (!isDeviceAlg(dalg)) throw new AccountHttpError(400, "bad-request");
+        const deviceKey = decodeBase64url(dk, keyLength(dalg));
+        const deviceSig = decodeBase64url(dsig, signatureLength);
+        // The device key the ticket names must have signed for this host itself.
+        if (
+          !deviceKey ||
+          !deviceSig ||
+          !verifySignature(dalg, deviceKey, bindSigningInput(hostId, caller.boundId), deviceSig)
+        ) {
+          throw new AccountHttpError(401, "unauthorized");
+        }
+        const ticket = accounts.hostToken(caller.accountId, hostId, deviceIdOf(dalg, deviceKey));
+        return { ...ticket, hostId, hk: base64url(host.hk) };
+      }
+      case "/v1/account/delete": {
+        this.store.deleteAccount(caller.accountId);
+        return { ok: true };
+      }
+    }
+    throw new AccountHttpError(404, "not-found");
   }
 
   /** `/metrics` is for the machine itself. A proxied request always carries forwarding headers. */
@@ -908,6 +1094,20 @@ class RelayServer implements Relay {
 
     const hostId = clientMatch?.[1];
     if (!hostId) return rejectUpgrade(socket, 404, "Not Found");
+    if (url.searchParams.get("account") === "1") {
+      const accounts = this.#accounts;
+      if (!accounts || this.#blocked.has(hostId) || !this.store.getHost(hostId)) {
+        return rejectUpgrade(socket, 404, "Not Found");
+      }
+      if (!this.#accountAdmissions.tryHit(hostId)) {
+        this.metrics.rejections += 1;
+        return rejectUpgrade(socket, 429, "Too Many Requests");
+      }
+      this.#wss.handleUpgrade(req, socket, head, (ws) =>
+        this.#onAccountSocket(ws, accounts, hostId, release),
+      );
+      return;
+    }
     if (url.searchParams.get("pairing") === "1") {
       const admission = this.#pairingAdmission(hostId);
       if (admission !== "ok") {
@@ -1186,6 +1386,74 @@ class RelayServer implements Relay {
     );
   }
 
+  /**
+   * `?account=1`: a device that signed in knocks on one of its account's hosts. The relay checks
+   * the host-access ticket and the device's signature, then opens an anonymous E2E session like
+   * pairing. The host checks the ticket again and asks its user (spec section 20.3).
+   */
+  #onAccountSocket(
+    ws: WebSocket,
+    accounts: AccountService,
+    hostId: string,
+    release: () => void,
+  ): void {
+    this.#webSockets.add(ws);
+    ws.on("error", () => {});
+    ws.once("close", () => {
+      this.#webSockets.delete(ws);
+      release();
+    });
+    const nonce = NodeCrypto.randomBytes(NONCE_BYTES);
+    const timer = setTimeout(
+      () => this.#closeEarly(ws, CLOSE.timeout, "timeout", "auth-timeout"),
+      this.#config.authTimeoutMs,
+    );
+    ws.once("close", () => clearTimeout(timer));
+    ws.send(JSON.stringify({ type: "nonce", nonce: base64url(nonce) }));
+    let answered = false;
+    ws.on("message", (data, isBinary) =>
+      this.#guard(ws, () => {
+        if (answered) return this.#closeEarly(ws, CLOSE.badRequest, "bad-request", "auth-failed");
+        answered = true;
+        clearTimeout(timer);
+        const text = isMessageText(data, isBinary);
+        const body = text ? parseJsonObject(text) : null;
+        if (
+          !body ||
+          !hasExactKeys(body, ["type", "alg", "dk", "token", "sig"]) ||
+          body.type !== "auth" ||
+          !isDeviceAlg(body.alg)
+        ) {
+          return this.#closeEarly(ws, CLOSE.badRequest, "bad-request", "auth-failed");
+        }
+        const dk = decodeBase64url(body.dk, keyLength(body.alg));
+        const sig = decodeBase64url(body.sig, signatureLength);
+        const deviceId = dk ? deviceIdOf(body.alg, dk) : "";
+        const signed =
+          dk !== null &&
+          sig !== null &&
+          verifySignature(
+            body.alg,
+            dk,
+            signingInput(ACCOUNT_LABELS.client, hostId, deviceId, nonce),
+            sig,
+          );
+        if (!signed || !accounts.admits(body.token, hostId, deviceId)) {
+          return this.#closeEarly(ws, CLOSE.unauthorized, "unauthorized", "auth-failed");
+        }
+        const waiting = [...(this.#hostSessions.get(hostId) ?? [])].filter(
+          (session) => session.kind === "account",
+        ).length;
+        if (waiting >= this.#config.accountMaxConcurrentPerHost) {
+          this.metrics.rejections += 1;
+          return this.#closeEarly(ws, CLOSE.limit, "limit", "limit");
+        }
+        release();
+        this.#openSession(ws, hostId, "account", deviceId);
+      }),
+    );
+  }
+
   #onPairingSocket(ws: WebSocket, hostId: string, release: () => void): void {
     this.#webSockets.add(ws);
     ws.on("error", () => {});
@@ -1203,7 +1471,7 @@ class RelayServer implements Relay {
   #openSession(
     ws: WebSocket,
     hostId: string,
-    kind: "client" | "pairing",
+    kind: Session["kind"],
     deviceId: string | null,
   ): void {
     const config = this.#config;
@@ -1283,10 +1551,10 @@ class RelayServer implements Relay {
       config.sessionSetupMs,
     );
     session.setupTimer.unref();
-    if (kind === "pairing") {
+    if (kind === "pairing" || kind === "account") {
       session.lifetimeTimer = setTimeout(
-        () => this.#endSession(session, "normal", 1000, "pairing-expired"),
-        config.pairingSessionMaxMs,
+        () => this.#endSession(session, "normal", 1000, `${kind}-expired`),
+        kind === "pairing" ? config.pairingSessionMaxMs : config.accountSessionMaxMs,
       );
       session.lifetimeTimer.unref();
     }

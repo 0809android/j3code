@@ -1,5 +1,31 @@
 const MIB = 1024 * 1024;
 
+export type AccountProviderKind = "github" | "google" | "apple";
+
+/**
+ * One OAuth / OIDC provider the relay signs people in with (spec section 20.2). The relay is the
+ * confidential client: the secret never leaves it. A provider is on only when all of its settings
+ * are present; the endpoints default to the real provider and are overridden only by tests.
+ */
+export interface AccountProviderConfig {
+  readonly kind: AccountProviderKind;
+  readonly clientId: string;
+  /** GitHub and Google. Apple signs a short client-secret JWT with `appleKey` instead. */
+  readonly clientSecret: string | null;
+  readonly appleKey: {
+    readonly teamId: string;
+    readonly keyId: string;
+    readonly privateKeyPem: string;
+  } | null;
+  readonly authorizeUrl: string;
+  readonly tokenUrl: string;
+  /** OIDC only (Google, Apple): the accepted `iss` values and the key set. */
+  readonly issuers: ReadonlyArray<string>;
+  readonly jwksUrl: string | null;
+  /** GitHub only: the REST API base, for checking and revoking the token. */
+  readonly apiUrl: string | null;
+}
+
 export interface RelayConfig {
   readonly host: string;
   readonly port: number;
@@ -82,6 +108,27 @@ export interface RelayConfig {
   readonly revocationRetentionDays: number;
   readonly inviteRetentionAfterUseDays: number;
   readonly inviteTtlDays: number;
+
+  /** Accounts (spec section 20). Off unless at least one provider is fully configured. */
+  readonly publicUrl: string | null;
+  /** Ed25519 seed (base64url, 32 bytes) for account tokens. Separate from every K3 key. */
+  readonly accountTokenSeed: string | null;
+  /** HMAC key for provider identifiers. Lives in the environment, never in the database. */
+  readonly accountHmacKey: string | null;
+  readonly accountProviders: ReadonlyArray<AccountProviderConfig>;
+  /** Exact return addresses for the browser client, besides `k3relay://` and loopback. */
+  readonly accountWebRedirects: ReadonlyArray<string>;
+  readonly maxHostsPerAccount: number;
+  readonly accountStartsPerMinutePerIp: number;
+  readonly accountsPerIpPerDay: number;
+  readonly maxPendingAccountFlows: number;
+  readonly accountFlowTtlMs: number;
+  readonly accountCodeTtlMs: number;
+  readonly accountTokenTtlMs: number;
+  readonly accountHostTokenTtlMs: number;
+  readonly accountAdmissionsPerHostPerHour: number;
+  readonly accountMaxConcurrentPerHost: number;
+  readonly accountSessionMaxMs: number;
 }
 
 export const DEFAULT_CONFIG: RelayConfig = {
@@ -156,6 +203,24 @@ export const DEFAULT_CONFIG: RelayConfig = {
   revocationRetentionDays: 30,
   inviteRetentionAfterUseDays: 30,
   inviteTtlDays: 30,
+
+  publicUrl: null,
+  accountTokenSeed: null,
+  accountHmacKey: null,
+  accountProviders: [],
+  accountWebRedirects: [],
+  maxHostsPerAccount: 20,
+  accountStartsPerMinutePerIp: 10,
+  accountsPerIpPerDay: 20,
+  maxPendingAccountFlows: 2_000,
+  accountFlowTtlMs: 10 * 60_000,
+  accountCodeTtlMs: 60_000,
+  accountTokenTtlMs: 60 * 60_000,
+  accountHostTokenTtlMs: 5 * 60_000,
+  accountAdmissionsPerHostPerHour: 20,
+  accountMaxConcurrentPerHost: 2,
+  // The device waits on this session while the host's user compares codes (10 minutes).
+  accountSessionMaxMs: 11 * 60_000,
 };
 
 type NumericKey = {
@@ -199,6 +264,10 @@ const NUMERIC_ENV: ReadonlyArray<readonly [NumericKey, string]> = [
   ["pressureWeightFactor", "PRESSURE_WEIGHT_FACTOR"],
   ["trafficCheckMs", "TRAFFIC_CHECK_MS"],
   ["blockedPollMs", "BLOCKED_POLL_MS"],
+  ["maxHostsPerAccount", "MAX_HOSTS_PER_ACCOUNT"],
+  ["accountStartsPerMinutePerIp", "ACCOUNT_STARTS_PER_MINUTE_PER_IP"],
+  ["accountsPerIpPerDay", "ACCOUNTS_PER_IP_PER_DAY"],
+  ["accountAdmissionsPerHostPerHour", "ACCOUNT_ADMISSIONS_PER_HOST_PER_HOUR"],
 ];
 
 export type RelayEnv = Readonly<Record<string, string | undefined>>;
@@ -252,6 +321,7 @@ export function loadConfig(env: RelayEnv): RelayConfig {
     .split(",")
     .map((entry) => entry.trim())
     .filter((entry) => entry !== "");
+  Object.assign(overrides, loadAccountConfig(env));
   const config = { ...DEFAULT_CONFIG, ...overrides };
   if (
     !(config.egressWarnFraction > 0) ||
@@ -267,6 +337,113 @@ export function loadConfig(env: RelayEnv): RelayConfig {
 }
 
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+const GITHUB_DEFAULTS = {
+  authorizeUrl: "https://github.com/login/oauth/authorize",
+  tokenUrl: "https://github.com/login/oauth/access_token",
+  apiUrl: "https://api.github.com",
+};
+const GOOGLE_DEFAULTS = {
+  authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+  tokenUrl: "https://oauth2.googleapis.com/token",
+  issuers: ["https://accounts.google.com", "accounts.google.com"],
+  jwksUrl: "https://www.googleapis.com/oauth2/v3/certs",
+};
+const APPLE_DEFAULTS = {
+  authorizeUrl: "https://appleid.apple.com/auth/authorize",
+  tokenUrl: "https://appleid.apple.com/auth/token",
+  issuers: ["https://appleid.apple.com"],
+  jwksUrl: "https://appleid.apple.com/auth/keys",
+};
+
+const present = (value: string | undefined): value is string =>
+  value !== undefined && value.trim() !== "";
+
+/** All of a provider's variables, or none of them: half a configuration is an error. */
+function group(env: RelayEnv, provider: string, names: ReadonlyArray<string>): boolean {
+  const set = names.filter((name) => present(env[name]));
+  if (set.length === 0) return false;
+  if (set.length !== names.length) {
+    throw new Error(`${provider} sign-in needs all of ${names.join(", ")} (or none of them)`);
+  }
+  return true;
+}
+
+/**
+ * Accounts are off until a provider is configured. A configured provider also needs the public
+ * URL (its redirect URI is derived from it), the token seed and the HMAC key; a relay with half of
+ * that refuses to start rather than sign people in with a key it would forget on restart.
+ */
+function loadAccountConfig(env: RelayEnv): Partial<RelayConfig> {
+  const providers: AccountProviderConfig[] = [];
+  if (group(env, "GitHub", ["GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET"])) {
+    providers.push({
+      kind: "github",
+      clientId: env.GITHUB_CLIENT_ID!.trim(),
+      clientSecret: env.GITHUB_CLIENT_SECRET!.trim(),
+      appleKey: null,
+      issuers: [],
+      jwksUrl: null,
+      ...GITHUB_DEFAULTS,
+    });
+  }
+  if (group(env, "Google", ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"])) {
+    providers.push({
+      kind: "google",
+      clientId: env.GOOGLE_CLIENT_ID!.trim(),
+      clientSecret: env.GOOGLE_CLIENT_SECRET!.trim(),
+      appleKey: null,
+      apiUrl: null,
+      ...GOOGLE_DEFAULTS,
+    });
+  }
+  if (
+    group(env, "Apple", ["APPLE_CLIENT_ID", "APPLE_TEAM_ID", "APPLE_KEY_ID", "APPLE_PRIVATE_KEY"])
+  ) {
+    providers.push({
+      kind: "apple",
+      clientId: env.APPLE_CLIENT_ID!.trim(),
+      clientSecret: null,
+      appleKey: {
+        teamId: env.APPLE_TEAM_ID!.trim(),
+        keyId: env.APPLE_KEY_ID!.trim(),
+        // Environment files often carry the PEM on one line with literal \n.
+        privateKeyPem: env.APPLE_PRIVATE_KEY!.replace(/\\n/gu, "\n"),
+      },
+      apiUrl: null,
+      ...APPLE_DEFAULTS,
+    });
+  }
+  const webRedirects = (env.ACCOUNT_WEB_REDIRECTS ?? "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry !== "")
+    .map((entry) => checkedUrl("ACCOUNT_WEB_REDIRECTS", entry));
+  if (providers.length === 0) return { accountWebRedirects: webRedirects };
+  if (!present(env.RELAY_PUBLIC_URL)) {
+    throw new Error("sign-in needs RELAY_PUBLIC_URL (the relay's own https:// address)");
+  }
+  if (!present(env.ACCOUNT_TOKEN_SEED) || !isSeed(env.ACCOUNT_TOKEN_SEED.trim())) {
+    throw new Error("sign-in needs ACCOUNT_TOKEN_SEED: 32 random bytes, base64url");
+  }
+  if (!present(env.ACCOUNT_ID_HMAC_KEY) || env.ACCOUNT_ID_HMAC_KEY.trim().length < 32) {
+    throw new Error("sign-in needs ACCOUNT_ID_HMAC_KEY: at least 32 random characters");
+  }
+  const publicUrl = checkedUrl("RELAY_PUBLIC_URL", env.RELAY_PUBLIC_URL.trim()).replace(/\/$/u, "");
+  return {
+    accountProviders: providers,
+    accountWebRedirects: webRedirects,
+    publicUrl,
+    accountTokenSeed: env.ACCOUNT_TOKEN_SEED.trim(),
+    accountHmacKey: env.ACCOUNT_ID_HMAC_KEY.trim(),
+  };
+}
+
+function isSeed(value: string): boolean {
+  if (!/^[A-Za-z0-9_-]{43}$/u.test(value)) return false;
+  const bytes = Buffer.from(value, "base64url");
+  return bytes.length === 32 && bytes.toString("base64url") === value;
+}
 
 /** https only, so an alert is never sent in the clear. Plain http is for a loopback receiver. */
 function checkedUrl(name: string, raw: string): string {
@@ -308,5 +485,6 @@ export function publicLimits(config: RelayConfig) {
     degradedHostBytesPerSec: config.degradedHostBytesPerSec,
     powBaseDifficulty: config.powBaseDifficulty,
     requireInvite: config.requireInvite,
+    maxHostsPerAccount: config.maxHostsPerAccount,
   };
 }

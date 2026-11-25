@@ -26,6 +26,9 @@ describe("data inventory", () => {
       "invites",
       "usage",
       "blocked_hosts",
+      "accounts",
+      "identities",
+      "account_hosts",
     ]);
     const markdown = renderDataMarkdown();
     for (const table of tables) {

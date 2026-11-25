@@ -83,9 +83,14 @@ describe("RelayStore", () => {
     store.upsertRevocation("live".padEnd(32, "a"), "4".repeat(32), NOW, "s", NOW - 10 * DAY);
     store.setUsage("live".padEnd(32, "a"), monthKey(NOW - 200 * DAY), 5);
     store.setUsage("live".padEnd(32, "a"), monthKey(NOW), 7);
+    store.createAccount("o".repeat(32), "github", Buffer.alloc(32, 1), 1);
+    store.addAccountHost("o".repeat(32), "idle".padEnd(32, "a"), 1);
+    store.addAccountHost("o".repeat(32), "live".padEnd(32, "a"), 1);
 
     const result = store.purge(NOW, RETENTION);
     expect(result.hosts).toBe(1);
+    expect(result.accountHosts).toBe(1);
+    expect(store.accountHostIds("o".repeat(32))).toEqual(["live".padEnd(32, "a")]);
     expect(store.getHost("idle".padEnd(32, "a"))).toBeUndefined();
     expect(store.getHost("live".padEnd(32, "a"))).toBeDefined();
     expect(store.hasGrant("live".padEnd(32, "a"), "1".repeat(32))).toBe(false);

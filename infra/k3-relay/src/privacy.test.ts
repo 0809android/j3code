@@ -6,6 +6,14 @@ import * as NodeSqlite from "node:sqlite";
 
 import { describe, expect, it } from "vite-plus/test";
 
+import {
+  accountCall,
+  accountConfig,
+  hostTicket,
+  signIn,
+  startFakeProvider,
+} from "./account.testkit.ts";
+
 import { base64url } from "./bytes.ts";
 import { deviceIdOf } from "./crypto.ts";
 import { registrationSigningInput, solveChallenge, type PowChallenge } from "./pow.ts";
@@ -116,9 +124,12 @@ describe("what the relay keeps", () => {
         .all()
         .map((row) => String(row.name));
       expect(tables.toSorted()).toEqual([
+        "account_hosts",
+        "accounts",
         "blocked_hosts",
         "grants",
         "hosts",
+        "identities",
         "invites",
         "revocations",
         "usage",
@@ -269,4 +280,78 @@ describe("public endpoints", () => {
       expect(response.headers.get("server")).toBeNull();
       expect(response.headers.get("x-powered-by")).toBeNull();
     }));
+});
+
+describe("accounts", () => {
+  it("keep no e-mail, name, avatar, login or provider id in the database or the logs", async () => {
+    const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "k3-relay-account-"));
+    const dbPath = NodePath.join(directory, "relay.sqlite");
+    const fake = await startFakeProvider();
+    const people = [
+      {
+        id: "58323117",
+        email: "octo.person@example.com",
+        name: "Octo Person-Name",
+        login: "octo-login-xyz",
+        avatar: "https://avatars.example.com/u/58323117",
+      },
+      {
+        id: "google-sub-77420019",
+        email: "g.person@example.com",
+        name: "Gee Person-Name",
+        login: "unused-login-abc",
+        avatar: "https://lh3.example.com/a/77420019",
+      },
+    ];
+    let logs: string[] = [];
+    try {
+      await withRelay({ ...accountConfig(fake), dbPath }, async (relay) => {
+        fake.nowMs = () => relay.clock.now;
+        const host = newHost();
+        await registerHost(relay, host);
+        fake.user = people[0]!;
+        const hostSession = await signIn(relay, "github", host.signer, {
+          use: "host",
+          redirect: "http://127.0.0.1:3773/k3relay/account/callback",
+        });
+        expect((await accountCall(relay, hostSession, "/v1/account/hosts/add")).status).toBe(200);
+        const device = await signIn(relay, "github", newEd25519());
+        expect((await hostTicket(relay, device, host.hostId, newEd25519())).status).toBe(200);
+        fake.user = people[1]!;
+        await signIn(relay, "google", newEd25519());
+        await signIn(relay, "apple", newEd25519());
+        logs = relay.logs;
+      });
+      const needles = [
+        ...people.flatMap((person) => [
+          person.id,
+          person.email,
+          person.name,
+          person.login,
+          person.avatar,
+        ]),
+        "gh-secret-DO-NOT-LOG",
+        "google-secret-DO-NOT-LOG",
+        "BEGIN PRIVATE KEY",
+      ];
+      const raw = NodeFS.readdirSync(directory)
+        .map((name) => NodeFS.readFileSync(NodePath.join(directory, name)).toString("latin1"))
+        .join("\n");
+      for (const needle of needles) {
+        expect(raw, `file bytes contain ${needle}`).not.toContain(needle);
+        expect(logs.join("\n"), `logs contain ${needle}`).not.toContain(needle);
+      }
+      const db = new NodeSqlite.DatabaseSync(dbPath, { readOnly: true });
+      expect(db.prepare("SELECT COUNT(*) AS n FROM accounts").get()?.n).toBe(3);
+      expect(db.prepare("SELECT COUNT(*) AS n FROM identities").get()?.n).toBe(3);
+      expect(db.prepare("SELECT COUNT(*) AS n FROM account_hosts").get()?.n).toBe(1);
+      for (const row of db.prepare("SELECT subject_mac FROM identities").all()) {
+        expect((row.subject_mac as Uint8Array).length).toBe(32);
+      }
+      db.close();
+    } finally {
+      await fake.close();
+      NodeFS.rmSync(directory, { recursive: true, force: true });
+    }
+  });
 });

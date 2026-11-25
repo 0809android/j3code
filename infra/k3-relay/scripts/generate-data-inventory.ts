@@ -78,6 +78,23 @@ const TABLE_NOTES: Readonly<Record<string, TableNote>> = {
       "運営が遮断したホストの ID と遮断した時刻。悪質なホストの接続を拒否するためだけに使います。",
     retention: "運営が解除するまで。",
   },
+  accounts: {
+    purpose:
+      "アカウント（GitHub / Google / Apple でサインインした人）。ランダムな ID と作成日だけで、メールアドレス、氏名、アバター、ログイン名は持ちません。アカウントを使わない人の行はありません。",
+    retention:
+      "アカウントの削除まで（サインインした端末から削除できます）。削除したデータは、バックアップに最大 30 日残ります。",
+  },
+  identities: {
+    purpose:
+      "提供元の識別子（GitHub の数値の ID、Google / Apple の `sub`）の HMAC と、それが指すアカウント。HMAC の鍵は、DB とバックアップの外（環境変数 `ACCOUNT_ID_HMAC_KEY`）にあります。メールアドレスでのひも付けはしません。",
+    retention: "アカウントの削除まで。",
+  },
+  account_hosts: {
+    purpose:
+      "アカウントに登録されたホストの一覧（「同じ人のホストのつながり」）。ホスト名は持ちません。端末がこの一覧を受け取っても、ホストの承認なしには、ホストに入れません。",
+    retention:
+      "ホストが一覧から外されたとき、アカウントの削除、またはホストが 365 日接続しなかったときまで。",
+  },
 };
 
 const COLUMN_NOTES: Readonly<Record<string, string>> = {
@@ -106,6 +123,17 @@ const COLUMN_NOTES: Readonly<Record<string, string>> = {
   "blocked_hosts.host_id": "遮断したホストの ID",
   "blocked_hosts.blocked_at": "遮断した時刻（ミリ秒）",
   "usage.bytes": "その月に中継した合計バイト数（両方向、1 バイトにつき 1 回）",
+  "accounts.owner_id":
+    "アカウント ID。サインインのたびに変わらない、ランダムな値（提供元の識別子から作らない）",
+  "accounts.created_day": "作成した日（日数。時刻は持たない）",
+  "identities.provider": "提供元（`github`、`google`、`apple`）",
+  "identities.subject_mac":
+    "`HMAC-SHA256(ACCOUNT_ID_HMAC_KEY, 提供元 ‖ 識別子)`。識別子そのものは保存しない",
+  "identities.owner_id": "アカウント ID",
+  "identities.created_day": "最初にサインインした日（日数）",
+  "account_hosts.owner_id": "アカウント ID",
+  "account_hosts.host_id": "ホストの ID（公開鍵のハッシュ）",
+  "account_hosts.added_day": "一覧に加えた日（日数）",
 };
 
 /** What the relay never writes to disk (spec section 10). Fixed text, not derived from the schema. */
@@ -125,7 +153,14 @@ const NEVER_STORED: readonly (readonly [string, string])[] = [
   ["端末名", "grant には名前の欄がなく、名前の付いた grant は受け取りません。"],
   ["ホスト名", "ホストは、公開鍵のハッシュ（hostId）としてだけ見えます。"],
   ["プロジェクト名、スレッド名", "これらは E2E の中にだけ存在し、リレーには届きません。"],
-  ["アカウント、メールアドレス、氏名", "リレーは、人（ユーザー）と端末の対応を持ちません。"],
+  [
+    "メールアドレス、氏名、アバター、ログイン名",
+    "アカウントを使う人についても、提供元に要求しません（GitHub はスコープなし、Google と Apple は `openid` だけ）。届いても読み捨て、識別子は HMAC にしてから保存します。",
+  ],
+  [
+    "提供元のトークンと秘密",
+    "GitHub のトークンは、K3 のアプリに出たものかを確かめたら、すぐに失効させます。`client_secret` は環境変数にだけあります。",
+  ],
 ];
 
 const IN_MEMORY_ONLY: readonly string[] = [
@@ -133,6 +168,8 @@ const IN_MEMORY_ONLY: readonly string[] = [
   "セッション",
   "データ接続の token",
   "ペアリングの窓",
+  "サインインの途中の状態（`state`、PKCE、nonce。10 分）と、一回限りの K3 のコード（1 分）",
+  "アカウントのトークン（署名つきで、リレーは保存しない。1 時間）",
   "IP ごとの接続や登録の回数（上限の判断のため。再起動で消えます）",
   "指標（接続数、帯域、切断の理由の内訳など）",
 ];
