@@ -55,6 +55,7 @@ import { EnvironmentsMap } from "./EnvironmentsMap";
 import { LinkedEnvironmentsSettings } from "./LinkedEnvironmentsSettings";
 import { addEnvironmentPrefillAtom } from "~/state/linkedThreadView";
 import { pendingK3RelayLinkAtom } from "~/k3relay/pendingLink";
+import { pendingK3RelayAccountCallbackAtom } from "~/k3relay/accountSignIn";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { useMediaQuery } from "~/hooks/useMediaQuery";
 import { usePeerLinkHosts } from "~/state/peerLinks";
@@ -370,6 +371,11 @@ function ConnectionsSettingsContent({
   const [addPrefill, setAddPrefill] = useAtom(addEnvironmentPrefillAtom);
   // A `k3relay://` link the OS handed the desktop app opens the dialog on the relay tab.
   const [pendingRelayLink, setPendingRelayLink] = useAtom(pendingK3RelayLinkAtom);
+  // A relay account sign-in the browser returned from opens the dialog on the account tab, which
+  // takes the callback; only the account panel clears it.
+  const pendingAccountCallback = useAtomValue(pendingK3RelayAccountCallbackAtom);
+  const [accountReturned, setAccountReturned] = useState(false);
+  if (pendingAccountCallback !== null && !accountReturned) setAccountReturned(true);
   const handleAddBackendDialogOpenChange = (open: boolean) => {
     setAddBackendDialogOpen(open);
     if (open) {
@@ -379,6 +385,7 @@ function ConnectionsSettingsContent({
       setSavedBackendError(null);
       setAddPrefill(null);
       setPendingRelayLink(null);
+      setAccountReturned(false);
     }
   };
   const openAddRoute = (target: EnvironmentPresentation) => {
@@ -1893,12 +1900,18 @@ function ConnectionsSettingsContent({
             ) : null}
             {/* Actions on several machines at once, such as linking several, go here. */}
             <AddEnvironmentDialog
-              key={`${addPrefill?.environmentId ?? "any"}:${addBackendHost}:${pendingRelayLink ?? ""}`}
-              open={addBackendDialogOpen || addPrefill !== null || pendingRelayLink !== null}
+              key={`${addPrefill?.environmentId ?? "any"}:${addBackendHost}:${pendingRelayLink ?? ""}:${accountReturned ? "account" : ""}`}
+              open={
+                addBackendDialogOpen ||
+                addPrefill !== null ||
+                pendingRelayLink !== null ||
+                accountReturned
+              }
               prefill={addPrefill}
               routeTarget={routeTarget}
               initialHost={addBackendHost}
               initialRelayLink={pendingRelayLink ?? ""}
+              initialAccount={accountReturned}
               error={savedBackendError}
               savedEnvironments={savedEnvironments}
               onOpenChange={handleAddBackendDialogOpenChange}

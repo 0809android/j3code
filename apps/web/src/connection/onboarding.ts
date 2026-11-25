@@ -7,6 +7,7 @@ import type { DesktopSshEnvironmentTarget, EnvironmentId } from "@t3tools/contra
 import * as Effect from "effect/Effect";
 
 import { K3RelayOnboarding, type K3RelayPairingProgress } from "@t3tools/client-runtime/k3relay";
+import { createK3RelayAccountCommands } from "@t3tools/client-runtime/state/k3relay";
 
 import { connectionAtomRuntime } from "./runtime";
 
@@ -68,3 +69,9 @@ export const connectK3RelayPairing = createRuntimeCommand(connectionAtomRuntime,
       ),
     ),
 });
+
+/** Signing this device in to a K3 Relay account and connecting to the account's hosts (§20). */
+export const k3relayAccount = createK3RelayAccountCommands(
+  connectionAtomRuntime,
+  "web:connection:k3relay-account",
+);
