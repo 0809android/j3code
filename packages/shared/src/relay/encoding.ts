@@ -1,12 +1,13 @@
-import { sha256 } from "@noble/hashes/sha2.js";
-
-import { type E2eeDeviceAlgorithm, hostIdFromIdentityKey } from "../socketE2eeDevice.ts";
+import {
+  type E2eeDeviceAlgorithm,
+  deviceIdFromPublicKey,
+  hostIdFromIdentityKey,
+} from "../socketE2eeDevice.ts";
 
 /**
  * The relay's wire encodings (`infra/k3-relay/src/bytes.ts` and `crypto.ts` are the source of
  * truth). Relay signing inputs length-prefix every part with a u32 big-endian length, unlike the
- * E2EE records, which use a u16. The two are not interchangeable, and neither are the device ids
- * derived from them.
+ * E2EE signing inputs, which use a u16. Device and host ids follow the relay in both layers.
  */
 
 const BASE32_ALPHABET = "abcdefghijklmnopqrstuvwxyz234567";
@@ -114,8 +115,7 @@ export const relayHostId = (hostIdentityKey: Uint8Array): string =>
 
 /**
  * `base32(sha256(lp32(alg) ‖ lp32(Dk)))`, first 32 characters: the id the relay computes and
- * the one grants and the host ledger carry. It differs from `deviceIdFromPublicKey`, which
- * prefixes with u16 lengths.
+ * the one grants and the host ledger carry. The E2EE layer derives the same id.
  */
 export const relayDeviceId = (alg: E2eeDeviceAlgorithm, devicePublicKey: Uint8Array): string =>
-  base32(sha256(relayLengthPrefixed(alg, devicePublicKey))).slice(0, 32);
+  deviceIdFromPublicKey(alg, devicePublicKey);

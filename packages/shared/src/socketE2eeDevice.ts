@@ -90,14 +90,25 @@ export const isCanonicalDevicePublicKey = (
   }
 };
 
-/** `base32(sha256(lp(alg) ‖ lp(Dk)))`, first 32 characters. */
-export const deviceIdFromPublicKey = (alg: E2eeDeviceAlgorithm, publicKey: Uint8Array): string =>
-  base32(sha256(concatBytes(lengthPrefixedBytes(utf8(alg)), lengthPrefixedBytes(publicKey)))).slice(
-    0,
-    ID_LENGTH,
-  );
+/** The relay's length prefix: a u32 big-endian length. E2EE records use a u16 instead. */
+const relayLengthPrefixedBytes = (bytes: Uint8Array): Uint8Array => {
+  const out = new Uint8Array(4 + bytes.length);
+  new DataView(out.buffer).setUint32(0, bytes.length, false);
+  out.set(bytes, 4);
+  return out;
+};
 
-/** `base32(sha256(Hk))`, first 32 characters. */
+/**
+ * `base32(sha256(lp32(alg) ‖ lp32(Dk)))`, first 32 characters: byte for byte the relay's
+ * `deviceIdOf` (`infra/k3-relay/src/crypto.ts`), so grants, the ledger and the E2EE layer
+ * name a device the same way.
+ */
+export const deviceIdFromPublicKey = (alg: E2eeDeviceAlgorithm, publicKey: Uint8Array): string =>
+  base32(
+    sha256(concatBytes(relayLengthPrefixedBytes(utf8(alg)), relayLengthPrefixedBytes(publicKey))),
+  ).slice(0, ID_LENGTH);
+
+/** `base32(sha256(Hk))`, first 32 characters, as the relay's `hostIdOf`. */
 export const hostIdFromIdentityKey = (identityPublicKey: Uint8Array): string =>
   base32(sha256(identityPublicKey)).slice(0, ID_LENGTH);
 

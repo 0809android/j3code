@@ -5,7 +5,11 @@ import * as Exit from "effect/Exit";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { p256 } from "@noble/curves/nist.js";
 
-import { deviceIdFromPublicKey } from "../socketE2eeDevice.ts";
+import {
+  deviceIdFromPublicKey,
+  deviceIdentity,
+  hostIdFromIdentityKey,
+} from "../socketE2eeDevice.ts";
 import { identityPublicKeyFromSeed } from "../socketE2eeV1.ts";
 import {
   decodeBase64url,
@@ -128,9 +132,16 @@ describe("relay encoding compatibility", () => {
     assert.strictEqual(relayDeviceId("p256", p256Dk), RELAY.p256.grant.deviceId);
   });
 
-  it("uses u32 length prefixes, so the relay device id is not the E2EE one", () => {
+  it("uses u32 length prefixes for signing inputs", () => {
     assert.strictEqual(hex(relaySigningInput("l", "x")), "000000016c0000000178");
-    assert.notStrictEqual(relayDeviceId("ed25519", edDk), deviceIdFromPublicKey("ed25519", edDk));
+  });
+
+  it("gives the E2EE layer the relay's device and host ids for the same keys", () => {
+    assert.strictEqual(deviceIdFromPublicKey("ed25519", edDk), RELAY.ed25519.grant.deviceId);
+    assert.strictEqual(deviceIdFromPublicKey("p256", p256Dk), RELAY.p256.grant.deviceId);
+    assert.strictEqual(deviceIdentity("p256", p256Dk).deviceId, relayDeviceId("p256", p256Dk));
+    assert.strictEqual(hostIdFromIdentityKey(hk), RELAY.hostId);
+    assert.strictEqual(hostIdFromIdentityKey(hk), relayHostId(hk));
   });
 
   it.effect("signs grants byte-for-byte like the relay, for both algorithms", () =>
