@@ -1,14 +1,11 @@
-import {
-  connectLoopbackRedirectUri,
-  CONNECT_OAUTH_SCOPES,
-  DEFAULT_HOSTED_APP_URL,
-} from "@t3tools/shared/connectAuth";
+import { connectLoopbackRedirectUri, CONNECT_OAUTH_SCOPES } from "@t3tools/shared/connectAuth";
 import { clerkFrontendApiUrlFromPublishableKey } from "@t3tools/shared/relayAuth";
 import { isRelayTracingEnabled } from "@t3tools/shared/otelEnvironment";
 import { normalizeSecureRelayUrl } from "@t3tools/shared/relayUrl";
 import * as Config from "effect/Config";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
 
@@ -110,23 +107,41 @@ export function makeRelayUrlConfig(fallback = buildTimeRelayUrl) {
 
 export const relayUrlConfig = makeRelayUrlConfig();
 
-export const hostedAppUrlConfig = makePublicValueConfig(
-  "K3CODE_HOSTED_APP_URL",
-  DEFAULT_HOSTED_APP_URL,
-).pipe(Config.mapEffect(validateHostedAppUrl));
-
-const NIGHTLY_HOSTED_APP_URL = "https://nightly.app.t3.codes";
+const HOSTED_APP_URL_ENV = "K3CODE_HOSTED_APP_URL";
 
 /**
- * Where agent sign-ins on the T3 Connect address are approved. A nightly build defaults to the
- * nightly hosted app, which ships the same approval page; app.t3.codes serves stable.
+ * The hosted web app an operator or user chose, if any. K3 Code has no hosted app of its own, so
+ * unset (or empty) is `None`, and everything that would link to one stays on this machine. A set
+ * value that is not an HTTPS (or HTTP loopback) origin is a configuration error, not `None`.
  */
-export const agentApprovalAppUrlConfig = makePublicValueConfig(
-  "K3CODE_HOSTED_APP_URL",
-  typeof __K3CODE_BUILD_CHANNEL__ !== "undefined" && __K3CODE_BUILD_CHANNEL__ === "nightly"
-    ? NIGHTLY_HOSTED_APP_URL
-    : DEFAULT_HOSTED_APP_URL,
-).pipe(Config.mapEffect(validateHostedAppUrl));
+export const optionalHostedAppUrlConfig = Config.String(HOSTED_APP_URL_ENV).pipe(
+  Config.option,
+  Config.map(Option.map((value) => value.trim())),
+  Config.map(Option.filter((value) => value !== "")),
+  Config.mapEffect((value) =>
+    Option.isSome(value)
+      ? validateHostedAppUrl(value.value).pipe(Effect.asSome)
+      : Effect.succeed(Option.none<string>()),
+  ),
+);
+
+/** For the flows that cannot work without a hosted app, such as T3 Connect sign-in. */
+export const hostedAppUrlConfig = optionalHostedAppUrlConfig.pipe(
+  Config.mapEffect((hosted) =>
+    Effect.fromOption(hosted).pipe(
+      Effect.mapError(
+        () =>
+          new Config.ConfigError(
+            new Schema.SchemaError(
+              new SchemaIssue.InvalidValue({
+                message: `${HOSTED_APP_URL_ENV} is not set. There is no hosted app unless you configure one.`,
+              }),
+            ),
+          ),
+      ),
+    ),
+  ),
+);
 
 function validateHostedAppUrl(value: string) {
   try {

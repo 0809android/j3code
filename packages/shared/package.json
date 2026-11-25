@@ -251,6 +251,10 @@
       "types": "./src/connectAuth.ts",
       "import": "./src/connectAuth.ts"
     },
+    "./projectLinks": {
+      "types": "./src/projectLinks.ts",
+      "import": "./src/projectLinks.ts"
+    },
     "./hostedApp": {
       "types": "./src/hostedApp.ts",
       "import": "./src/hostedApp.ts"

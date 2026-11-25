@@ -28,6 +28,7 @@ import { HttpClient, HttpClientRequest } from "effect/http";
 import * as ProviderCredentialStore from "./ProviderCredentialStore.ts";
 import { withChatGptSessionLock } from "./CodexChatGptSessionLock.ts";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import { optionalHostedAppUrlConfig } from "../cloud/publicConfig.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 
 const RESOURCE = "https://api.openai.com/v1";
@@ -427,8 +428,14 @@ export const makeCodexChatGptAuth = Effect.fn("makeCodexChatGptAuth")(function* 
     const state = yield* randomToken(32);
     const nonce = yield* randomToken(32);
     const verifier = yield* randomToken(64);
+    // The browser may return to a hosted app only when one is configured.
+    const hostedAppUrl = yield* optionalHostedAppUrlConfig.pipe(
+      Effect.map(Option.getOrUndefined),
+      Effect.orElseSucceed(() => undefined),
+    );
     const returnUrl =
-      codexAuthReturnUrl(context.returnUrl) ?? codexAuthReturnUrl(options.defaultReturnUrl);
+      codexAuthReturnUrl(context.returnUrl, hostedAppUrl) ??
+      codexAuthReturnUrl(options.defaultReturnUrl, hostedAppUrl);
     const pageNonce = yield* randomToken(24);
     const callback = Promise.withResolvers<{ url: URL; response?: NodeHttp.ServerResponse }>();
     const clientCallback = context.callbackMode === "client";
@@ -691,7 +698,10 @@ export const makeCodexChatGptAuth = Effect.fn("makeCodexChatGptAuth")(function* 
                   "content-security-policy": `default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${pageNonce}'; base-uri 'none'; frame-ancestors 'none'`,
                   "x-content-type-options": "nosniff",
                 })
-                .end(codexAuthCallbackPage(Exit.isSuccess(result), returnUrl, pageNonce), resolve);
+                .end(
+                  codexAuthCallbackPage(Exit.isSuccess(result), returnUrl, pageNonce, hostedAppUrl),
+                  resolve,
+                );
             }),
         ),
       ),
