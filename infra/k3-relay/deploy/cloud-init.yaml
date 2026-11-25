@@ -14,6 +14,7 @@ packages:
   - docker-compose-v2
   - git
   - jq
+  - sqlite3
   - curl
   - unattended-upgrades
   - netfilter-persistent
