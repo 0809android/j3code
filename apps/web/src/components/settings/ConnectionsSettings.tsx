@@ -1180,7 +1180,10 @@ function ConnectionsSettingsContent({
     <PairingClientsList
       servedByEnvironment={isPrimaryAccess}
       serverIdentityKey={
-        accessServerConfig?.transportSecurity?.identityPublicKey ?? null
+        // A pin makes the client demand E2EE, which a host with it off refuses.
+        accessServerConfig?.transportSecurity?.e2eeMode === "off"
+          ? null
+          : (accessServerConfig?.transportSecurity?.identityPublicKey ?? null)
       }
       endpointUrl={desktopServerExposureState?.endpointUrl}
       endpoints={visibleDesktopAdvertisedEndpoints}
