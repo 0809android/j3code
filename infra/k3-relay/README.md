@@ -76,11 +76,13 @@ RELAY_DOMAIN=relay.example.com docker compose -f docker-compose.example.yml up -
 | `K3_SELF_PING_URL` / `K3_SELF_PING_INTERVAL_SEC`                     | なし / `0`（オフ）   | リレー自身の公開 URL（`https://<ドメイン>/health`）へ、この秒数ごとに軽い GET を送る（アイドル回収への備え。下を参照）          |
 | `GIT_COMMIT` / `IMAGE_DIGEST`                                        | `unknown`            | `/.well-known/k3-relay` に出す。`GIT_COMMIT` はビルド引数、`IMAGE_DIGEST` は配備のときに渡す                                    |
 
+アカウント（GitHub / Google / Apple でのサインイン）の変数（`RELAY_PUBLIC_URL`、`ACCOUNT_TOKEN_SEED`、`ACCOUNT_ID_HMAC_KEY`、提供元ごとの ID と秘密など）は、[docs/ACCOUNTS.md](docs/ACCOUNTS.md) にまとめています。**どの提供元も設定しなければ、アカウントは無効で、その API はすべて `404` です。**
+
 上限値の一覧は、実行中のリレーの `/.well-known/k3-relay` にも出ます。
 
 ## 保存するデータ
 
-SQLite（`node:sqlite`）に、次の 6 つだけを置きます（スキーマは `src/store.ts` の `SCHEMA_SQL`。ハッシュは `/.well-known/k3-relay` の `schemaHash`）。
+SQLite（`node:sqlite`）に、次の 9 つだけを置きます（スキーマは `src/store.ts` の `SCHEMA_SQL`。ハッシュは `/.well-known/k3-relay` の `schemaHash`）。
 
 | テーブル        | 内容                                                                      | 保持                                 |
 | --------------- | ------------------------------------------------------------------------- | ------------------------------------ |
@@ -90,10 +92,13 @@ SQLite（`node:sqlite`）に、次の 6 つだけを置きます（スキーマ�
 | `invites`       | コードのハッシュ、使用済みの印、期限（`REQUIRE_INVITE=1` のときだけ使う） | 使用後 30 日                         |
 | `usage`         | hostId、月、中継したバイト数                                              | 2 か月                               |
 | `blocked_hosts` | 運営が遮断した hostId と、遮断した時刻（理由や IP は持たない）            | `unblock` するまで                   |
+| `accounts`      | ランダムなアカウント ID、作成日（アカウントを使う人だけ）                 | アカウントの削除まで                 |
+| `identities`    | 提供元、識別子（GitHub の数値 ID、OIDC の `sub`）の HMAC、アカウント ID   | アカウントの削除まで                 |
+| `account_hosts` | アカウント ID、hostId                                                     | 一覧から外すか、アカウントの削除まで |
 
 メモリだけに置くもの: nonce、セッション、token、ペアリングの窓、IP ごとの数（IP は保存しない）、指標。
 
-**保存しない**: 通信内容、端末名、ホスト名、プロジェクト名、IP アドレス。grant に未知の項目があれば拒否し、保存する grant は読み取った項目だけから作り直します。
+**保存しない**: 通信内容、端末名、ホスト名、プロジェクト名、IP アドレス、メールアドレス、氏名、アバター、ログイン名、提供元のトークン。grant に未知の項目があれば拒否し、保存する grant は読み取った項目だけから作り直します。
 
 **ログ**: アクセスログは出しません。リレーが書く行は `listening`、`purged`、`closed`、全体の転送量の警報（`alert`。しきい値と数字だけ）、自己通信の失敗と回復（`self-ping-failed`、`self-ping-recovered`）、警報 webhook の失敗（`alert-webhook-failed`）と、例外の種類（`error.code`）だけで、パス、メソッド、hostId、IP、URL は含みません。Caddy も、`log` を書かないので、アクセスログは出ません（`src/ops.test.ts` が CI で検査します）。ただし Caddy のエラーログ（ERROR）には、TLS の失敗などで接続元が出ることがあります。compose の例は、そのログを 1 MiB の 1 ファイルで回します。残したくなければ `logging: driver: none` にしてください。
 
@@ -121,6 +126,22 @@ SQLite（`node:sqlite`）に、次の 6 つだけを置きます（スキーマ�
 | `POST`   | `/v1/grants/revoke`          | `{hostId, deviceId, issuedAt, sig}`。`sig` は `Hk` による `k3relay-v1/revoke`、hostId、deviceId、`issuedAt`（10 進の文字列）への署名。`issuedAt` は現在から 5 分以内                                                                                                                                                                                                                                                     |
 | `POST`   | `/v1/client/<hostId>/status` | `{alg, dk, grant, ts, nonce, sig}`。`sig` は `Dk` による `k3relay-v1/status`、hostId、deviceId、`ts`（10 進の文字列）、`nonce`（文字列）への署名。`ts` は ±60 秒、nonce は一回限り                                                                                                                                                                                                                                       |
 
+アカウント（[docs/ACCOUNTS.md](docs/ACCOUNTS.md)。提供元が 1 つも設定されていなければ、すべて `404`）:
+
+| メソッド | パス                                    | 内容                                                                                                                                            |
+| -------- | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`    | `/v1/account/providers`                 | 有効な提供元 `{providers}`                                                                                                                      |
+| `POST`   | `/v1/account/oauth/<provider>/start`    | `{use: "device"\|"host", alg, key, challenge, redirect, state}` → `{authorizeUrl}`                                                              |
+| `GET`    | `/v1/account/oauth/<provider>/callback` | 提供元からの戻り。`302` でアプリの戻り先へ `?code=<K3 のコード>&state=<アプリの state>`。失敗はすべて同じ `400`                                 |
+| `POST`   | `/v1/account/token`                     | `{code, verifier, redirect, ts, sig}` → `{token, expiresAt, use}`。`sig` は結びついた鍵による `k3relay-v1/account-code`、code、`ts`             |
+| `POST`   | `/v1/account/hosts`                     | 端末だけ。`{hosts: [{hostId, hk}]}`                                                                                                             |
+| `POST`   | `/v1/account/hosts/add`                 | ホストだけ（登録済みのホスト）。自分をアカウントに載せる                                                                                        |
+| `POST`   | `/v1/account/hosts/remove`              | `hostId`。端末は自分のアカウントの任意のホストを、ホストは自分だけを外す                                                                        |
+| `POST`   | `/v1/account/hosts/token`               | 端末だけ。`hostId, dalg, dk, dsig` → 5 分のチケット。`dsig` は新しい鍵 `dk` による `k3relay-v1/account-bind`、hostId、セッションの鍵の deviceId |
+| `POST`   | `/v1/account/delete`                    | アカウントと、その識別子とホストの一覧を消す                                                                                                    |
+
+アカウントの呼び出しの本文は、すべて `{token, alg, key, ts, nonce, sig, …引数}` で、`sig` は `key`（トークンが結びついた鍵）による `k3relay-v1/account-request`、パス、トークン、`ts`、nonce、引数（順に）への署名です。`ts` は ±60 秒、nonce は一回限り。
+
 `status` は、未知の hostId、署名の誤り、grant の誤り、古い時刻、nonce の再利用のすべてに、同じ `401 {"error":"unauthorized"}` を返します（未知のホストでも、署名の確認に同じ手間をかけます）。署名と grant が正しい端末にだけ、`403 revoked`、`403 grant-expired`、`200 {online, month:{bytes, limit}}` を返します。
 
 ### WebSocket
@@ -132,6 +153,7 @@ SQLite（`node:sqlite`）に、次の 6 つだけを置きます（スキーマ�
   - リレー → ホスト: `{"type":"session-open","sessionId","token","kind":"client"|"pairing","deviceId"?}`、`{"type":"error","code"}`。`deviceId` はリレーが見た値で、ホストは信じず、E2E の中の `Dk` から決める。
 - `WS /v1/host/data/<sessionId>?t=<token>`: token は 16 バイトの一回限り、有効 10 秒。誤りは、アップグレードの前に `401`。
 - `WS /v1/client/<hostId>`: 端末が `{"type":"auth","alg","dk","grant","sig"}` を返す。`sig` は `Dk` による `k3relay-v1/client`、hostId、deviceId、nonce。通れば、リレーが `{"type":"accepted"}` を 1 回だけ送り、ホストの data が張られたところから、2 本をそのまま（テキストはテキスト、バイナリはバイナリのまま）つなぐ。以降のフレームは、すべて E2E のものです。10 秒で張られなければ閉じる。
+- `WS /v1/client/<hostId>?account=1`: アカウント経由のノック（アカウントが無効なら `404`）。端末が `{"type":"auth","alg","dk","token","sig"}` を返す（`token` は `/v1/account/hosts/token` のチケット、`sig` は `Dk` による `k3relay-v1/account-client`、hostId、deviceId、nonce）。通れば、ペアリングと同じ匿名の E2E のセッション（`session-open` の `kind` は `account`）になり、ホストが、チケットを自分で検証して、利用者の承認を求める。ホストごとに 1 時間 20 回、同時 2 本、1 つの接続は最長 11 分。
 - `WS /v1/client/<hostId>?pairing=1`: 認証なし。ホストが窓を開けているときだけ（そうでなければ、未知のホストと同じ `404`）。ホストごとに同時 1、1 時間 10 回、1 つの接続は最長 5 分。
 
 grant は `{v:1, hostId, deviceId, alg, issuedAt, expiresAt, nonce, sig}` だけです（名前や権限は入れられない）。`sig` は `Hk` による `k3relay-v1/grant`、`"1"`、hostId、deviceId、alg、`issuedAt`、`expiresAt`（10 進の文字列）、nonce への署名です。失効は「失効の時刻 ≥ grant の `issuedAt`」で判定するので、再ペアリングで出し直した新しい grant は通ります。
@@ -269,7 +291,7 @@ vp test run --config ../../vite.config.ts --dir .
 vp run typecheck   # effect-tsgo tsrs --noEmit
 ```
 
-テストは、同じプロセスの中で本物の WebSocket を張ります。ファイルごとの内容: `crypto`（Ed25519 と P-256 の相互運用、grant）、`pow`、`fair`（公平配分）、`limits`、`store`（保持期間）、`auth`、`splice`（スプライス、バックプレッシャー、セッションの上限）、`abuse`（認証前の上限、control、ペアリング）、`register`、`status`、`privacy`（DB のファイルのバイト列、全テーブル、ログに IP、端末名、通信内容、招待コードがないこと。IP ごとの登録数の上限が IPv6 の /64 でも数えられ、保存されないこと）、`ops`（Caddyfile と Dockerfile）、`traffic`（70% / 90% の警報、縮退運転、月の切り替わり、再起動をまたぐ計数、警報の本文に hostId と IP がないこと、1 ホストの上限）、`block`（遮断と解除）、`admin`（運営のコマンド）、`backup`（スナップショット）、`metrics`（実測の指標と自己通信）、`deploy`（`deploy/` の内容）。
+テストは、同じプロセスの中で本物の WebSocket を張ります。ファイルごとの内容: `crypto`（Ed25519 と P-256 の相互運用、grant）、`pow`、`fair`（公平配分）、`limits`、`store`（保持期間）、`auth`、`splice`（スプライス、バックプレッシャー、セッションの上限）、`abuse`（認証前の上限、control、ペアリング）、`register`、`status`、`privacy`（DB のファイルのバイト列、全テーブル、ログに IP、端末名、通信内容、招待コードがないこと。IP ごとの登録数の上限が IPv6 の /64 でも数えられ、保存されないこと）、`ops`（Caddyfile と Dockerfile）、`traffic`（70% / 90% の警報、縮退運転、月の切り替わり、再起動をまたぐ計数、警報の本文に hostId と IP がないこと、1 ホストの上限）、`block`（遮断と解除）、`account`（OAuth の state、PKCE、コードの再利用、戻り先、ID トークンの署名と `aud` / `iss` / `exp` / nonce、GitHub の数値 ID、アカウントのトークンとノック。フェイクの提供元を同じプロセスに立てる）、`admin`（運営のコマンド）、`backup`（スナップショット）、`metrics`（実測の指標と自己通信）、`deploy`（`deploy/` の内容）。
 
 ## 実測（このリポジトリの開発機で。マイクロではない）
 
@@ -298,4 +320,5 @@ Apple Silicon の Mac、Node 22、同じマシンにクライアントを置い�
 - `status` の答えに `state`（`ok`、`squeezed`、`blocked`）を足しました。縮退運転と遮断の理由を、画面に出すためです。
 - バックアップ、構築のスクリプト、cloud-init は、書いただけで、実際の OCI では動かしていません。オブジェクトストレージへの書き込みの権限（instance principal の動的グループとポリシー）は、手で作る必要があります。
 - 自己通信は、アイドル回収を防ぐ保証になりません（上を参照）。
-- 未実装: push（P4）、アカウント（P3.5）、ビルドの出所の証明。
+- アカウント（P3.5）の仕様との差は、[docs/ACCOUNTS.md](docs/ACCOUNTS.md) の末尾。デバイスコード（CLI のホスト）と、複数の提供元のひも付けは、まだ。
+- 未実装: push（P4）、ビルドの出所の証明。
