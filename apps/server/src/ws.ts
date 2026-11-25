@@ -3814,16 +3814,13 @@ export const layer = Layer.unwrap(
           ),
         );
         // The RPC server upgrades the request itself, so socket wrapping goes
-        // through the request it reads. E2EE sits outermost: its records are
-        // binary, so the frame splitter passes them through untouched.
+        // through the request it reads. The frame splitter sits outside E2EE:
+        // it only splits string frames, which E2EE would turn into binary records.
         const framedRequested = url.value.searchParams.has(SOCKET_FRAME_PARTS_QUERY_PARAM);
         const e2eeActive =
           e2eeRequested && currentSettings.e2eeMode !== "off" && Option.isSome(e2eeIdentity);
-        const baseUpgrade = framedRequested
-          ? Effect.map(request.upgrade, splitLargeSocketFrames)
-          : request.upgrade;
-        const e2eeUpgrade = e2eeActive
-          ? Effect.flatMap(baseUpgrade, (socket) =>
+        const encryptedUpgrade = e2eeActive
+          ? Effect.flatMap(request.upgrade, (socket) =>
               Effect.flatMap(Option.getOrThrow(e2eeIdentity).getKeypair, (keypair) =>
                 wrapServerSocketWithE2ee(socket, {
                   environmentId: e2eeEnvironmentId,
@@ -3831,14 +3828,17 @@ export const layer = Layer.unwrap(
                 }),
               ),
             )
-          : baseUpgrade;
-        // The heartbeat is an RPC frame, so it goes through E2EE like every other one.
-        const upgradeEffect = Effect.map(e2eeUpgrade, withSocketHeartbeat);
+          : request.upgrade;
+        const upgradeEffect = framedRequested
+          ? Effect.map(encryptedUpgrade, splitLargeSocketFrames)
+          : encryptedUpgrade;
+        // The heartbeat is an RPC frame, so it is written above the E2EE layer.
+        const heartbeatUpgradeEffect = Effect.map(upgradeEffect, withSocketHeartbeat);
         const e2eeRpcWebSocketHttpEffect = rpcWebSocketHttpEffect.pipe(
           Effect.provideService(
             HttpServerRequest.HttpServerRequest,
             Object.create(request, {
-              upgrade: { value: upgradeEffect },
+              upgrade: { value: heartbeatUpgradeEffect },
             }),
           ),
         );
