@@ -25,6 +25,10 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.k3RelayRejectPairing]: AuthRelayConfigureScope,
   [WS_METHODS.k3RelayRevokeDevice]: AuthRelayConfigureScope,
   [WS_METHODS.k3RelayRenameDevice]: AuthRelayConfigureScope,
+  // Putting this host on an account, and the approval policy, are the owner's call too.
+  [WS_METHODS.k3RelayAccountSignIn]: AuthRelayConfigureScope,
+  [WS_METHODS.k3RelayAccountSignOut]: AuthRelayConfigureScope,
+  [WS_METHODS.k3RelayAccountSetApproval]: AuthRelayConfigureScope,
   [WS_METHODS.providerAuthRemoveMethod]: AuthProvidersManageScope,
   // An MCP sign-in stores a credential for the agent, as an account sign-in does.
   [WS_METHODS.providerMcpSignInStart]: AuthProvidersManageScope,

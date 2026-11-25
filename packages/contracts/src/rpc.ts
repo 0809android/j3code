@@ -43,6 +43,13 @@ import {
 } from "./providerSetup.ts";
 import * as Schema from "effect/Schema";
 import * as Rpc from "effect/rpc/Rpc";
+import {
+  K3_RELAY_ACCOUNT_METHODS,
+  WsK3RelayAccountSetApprovalRpc,
+  WsK3RelayAccountSignInRpc,
+  WsK3RelayAccountSignOutRpc,
+  WsK3RelayAccountSubscribeRpc,
+} from "./k3RelayAccount.ts";
 import * as RpcGroup from "effect/rpc/RpcGroup";
 import * as RpcMiddleware from "effect/rpc/RpcMiddleware";
 import { IsoDateTime, NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
@@ -766,6 +773,10 @@ export const WS_METHODS = {
   k3RelayRejectPairing: "k3relay.rejectPairing",
   k3RelayRevokeDevice: "k3relay.revokeDevice",
   k3RelayRenameDevice: "k3relay.renameDevice",
+  k3RelayAccountSubscribe: K3_RELAY_ACCOUNT_METHODS.subscribe,
+  k3RelayAccountSignIn: K3_RELAY_ACCOUNT_METHODS.signIn,
+  k3RelayAccountSignOut: K3_RELAY_ACCOUNT_METHODS.signOut,
+  k3RelayAccountSetApproval: K3_RELAY_ACCOUNT_METHODS.setApproval,
 } as const;
 
 const WsServerUpsertKeybindingRpc = Rpc.make(WS_METHODS.serverUpsertKeybinding, {
@@ -2794,6 +2805,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsK3RelayRejectPairingRpc,
   WsK3RelayRevokeDeviceRpc,
   WsK3RelayRenameDeviceRpc,
+  WsK3RelayAccountSubscribeRpc,
+  WsK3RelayAccountSignInRpc,
+  WsK3RelayAccountSignOutRpc,
+  WsK3RelayAccountSetApprovalRpc,
   WsOrchestrationV2DispatchCommandRpc,
   WsOrchestrationV2GetWorkflowScriptRpc,
   WsOrchestrationV2GetNativeChildWorkRpc,

@@ -9,6 +9,7 @@ export * from "./environment.ts";
 export * from "./environmentHttp.ts";
 export * from "./relayClient.ts";
 export * from "./k3Relay.ts";
+export * from "./k3RelayAccount.ts";
 export * from "./desktopBootstrap.ts";
 export * from "./desktopBrowser.ts";
 export * from "./desktopAppActivation.ts";
