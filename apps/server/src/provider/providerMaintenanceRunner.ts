@@ -472,8 +472,8 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
           )
         : started;
       const finalState = settledState ?? (yield* install.state);
-      const ok = finalState.phase === "installed" || finalState.phase === "idle";
-      yield* providerRegistry.refreshProviders(provider).pipe(Effect.ignore);
+      const ok = finalState.phase === "succeeded" || finalState.phase === "idle";
+      yield* providerRegistry.refresh(provider).pipe(Effect.ignore);
       const providers = yield* providerRegistry.setProviderMaintenanceActionState({
         instanceId,
         action: "update",
