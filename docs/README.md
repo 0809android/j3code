@@ -71,3 +71,4 @@ anything.
 - [03 · Release](./operations/03_release.md)
 - [04 · Observability](./operations/04_observability.md)
 - [05 · Relay observability](./operations/05_relay-observability.md)
+- [K3 Relay transparency](../infra/k3-relay/docs/TRANSPARENCY.md), [verifying a relay](../infra/k3-relay/docs/VERIFY.md), [stored data](../infra/k3-relay/docs/DATA.md)
