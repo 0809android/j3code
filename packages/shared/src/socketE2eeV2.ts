@@ -456,6 +456,14 @@ const clientHandshake = Effect.fn("socketE2ee.clientHandshakeV2")(function* (
     serverNonce: hello.nonce,
     serverIdentityPub: hello.identityPub,
   });
+  // Another host signs for its own environment id, so its signature never verifies here; name
+  // the wrong key first, which is what the user needs to hear. Both checks refuse the session.
+  if (!timingSafeEqual(hello.identityPub, options.expectedServerIdentityKey)) {
+    return yield* new E2eeIdentityMismatchError({
+      pinnedFingerprint: identityFingerprint(options.expectedServerIdentityKey),
+      receivedFingerprint: identityFingerprint(hello.identityPub),
+    });
+  }
   if (
     !ed25519.verify(
       hello.signature,
@@ -467,12 +475,6 @@ const clientHandshake = Effect.fn("socketE2ee.clientHandshakeV2")(function* (
     )
   ) {
     return yield* protocolError("The server's E2EE handshake signature is invalid.");
-  }
-  if (!timingSafeEqual(hello.identityPub, options.expectedServerIdentityKey)) {
-    return yield* new E2eeIdentityMismatchError({
-      pinnedFingerprint: identityFingerprint(options.expectedServerIdentityKey),
-      receivedFingerprint: identityFingerprint(hello.identityPub),
-    });
   }
   const sharedSecret = yield* sharedSecretWith(ephemeralPriv, hello.ephemeralPub);
   const device = options.device;
