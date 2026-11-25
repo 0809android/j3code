@@ -33,7 +33,7 @@
 | `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET`                                | GitHub の OAuth アプリ                                                                                                       |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`                                | Google の OAuth クライアント（ウェブ アプリケーション）                                                                      |
 | `APPLE_CLIENT_ID` / `APPLE_TEAM_ID` / `APPLE_KEY_ID` / `APPLE_PRIVATE_KEY` | Sign in with Apple（Services ID、チーム ID、鍵 ID、`.p8` の PEM。改行は `\n` でもよい）                                      |
-| `ACCOUNT_WEB_REDIRECTS`                                                    | ブラウザ版のクライアントの戻り先（コンマ区切り、完全一致、https）                                                            |
+| `ACCOUNT_WEB_REDIRECTS`                                                    | ブラウザ版のクライアントの戻り先（コンマ区切り、完全一致、https）。配る origin ごとに `<origin>/k3relay/account/callback`    |
 | `MAX_HOSTS_PER_ACCOUNT`                                                    | 1 アカウントのホストの上限（既定 20）                                                                                        |
 | `ACCOUNT_STARTS_PER_MINUTE_PER_IP`                                         | サインインの開始の上限（既定 10。IPv6 は /64）                                                                               |
 | `ACCOUNTS_PER_IP_PER_DAY`                                                  | 新しいアカウントの作成の上限（既定 20）                                                                                      |
