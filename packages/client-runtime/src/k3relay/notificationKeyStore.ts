@@ -79,6 +79,8 @@ const KeyRecord = Schema.fromJsonString(
   Schema.Struct({
     v: Schema.Literal(1),
     sk: Schema.String,
+    /** The public half; the Android service needs it for the HPKE context. */
+    pk: Schema.String,
     hostId: Schema.String,
     env: Schema.String,
     label: Schema.NullOr(Schema.String),
@@ -127,6 +129,7 @@ export const makeNotificationKeyStore = (vault: NotificationSecretVault) => {
       encodeKeyRecord({
         v: 1,
         sk: encodeBase64url(secretKey),
+        pk: encodeBase64url(publicKey),
         hostId: context.hostId,
         env: context.environmentId,
         label: context.hostLabel,
