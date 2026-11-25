@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
+import { markRelayRequest } from "./transportSecurity.ts";
 import { deriveAuthClientMetadata, resolveSessionCookieName } from "./utils.ts";
 
 describe("deriveAuthClientMetadata", () => {
@@ -45,6 +46,30 @@ describe("deriveAuthClientMetadata", () => {
       } as never,
     });
     expect(direct.ipAddress).toBe("192.168.1.20");
+  });
+
+  it("records the synthetic relay address, whatever the device's headers or peer say", () => {
+    for (const [headers, source] of [
+      [{}, {}],
+      [{ "x-forwarded-for": "127.0.0.1" }, { remoteAddress: "127.0.0.1" }],
+      [{ "x-forwarded-for": "100.64.0.2" }, { remoteAddress: "127.0.0.1" }],
+      [{ "x-forwarded-for": "203.0.113.9", "cf-connecting-ip": "203.0.113.9" }, {}],
+    ] as const) {
+      const metadata = deriveAuthClientMetadata({
+        request: markRelayRequest({ headers, source }) as never,
+      });
+      expect(metadata.ipAddress).toBe("k3relay");
+    }
+  });
+
+  it("does not record the relay address for a request nobody marked", () => {
+    const metadata = deriveAuthClientMetadata({
+      request: {
+        headers: { "x-forwarded-for": "k3relay" },
+        source: { remoteAddress: "127.0.0.1" },
+      } as never,
+    });
+    expect(metadata.ipAddress).toBe("127.0.0.1");
   });
 
   it.each([

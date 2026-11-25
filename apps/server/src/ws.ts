@@ -245,7 +245,11 @@ import * as EventLoopMonitor from "./observability/EventLoopMonitor.ts";
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import * as ServerE2eeIdentity from "./auth/ServerE2eeIdentity.ts";
-import { classifyRequestTransport, transportAllowedByPolicy } from "./auth/transportSecurity.ts";
+import {
+  classifyRequestTransport,
+  transportAllowedByPolicy,
+  transportSatisfiesE2eeRequirement,
+} from "./auth/transportSecurity.ts";
 import { requiredScopeForDeviceList, rpcAuthorizationError } from "./auth/RpcAuthorization.ts";
 import * as RpcAuthorization from "./auth/RpcAuthorization.ts";
 import { RpcInstrumentation, rpcInstrumentationLayer } from "./observability/RpcInstrumentation.ts";
@@ -3717,7 +3721,11 @@ export const layer = Layer.unwrap(
             { status: 403 },
           );
         }
-        if (!e2eeRequested && currentSettings.e2eeMode === "require" && transport !== "loopback") {
+        if (
+          !e2eeRequested &&
+          currentSettings.e2eeMode === "require" &&
+          !transportSatisfiesE2eeRequirement(transport)
+        ) {
           return HttpServerResponse.jsonUnsafe(
             {
               code: E2EE_REQUIRED_CODE,
