@@ -5705,5 +5705,14 @@
   "ad208e3e32c85029": "Tout masquer",
   "3328503592789bed": "Zen",
   "856812e7e1fc445e": "Appels d’outils dans la discussion",
-  "8d545d54c0a9e950": "Masque les commandes, modifications et recherches lancées par les agents. Masquer les réussis garde les échecs. Zen n’affiche que les réponses finales. Les approbations, questions et erreurs s’affichent toujours."
+  "8d545d54c0a9e950": "Masque les commandes, modifications et recherches lancées par les agents. Masquer les réussis garde les échecs. Zen n’affiche que les réponses finales. Les approbations, questions et erreurs s’affichent toujours.",
+  "696fafb324c77af8": "Les notifications sont désactivées",
+  "7fe05ae4d1bbb22d": "Autorisez les notifications pour {product} dans les Réglages pour recevoir les notifications du relais.",
+  "7db0befe137138a8": "Les notifications des hôtes que vous joignez via le relais K3 sont chiffrées de bout en bout pour cet appareil. Ni le relais, ni Apple, ni Google ne peuvent les lire ; elles disent seulement ce qui s’est passé, jamais les titres de fils ni le contenu des fichiers. Les changements atteignent chaque hôte la prochaine fois que cet appareil s’y connecte.",
+  "b4aaa7b0a3025fce": "Notifications du relais",
+  "0e9fd498e2a93dea": "Cette version de l’app ne peut pas recevoir de notifications.",
+  "fd1316b1f627872b": "Approbation requise",
+  "62e626804919b294": "Réponse requise",
+  "0f8b99938bb11d38": "Tâche terminée",
+  "65d0dd48ec3a3d52": "L’exécution de l’agent a échoué"
 }

@@ -5711,5 +5711,14 @@
   "ad208e3e32c85029": "Dölj alla",
   "3328503592789bed": "Zen",
   "856812e7e1fc445e": "Verktygsanrop i chatten",
-  "8d545d54c0a9e950": "Dölj kommandon, redigeringar och sökningar som agenter kör. Dölj lyckade behåller misslyckanden. Zen visar bara slutliga svar. Godkännanden, frågor och fel visas alltid."
+  "8d545d54c0a9e950": "Dölj kommandon, redigeringar och sökningar som agenter kör. Dölj lyckade behåller misslyckanden. Zen visar bara slutliga svar. Godkännanden, frågor och fel visas alltid.",
+  "696fafb324c77af8": "Aviseringar är avstängda",
+  "7fe05ae4d1bbb22d": "Tillåt aviseringar för {product} i Inställningar för att få reläaviseringar.",
+  "7db0befe137138a8": "Aviseringar från värdar du når via K3-reläet är krypterade hela vägen till den här enheten. Reläet, Apple och Google kan inte läsa dem; de säger bara vad som hände, aldrig trådrubriker eller filinnehåll. Ändringar når varje värd nästa gång enheten ansluter till den.",
+  "b4aaa7b0a3025fce": "Reläaviseringar",
+  "0e9fd498e2a93dea": "Den här appversionen kan inte ta emot aviseringar.",
+  "fd1316b1f627872b": "Godkännande krävs",
+  "62e626804919b294": "Svar krävs",
+  "0f8b99938bb11d38": "Uppgiften är klar",
+  "65d0dd48ec3a3d52": "Agentkörningen misslyckades"
 }

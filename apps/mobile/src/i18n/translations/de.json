@@ -5711,5 +5711,14 @@
   "ad208e3e32c85029": "Alle ausblenden",
   "3328503592789bed": "Zen",
   "856812e7e1fc445e": "Tool-Aufrufe im Chat",
-  "8d545d54c0a9e950": "Die Befehle, Bearbeitungen und Suchen ausblenden, die Agenten ausführen. „Erfolgreiche ausblenden“ behält Fehler. „Zen“ zeigt nur endgültige Antworten. Genehmigungen, Fragen und Fehler werden immer angezeigt."
+  "8d545d54c0a9e950": "Die Befehle, Bearbeitungen und Suchen ausblenden, die Agenten ausführen. „Erfolgreiche ausblenden“ behält Fehler. „Zen“ zeigt nur endgültige Antworten. Genehmigungen, Fragen und Fehler werden immer angezeigt.",
+  "696fafb324c77af8": "Benachrichtigungen sind aus",
+  "7fe05ae4d1bbb22d": "Erlaube Benachrichtigungen für {product} in den Einstellungen, um Relay-Benachrichtigungen zu erhalten.",
+  "7db0befe137138a8": "Benachrichtigungen von Hosts, die du über das K3-Relay erreichst, sind Ende-zu-Ende für dieses Gerät verschlüsselt. Das Relay, Apple und Google können sie nicht lesen; sie sagen nur, was passiert ist, nie Thread-Titel oder Dateiinhalte. Änderungen erreichen jeden Host, wenn sich dieses Gerät das nächste Mal mit ihm verbindet.",
+  "b4aaa7b0a3025fce": "Relay-Benachrichtigungen",
+  "0e9fd498e2a93dea": "Dieser App-Build kann keine Benachrichtigungen empfangen.",
+  "fd1316b1f627872b": "Freigabe erforderlich",
+  "62e626804919b294": "Eingabe erforderlich",
+  "0f8b99938bb11d38": "Aufgabe abgeschlossen",
+  "65d0dd48ec3a3d52": "Agentenlauf fehlgeschlagen"
 }
