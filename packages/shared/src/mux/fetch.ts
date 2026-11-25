@@ -8,7 +8,7 @@ import type { MuxStream } from "./session.ts";
 /** Where relative URLs resolve. Only path and query reach the host; the host name never leaves the device. */
 export const MUX_DEFAULT_BASE_URL = "http://mux.invalid";
 
-export type MuxFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+export type MuxFetch = (input: Request | string | URL, init?: RequestInit) => Promise<Response>;
 
 export interface MuxFetchOptions {
   readonly baseUrl?: string | undefined;
