@@ -46,6 +46,10 @@ CREATE TABLE IF NOT EXISTS usage (
   bytes INTEGER NOT NULL,
   PRIMARY KEY (host_id, month)
 ) STRICT;
+CREATE TABLE IF NOT EXISTS blocked_hosts (
+  host_id TEXT PRIMARY KEY,
+  blocked_at INTEGER NOT NULL
+) STRICT;
 `;
 
 export const SCHEMA_HASH = NodeCrypto.createHash("sha256").update(SCHEMA_SQL).digest("hex");
@@ -216,6 +220,26 @@ export class RelayStore {
       "UPDATE invites SET used_at = ? WHERE code_hash = ? AND used_at IS NULL AND expires_at > ?",
     ).run(now, codeHash, now);
     return Number(result.changes) > 0;
+  }
+
+  /** Returns true when the host was not blocked before. */
+  blockHost(hostId: string, now: number): boolean {
+    const result = this.#stmt(
+      "INSERT OR IGNORE INTO blocked_hosts (host_id, blocked_at) VALUES (?, ?)",
+    ).run(hostId, now);
+    return Number(result.changes) > 0;
+  }
+
+  /** Returns true when the host was blocked. */
+  unblockHost(hostId: string): boolean {
+    const result = this.#stmt("DELETE FROM blocked_hosts WHERE host_id = ?").run(hostId);
+    return Number(result.changes) > 0;
+  }
+
+  blockedHosts(): string[] {
+    return this.#stmt("SELECT host_id FROM blocked_hosts ORDER BY host_id")
+      .all()
+      .map((row) => String(row.host_id));
   }
 
   getUsage(hostId: string, month: string): number {

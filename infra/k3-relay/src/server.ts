@@ -98,6 +98,8 @@ export interface Relay {
   readonly events: NodeEvents.EventEmitter;
   readonly metrics: Metrics;
   readonly store: RelayStore;
+  /** Re-reads the blocklist now, and cuts off hosts that were blocked since the last read. */
+  syncBlocked(): void;
   listen(): Promise<number>;
   close(): Promise<void>;
 }
@@ -232,7 +234,7 @@ class RelayServer implements Relay {
   readonly #statusNonces: ExpiringSet;
   readonly #powUsed: ExpiringSet;
   readonly #powSecret: Buffer;
-  readonly #blocked: ReadonlySet<string>;
+  #blocked: ReadonlySet<string>;
   readonly #policies = new Map<string, HostPolicy & { baseWeight: number; until: number }>();
   readonly #traffic: TrafficGuard;
   readonly #throttle: HostThrottle;
@@ -313,7 +315,7 @@ class RelayServer implements Relay {
     this.#powSecret = config.powSecret
       ? NodeCrypto.createHash("sha256").update(config.powSecret).digest()
       : NodeCrypto.randomBytes(32);
-    this.#blocked = new Set(config.blockedHosts);
+    this.#blocked = new Set([...config.blockedHosts, ...this.store.blockedHosts()]);
 
     this.#wss = new WebSocketServer({
       noServer: true,
@@ -359,6 +361,7 @@ class RelayServer implements Relay {
     this.#every(HOUR_MS, () => this.#purge());
     this.#every(1_000, () => this.metrics.sample());
     this.#every(config.trafficCheckMs, () => this.#traffic.evaluate());
+    this.#every(config.blockedPollMs, () => this.syncBlocked());
     this.#purge();
     this.#traffic.evaluate();
     const address = this.#http.address();
@@ -389,6 +392,30 @@ class RelayServer implements Relay {
     this.#usage.flush();
     this.store.close();
     this.#logger.info("closed");
+  }
+
+  /**
+   * The blocklist is the `BLOCKED_HOSTS` setting plus the table that `cli block` writes, so a
+   * block reaches a running relay within `blockedPollMs`. Control and data sockets of a newly
+   * blocked host are closed at once, and its new connections are refused.
+   */
+  syncBlocked(): void {
+    const next = new Set([...this.#config.blockedHosts, ...this.store.blockedHosts()]);
+    const added = [...next].filter((hostId) => !this.#blocked.has(hostId));
+    this.#blocked = next;
+    for (const hostId of added) this.#cutOff(hostId);
+  }
+
+  #cutOff(hostId: string): void {
+    for (const session of this.#hostSessions.get(hostId) ?? []) {
+      this.#endSession(session, "blocked", CLOSE.blocked, "blocked");
+    }
+    const control = this.#controls.get(hostId);
+    if (control && !control.accounted) {
+      control.accounted = true;
+      this.metrics.recordDisconnect("blocked");
+      control.ws.close(CLOSE.blocked, "blocked");
+    }
   }
 
   /** A throw inside a socket handler must cost that socket, not the process. */
@@ -776,7 +803,8 @@ class RelayServer implements Relay {
   }
 
   /** What a device may tell its user about why the relay is slow for them, if it is. */
-  #hostState(hostId: string): "ok" | "squeezed" {
+  #hostState(hostId: string): "ok" | "squeezed" | "blocked" {
+    if (this.#blocked.has(hostId)) return "blocked";
     return this.#policy(hostId).squeezed ? "squeezed" : "ok";
   }
 
@@ -891,6 +919,7 @@ class RelayServer implements Relay {
   #pairingAdmission(hostId: string): "ok" | "closed" | "limit" {
     const now = this.#now();
     const state = this.#pairing.get(hostId);
+    if (this.#blocked.has(hostId)) return "closed";
     if (!this.#controls.has(hostId) || !state || state.expiresAt <= now) return "closed";
     state.attempts = state.attempts.filter((at) => at > now - HOUR_MS);
     if (state.active >= this.#config.pairingMaxConcurrent) return "limit";
@@ -926,8 +955,9 @@ class RelayServer implements Relay {
         clearTimeout(timer);
         const hostId = this.#authenticateControl(data, isBinary, nonce);
         if (!hostId) return this.#closeEarly(ws, CLOSE.unauthorized, "unauthorized", "auth-failed");
-        if (this.#blocked.has(hostId))
-          return this.#closeEarly(ws, CLOSE.blocked, "blocked", "auth-failed");
+        if (this.#blocked.has(hostId)) {
+          return this.#closeEarly(ws, CLOSE.blocked, "blocked", "blocked");
+        }
         control = this.#adoptControl(ws, hostId);
         release();
       }),
@@ -1160,6 +1190,9 @@ class RelayServer implements Relay {
     deviceId: string | null,
   ): void {
     const config = this.#config;
+    if (this.#blocked.has(hostId)) {
+      return this.#closeEarly(ws, CLOSE.blocked, "blocked", "blocked");
+    }
     const control = this.#controls.get(hostId);
     if (!control || control.ws.readyState !== WebSocket.OPEN) {
       return this.#closeEarly(ws, CLOSE.hostOffline, "host-offline", "host-offline");

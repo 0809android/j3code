@@ -115,7 +115,14 @@ describe("what the relay keeps", () => {
         .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
         .all()
         .map((row) => String(row.name));
-      expect(tables.toSorted()).toEqual(["grants", "hosts", "invites", "revocations", "usage"]);
+      expect(tables.toSorted()).toEqual([
+        "blocked_hosts",
+        "grants",
+        "hosts",
+        "invites",
+        "revocations",
+        "usage",
+      ]);
       for (const table of tables) {
         const columns = db
           .prepare(`PRAGMA table_info(${table})`)
@@ -151,6 +158,46 @@ describe("what the relay keeps", () => {
       expect(text).not.toMatch(/\/v1|GET|POST|health/u);
       expect(text).not.toContain(host.hostId);
     }));
+});
+
+describe("addresses", () => {
+  const needles = ["203.0.113.77", "198.51.100.8", "2001:db8:abcd", "2001:0db8:abcd", "127.0.0.1"];
+  const via = (address: string) => ({ "x-forwarded-for": address });
+
+  it("are counted per day in memory, by /64 for IPv6, and never reach the database or the logs", async () => {
+    const directory = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "k3-relay-ip-"));
+    const dbPath = NodePath.join(directory, "relay.sqlite");
+    let logs: string[] = [];
+    try {
+      await withRelay({ dbPath, trustProxy: true, registrationsPerIpPerDay: 2 }, async (relay) => {
+        const status = async (address: string) =>
+          (await registerHost(relay, newHost(), via(address))).status;
+        expect(await status("203.0.113.77")).toBe(201);
+        expect(await status("203.0.113.77")).toBe(201);
+        expect(await status("203.0.113.77")).toBe(429);
+        expect(await status("198.51.100.8")).toBe(201);
+
+        expect(await status("2001:db8:abcd:12::5")).toBe(201);
+        expect(await status("2001:db8:abcd:12:ffff::9")).toBe(201);
+        expect(await status("2001:db8:abcd:12::77")).toBe(429);
+        expect(await status("2001:db8:abcd:13::1")).toBe(201);
+        logs = relay.logs;
+      });
+      expect(logs.length).toBeGreaterThan(0);
+      const raw = NodeFS.readdirSync(directory)
+        .map((name) => NodeFS.readFileSync(NodePath.join(directory, name)).toString("latin1"))
+        .join("\n");
+      for (const needle of needles) {
+        expect(raw, `file bytes contain ${needle}`).not.toContain(needle);
+        expect(logs.join("\n"), `logs contain ${needle}`).not.toContain(needle);
+      }
+      const db = new NodeSqlite.DatabaseSync(dbPath, { readOnly: true });
+      expect(db.prepare("SELECT COUNT(*) AS n FROM hosts").get()?.n).toBe(6);
+      db.close();
+    } finally {
+      NodeFS.rmSync(directory, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("public endpoints", () => {

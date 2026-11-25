@@ -238,15 +238,16 @@ export async function withRelay<T>(
 export async function registerHost(
   relay: TestRelay,
   host: TestHost,
+  headers?: Record<string, string>,
 ): Promise<{ status: number; hostId?: string }> {
   const hk = base64url(host.signer.pub);
-  const first = await relay.http("POST", "/v1/hosts", { hk });
+  const first = await relay.http("POST", "/v1/hosts", { hk }, headers);
   const challenge = first.json?.challenge as PowChallenge;
   const nonce = solveChallenge(host.signer.pub, challenge);
   const sig = base64url(
     host.signer.sign(registrationSigningInput(host.signer.pub, challenge.mac, nonce)),
   );
-  const second = await relay.http("POST", "/v1/hosts", { hk, challenge, nonce, sig });
+  const second = await relay.http("POST", "/v1/hosts", { hk, challenge, nonce, sig }, headers);
   return {
     status: second.status,
     ...(second.json?.hostId ? { hostId: String(second.json.hostId) } : {}),

@@ -10,6 +10,7 @@ export type DisconnectReason =
   | "backpressure"
   | "limit"
   | "degraded"
+  | "blocked"
   | "replaced"
   | "revoked"
   | "ping-timeout"
