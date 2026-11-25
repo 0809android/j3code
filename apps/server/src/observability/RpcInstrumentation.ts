@@ -272,6 +272,13 @@ const RPC_AGGREGATES = {
   [WS_METHODS.subscribeServerConfig]: "server",
   [WS_METHODS.subscribeServerLifecycle]: "server",
   [WS_METHODS.subscribeAuthAccess]: "auth",
+  [WS_METHODS.k3RelaySubscribe]: "k3relay",
+  [WS_METHODS.k3RelayCreatePairingOffer]: "k3relay",
+  [WS_METHODS.k3RelayCancelPairing]: "k3relay",
+  [WS_METHODS.k3RelayApprovePairing]: "k3relay",
+  [WS_METHODS.k3RelayRejectPairing]: "k3relay",
+  [WS_METHODS.k3RelayRevokeDevice]: "k3relay",
+  [WS_METHODS.k3RelayRenameDevice]: "k3relay",
 } as const satisfies Readonly<Record<WsRpcMethod, string>>;
 
 const RPC_SPAN_PREFIX = "ws.rpc";
