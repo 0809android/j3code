@@ -26,7 +26,7 @@ info      = "k3relay-v1/notify"
 aad       = version ‖ keyId
 平文      = u16be(JSON の長さ) ‖ JSON ‖ 0 埋め（256、512、1024 バイトのどれかに揃える）
 JSON      = {"v":1,"id":<16 バイトの乱数, base64url>,"ts":<ミリ秒>,"kind":<種類>,"env":<環境 ID>,"thread"?:<スレッド ID>,"text"?:<120 文字まで>}
-種類      = approval | input | completed | failed | test
+種類      = approval | input | completed | failed | test | device（紹介で端末が加わった。端末の設定によらず送る）
 ```
 
 最大の envelope は 1081 バイト（base64url で 1442 文字）で、APNs と FCM の 4 KB に収まります。リレーは `PUSH_MAX_ENVELOPE_BYTES`（既定 2048）を超えるものを `413` で断ります。iOS の通知拡張（Swift）と Android の受信サービス（Kotlin）は、この形をそのまま読みます。形を変えるときは、`version` を上げてください。

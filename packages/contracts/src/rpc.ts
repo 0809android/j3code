@@ -107,6 +107,7 @@ import {
   K3RelayHostState,
   K3RelayPairingOffer,
   K3RelayRenameDeviceInput,
+  K3RelaySetDevicePermissionsInput,
 } from "./k3Relay.ts";
 import { ClientActivityReportInput } from "./background.ts";
 import {
@@ -774,6 +775,7 @@ export const WS_METHODS = {
   k3RelayRejectPairing: "k3relay.rejectPairing",
   k3RelayRevokeDevice: "k3relay.revokeDevice",
   k3RelayRenameDevice: "k3relay.renameDevice",
+  k3RelaySetDevicePermissions: "k3relay.setDevicePermissions",
   k3RelayAccountSubscribe: K3_RELAY_ACCOUNT_METHODS.subscribe,
   k3RelayAccountSignIn: K3_RELAY_ACCOUNT_METHODS.signIn,
   k3RelayAccountSignOut: K3_RELAY_ACCOUNT_METHODS.signOut,
@@ -2550,6 +2552,13 @@ const WsK3RelayRenameDeviceRpc = Rpc.make(WS_METHODS.k3RelayRenameDevice, {
   error: K3RelayRpcError,
 });
 
+/** Grants or withdraws `devices:invite`; an introduced device never gets it. */
+const WsK3RelaySetDevicePermissionsRpc = Rpc.make(WS_METHODS.k3RelaySetDevicePermissions, {
+  payload: K3RelaySetDevicePermissionsInput,
+  success: K3RelayDevice,
+  error: K3RelayRpcError,
+});
+
 /**
  * A device paired through the relay takes itself off the host's ledger. Only its own entry: the
  * host reads the device from the session, never from the payload, and needs no `relay:configure`.
@@ -2816,6 +2825,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsK3RelayRejectPairingRpc,
   WsK3RelayRevokeDeviceRpc,
   WsK3RelayRenameDeviceRpc,
+  WsK3RelaySetDevicePermissionsRpc,
   WsK3RelayAccountSubscribeRpc,
   WsK3RelayAccountSignInRpc,
   WsK3RelayAccountSignOutRpc,

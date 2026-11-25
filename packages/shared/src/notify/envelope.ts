@@ -37,7 +37,8 @@ const KEY_ID_LABEL = new TextEncoder().encode("k3relay-v1/notify-key-id");
 const ID_PATTERN = /^[A-Za-z0-9_-]{22}$/u;
 const REF_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/u;
 
-export const NOTIFY_KINDS = ["approval", "input", "completed", "failed", "test"] as const;
+/** `device`: a device joined the host by introduction; sent regardless of the device's choices. */
+export const NOTIFY_KINDS = ["approval", "input", "completed", "failed", "test", "device"] as const;
 export type NotifyKind = (typeof NOTIFY_KINDS)[number];
 
 /**

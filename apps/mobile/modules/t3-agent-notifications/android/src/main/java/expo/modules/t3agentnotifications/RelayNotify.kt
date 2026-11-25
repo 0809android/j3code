@@ -45,7 +45,7 @@ object RelayNotify {
   private const val MAX_AGE_MS = 24 * 60 * 60 * 1000L
   private const val FUTURE_SKEW_MS = 5 * 60 * 1000L
   private val BUCKETS = setOf(256, 512, 1024)
-  private val KINDS = setOf("approval", "input", "completed", "failed", "test")
+  private val KINDS = setOf("approval", "input", "completed", "failed", "test", "device")
   private val INFO = "k3relay-v1/notify".toByteArray()
   private val NAME = Regex("^k3relay\\.notify\\.[A-Za-z0-9._-]{1,96}$")
 
@@ -318,18 +318,18 @@ internal object Hpke {
 /** The notification text, in the app's languages. The envelope carries only a kind. */
 internal object RelayNotifyText {
   private val TABLE = mapOf(
-    "en" to listOf("Approval needed", "Input needed", "Task completed", "The agent run failed", "Test notification", "New activity"),
-    "ja" to listOf("承認が必要です", "入力が必要です", "タスクが完了しました", "エージェントの実行に失敗しました", "テスト通知", "新しいアクティビティ"),
-    "de" to listOf("Freigabe erforderlich", "Eingabe erforderlich", "Aufgabe abgeschlossen", "Der Agentenlauf ist fehlgeschlagen", "Testbenachrichtigung", "Neue Aktivität"),
-    "es" to listOf("Se necesita aprobación", "Se necesita tu respuesta", "Tarea completada", "La ejecución del agente falló", "Notificación de prueba", "Nueva actividad"),
-    "fr" to listOf("Approbation requise", "Réponse requise", "Tâche terminée", "L’exécution de l’agent a échoué", "Notification de test", "Nouvelle activité"),
-    "ko" to listOf("승인이 필요합니다", "입력이 필요합니다", "작업이 완료되었습니다", "에이전트 실행에 실패했습니다", "테스트 알림", "새 활동"),
-    "pt" to listOf("Aprovação necessária", "Resposta necessária", "Tarefa concluída", "A execução do agente falhou", "Notificação de teste", "Nova atividade"),
-    "ru" to listOf("Требуется одобрение", "Требуется ваш ответ", "Задача выполнена", "Запуск агента завершился ошибкой", "Тестовое уведомление", "Новая активность"),
-    "sv" to listOf("Godkännande krävs", "Svar krävs", "Uppgiften är klar", "Agentkörningen misslyckades", "Testavisering", "Ny aktivitet"),
-    "zh" to listOf("需要批准", "需要你的输入", "任务已完成", "智能体运行失败", "测试通知", "新动态"),
+    "en" to listOf("Approval needed", "Input needed", "Task completed", "The agent run failed", "Test notification", "A device was added by introduction", "New activity"),
+    "ja" to listOf("承認が必要です", "入力が必要です", "タスクが完了しました", "エージェントの実行に失敗しました", "テスト通知", "紹介で端末が追加されました", "新しいアクティビティ"),
+    "de" to listOf("Freigabe erforderlich", "Eingabe erforderlich", "Aufgabe abgeschlossen", "Der Agentenlauf ist fehlgeschlagen", "Testbenachrichtigung", "Ein Gerät wurde per Empfehlung hinzugefügt", "Neue Aktivität"),
+    "es" to listOf("Se necesita aprobación", "Se necesita tu respuesta", "Tarea completada", "La ejecución del agente falló", "Notificación de prueba", "Se añadió un dispositivo por presentación", "Nueva actividad"),
+    "fr" to listOf("Approbation requise", "Réponse requise", "Tâche terminée", "L’exécution de l’agent a échoué", "Notification de test", "Un appareil a été ajouté par présentation", "Nouvelle activité"),
+    "ko" to listOf("승인이 필요합니다", "입력이 필요합니다", "작업이 완료되었습니다", "에이전트 실행에 실패했습니다", "테스트 알림", "소개로 기기가 추가되었습니다", "새 활동"),
+    "pt" to listOf("Aprovação necessária", "Resposta necessária", "Tarefa concluída", "A execução do agente falhou", "Notificação de teste", "Um dispositivo foi adicionado por apresentação", "Nova atividade"),
+    "ru" to listOf("Требуется одобрение", "Требуется ваш ответ", "Задача выполнена", "Запуск агента завершился ошибкой", "Тестовое уведомление", "Устройство добавлено по приглашению", "Новая активность"),
+    "sv" to listOf("Godkännande krävs", "Svar krävs", "Uppgiften är klar", "Agentkörningen misslyckades", "Testavisering", "En enhet lades till via introduktion", "Ny aktivitet"),
+    "zh" to listOf("需要批准", "需要你的输入", "任务已完成", "智能体运行失败", "测试通知", "已通过引荐添加设备", "新动态"),
   )
-  private val KINDS = listOf("approval", "input", "completed", "failed", "test")
+  private val KINDS = listOf("approval", "input", "completed", "failed", "test", "device")
 
   fun body(kind: String): String {
     val strings = TABLE[Locale.getDefault().language] ?: TABLE.getValue("en")

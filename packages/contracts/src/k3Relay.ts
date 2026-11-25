@@ -178,6 +178,14 @@ export type K3RelayConnectionError = typeof K3RelayConnectionError.Type;
 export const K3RelayDeviceAlgorithm = Schema.Literals(["ed25519", "p256"]);
 export type K3RelayDeviceAlgorithm = typeof K3RelayDeviceAlgorithm.Type;
 
+/** Lets a device introduce new devices and revoke ordinary ones (spec §18.2). Never by default. */
+export const K3RelayDevicePermission = Schema.Literals(["devices:invite"]);
+export type K3RelayDevicePermission = typeof K3RelayDevicePermission.Type;
+
+/** How the host's ledger approved the device. */
+export const K3RelayApprovalRoute = Schema.Literals(["host", "qr", "account", "introduction"]);
+export type K3RelayApprovalRoute = typeof K3RelayApprovalRoute.Type;
+
 export const K3RelayDevice = Schema.Struct({
   deviceId: TrimmedNonEmptyString,
   name: Schema.String,
@@ -191,6 +199,17 @@ export const K3RelayDevice = Schema.Struct({
   connectedSessions: NonNegativeInt,
   /** The device registered a notification key; older hosts do not say. */
   notifications: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false))),
+  permissions: Schema.Array(K3RelayDevicePermission).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed([])),
+  ),
+  /** Null for devices approved before the ledger recorded it, and from older hosts. */
+  approvedVia: Schema.NullOr(K3RelayApprovalRoute).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(null)),
+  ),
+  /** The introducing device's id, for `approvedVia: "introduction"`. */
+  introducedBy: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(null)),
+  ),
 });
 export type K3RelayDevice = typeof K3RelayDevice.Type;
 
@@ -258,6 +277,19 @@ export const K3RelayPairingState = Schema.Union([
 ]);
 export type K3RelayPairingState = typeof K3RelayPairingState.Type;
 
+/** An introduction the host holds open for one of its devices (spec §18.2). */
+export const K3RelayIntroductionState = Schema.Union([
+  Schema.Struct({ phase: Schema.Literal("idle") }),
+  Schema.Struct({
+    phase: Schema.Literals(["open", "claimed"]),
+    introducerDeviceId: TrimmedNonEmptyString,
+    expiresAt: NonNegativeInt,
+    /** The new device's name, once its claim arrived. */
+    deviceName: Schema.NullOr(Schema.String),
+  }),
+]);
+export type K3RelayIntroductionState = typeof K3RelayIntroductionState.Type;
+
 export const K3RelayHostState = Schema.Struct({
   enabled: Schema.Boolean,
   /** False when the managed policy forbids the relay; the connector never starts then. */
@@ -282,6 +314,9 @@ export const K3RelayHostState = Schema.Struct({
   /** End-to-end encrypted notifications to devices that registered for them (spec §13). */
   notifications: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false))),
   pairing: K3RelayPairingState,
+  introduction: K3RelayIntroductionState.pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed({ phase: "idle" as const })),
+  ),
   devices: Schema.Array(K3RelayDevice),
 });
 export type K3RelayHostState = typeof K3RelayHostState.Type;
@@ -310,6 +345,13 @@ export const K3RelayApproveInput = Schema.Struct({
 });
 export type K3RelayApproveInput = typeof K3RelayApproveInput.Type;
 
+/** The host's user grants or withdraws `devices:invite` (`relay:configure` only). */
+export const K3RelaySetDevicePermissionsInput = Schema.Struct({
+  deviceId: TrimmedNonEmptyString,
+  invite: Schema.Boolean,
+});
+export type K3RelaySetDevicePermissionsInput = typeof K3RelaySetDevicePermissionsInput.Type;
+
 export const K3RelayRenameDeviceInput = Schema.Struct({
   deviceId: TrimmedNonEmptyString,
   name: Schema.String,
@@ -324,6 +366,7 @@ export const K3RelayFailure = Schema.Literals([
   "invalid-name",
   "confirmation-required",
   "not-a-relay-device",
+  "introduced-device",
   "internal",
 ]);
 export type K3RelayFailure = typeof K3RelayFailure.Type;
@@ -347,6 +390,8 @@ export class K3RelayError extends Schema.TaggedError<K3RelayError>()("K3RelayErr
         return "Compare the confirmation codes, then approve with the code this host shows.";
       case "not-a-relay-device":
         return "Only a device paired through the K3 relay can remove itself.";
+      case "introduced-device":
+        return "A device that was introduced by another device cannot introduce devices.";
       case "internal":
         return "The K3 relay could not complete the request.";
     }
@@ -379,3 +424,88 @@ export const K3RelayBootstrapResponse = Schema.Struct({
   expiresAt: NonNegativeInt,
 });
 export type K3RelayBootstrapResponse = typeof K3RelayBootstrapResponse.Type;
+
+// ── Introductions (spec §18.2, infra/k3-relay/docs/INTRODUCTION.md) ──────────
+
+/**
+ * Device-only routes for a device with `devices:invite`, inside its own E2E tunnel. `POST` each:
+ * open a window (`{ secret }`), wait for the new device's claim, approve it with a signature,
+ * cancel it, and revoke an ordinary device.
+ */
+export const K3_RELAY_INTRODUCTION_PATH = "/api/relay/introduction";
+export const K3_RELAY_INTRODUCTION_CLAIM_PATH = "/api/relay/introduction/claim";
+export const K3_RELAY_INTRODUCTION_APPROVE_PATH = "/api/relay/introduction/approve";
+export const K3_RELAY_INTRODUCTION_CANCEL_PATH = "/api/relay/introduction/cancel";
+export const K3_RELAY_DEVICE_REVOKE_PATH = "/api/relay/devices/revoke";
+
+export const K3RelayIntroductionOpenRequest = Schema.Struct({
+  /** `S`, base64url, 16 bytes. The host learns it only inside the E2E channel. */
+  secret: TrimmedNonEmptyString,
+});
+export type K3RelayIntroductionOpenRequest = typeof K3RelayIntroductionOpenRequest.Type;
+
+export const K3RelayIntroductionOpenResponse = Schema.Struct({
+  introductionId: TrimmedNonEmptyString,
+  expiresAt: NonNegativeInt,
+});
+export type K3RelayIntroductionOpenResponse = typeof K3RelayIntroductionOpenResponse.Type;
+
+export const K3RelayIntroductionRef = Schema.Struct({ introductionId: TrimmedNonEmptyString });
+export type K3RelayIntroductionRef = typeof K3RelayIntroductionRef.Type;
+
+export const K3RelayIntroductionPeer = Schema.Struct({
+  host: TrimmedNonEmptyString,
+  alg: K3RelayDeviceAlgorithm,
+  dk: TrimmedNonEmptyString,
+});
+
+/** The claim the host holds, after waiting up to a few seconds for one. */
+export const K3RelayIntroductionClaimResponse = Schema.Union([
+  Schema.Struct({ phase: Schema.Literal("open") }),
+  Schema.Struct({
+    phase: Schema.Literal("claimed"),
+    introductionId: TrimmedNonEmptyString,
+    expiresAt: NonNegativeInt,
+    device: Schema.Struct({
+      alg: K3RelayDeviceAlgorithm,
+      dk: TrimmedNonEmptyString,
+      name: Schema.String,
+    }),
+    peers: Schema.Array(K3RelayIntroductionPeer),
+  }),
+]);
+export type K3RelayIntroductionClaimResponse = typeof K3RelayIntroductionClaimResponse.Type;
+
+export const K3RelayIntroductionApproveRequest = Schema.Struct({
+  introductionId: TrimmedNonEmptyString,
+  deviceId: TrimmedNonEmptyString,
+  confirmationCode: TrimmedNonEmptyString,
+  sig: TrimmedNonEmptyString,
+});
+export type K3RelayIntroductionApproveRequest = typeof K3RelayIntroductionApproveRequest.Type;
+
+export const K3RelayDeviceRevokeRequest = Schema.Struct({ deviceId: TrimmedNonEmptyString });
+export type K3RelayDeviceRevokeRequest = typeof K3RelayDeviceRevokeRequest.Type;
+
+/** The `error` of a refused introduction or device route. */
+export const K3RelayIntroductionFailure = Schema.Literals([
+  "disabled",
+  "not-permitted",
+  "limit",
+  "busy",
+  "invalid-request",
+  "no-introduction",
+  "expired",
+  "not-introducer",
+  "mismatch",
+  "code-mismatch",
+  "bad-signature",
+  "unknown-device",
+  "protected-device",
+  "internal",
+]);
+export type K3RelayIntroductionFailure = typeof K3RelayIntroductionFailure.Type;
+
+export const K3RelayIntroductionErrorResponse = Schema.Struct({
+  error: K3RelayIntroductionFailure,
+});

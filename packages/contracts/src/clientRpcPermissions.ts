@@ -25,6 +25,8 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.k3RelayRejectPairing]: AuthRelayConfigureScope,
   [WS_METHODS.k3RelayRevokeDevice]: AuthRelayConfigureScope,
   [WS_METHODS.k3RelayRenameDevice]: AuthRelayConfigureScope,
+  // Who may introduce devices is the owner's call; a device can never grant it.
+  [WS_METHODS.k3RelaySetDevicePermissions]: AuthRelayConfigureScope,
   // Putting this host on an account, and the approval policy, are the owner's call too.
   [WS_METHODS.k3RelayAccountSignIn]: AuthRelayConfigureScope,
   [WS_METHODS.k3RelayAccountSignOut]: AuthRelayConfigureScope,
