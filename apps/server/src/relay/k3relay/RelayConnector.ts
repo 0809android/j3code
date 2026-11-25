@@ -392,6 +392,7 @@ const make = Effect.gen(function* () {
       maxSessions: settings.relay.maxSessions,
       reachableWhenNetworkAccessOff: policyAllowed && settings.relay.enabled,
       requireApproval: approvalRequired(yield* account.approvalPolicy),
+      notifications: settings.relay.notifications,
       pairing: pairingView(pairing, pendingApproval),
       devices: devices.map((device) => toDevice(device, live, notified)),
     } satisfies K3RelayHostState;

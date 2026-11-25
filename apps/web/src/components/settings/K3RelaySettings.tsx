@@ -75,6 +75,7 @@ const formatTime = (epochMs: number) =>
 
 export interface K3RelaySettingsActions {
   readonly setEnabled: (enabled: boolean) => void;
+  readonly setNotifications: (notifications: boolean) => void;
   readonly setRelayUrl: (relayUrl: string) => void;
   readonly createOffer: () => void;
   readonly cancelOffer: () => void;
@@ -143,6 +144,11 @@ export function K3RelaySettingsView({
             <p className="truncate text-sm font-medium text-foreground">{device.name}</p>
           )}
           <p className="text-xs text-muted-foreground">
+            {device.status === "active" && device.notifications ? (
+              <span className="me-1" data-testid="k3relay-device-notifications">
+                <T>Notifications on ·</T>
+              </span>
+            ) : null}
             {device.revokedAt !== null && device.status === "revoked" ? (
               <T>
                 Revoked <Var>{formatTime(device.revokedAt)}</Var>
@@ -213,6 +219,22 @@ export function K3RelaySettingsView({
         <SettingsRow
           title={gt("Turned off by your organization")}
           description={gt("A managed policy does not allow relay connections on this machine.")}
+        />
+      ) : null}
+      {state.enabled && state.policyAllowed ? (
+        <SettingsRow
+          title={gt("Notifications through the relay")}
+          description={gt(
+            "Paired phones that turn on relay notifications hear about approvals, input requests and finished or failed runs. Each notification is end-to-end encrypted to its device; the relay, Apple and Google cannot read it, and it never carries thread titles or file contents.",
+          )}
+          control={
+            <Switch
+              checked={state.notifications}
+              disabled={disabled}
+              onCheckedChange={(checked) => actions.setNotifications(checked)}
+              aria-label={gt("Turn relay notifications on or off")}
+            />
+          }
         />
       ) : null}
       {state.reachableWhenNetworkAccessOff && !networkAccessEnabled ? (
@@ -431,6 +453,7 @@ export function K3RelaySettings({
     };
   const actions = {
     setEnabled: run(gt("Could not change the relay"), host.setEnabled),
+    setNotifications: run(gt("Could not change relay notifications"), host.setNotifications),
     setRelayUrl: run(gt("Could not save the relay address"), host.setRelayUrl),
     createOffer: run(gt("Could not create a pairing code"), host.createOffer, setOffer),
     cancelOffer: run(gt("Could not cancel pairing"), host.cancelOffer, () => setOffer(null)),

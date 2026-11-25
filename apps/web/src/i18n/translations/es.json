@@ -12976,5 +12976,10 @@
   "27d76249d09eb69f": "Guía de revisión lista",
   "faa3bb26abb39c93": "Falló la guía de revisión",
   "b7df38b7d8792d78": "Abrir guía",
-  "9e91e9a77b664e4e": "No se pudo iniciar una guía de revisión"
+  "9e91e9a77b664e4e": "No se pudo iniciar una guía de revisión",
+  "e28e72a08ef671f4": "Notificaciones a través del relay",
+  "43d21ea5d95279c9": "Los teléfonos vinculados que activan las notificaciones del relay se enteran de aprobaciones, solicitudes de respuesta y ejecuciones terminadas o fallidas. Cada notificación está cifrada de extremo a extremo para su dispositivo; ni el relay, ni Apple, ni Google pueden leerla, y nunca incluye títulos de hilos ni contenido de archivos.",
+  "ea59b6afbc856df4": "Activar o desactivar las notificaciones del relay",
+  "28ec637365a62040": "No se pudieron cambiar las notificaciones del relay",
+  "edd5ea9481ebd306": "Notificaciones activadas ·"
 }

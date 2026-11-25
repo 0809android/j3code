@@ -21,6 +21,7 @@ const baseState: K3RelayHostState = {
   maxSessions: 8,
   reachableWhenNetworkAccessOff: true,
   requireApproval: true,
+  notifications: true,
   pairing: { phase: "idle" },
   devices: [],
 };
@@ -28,6 +29,7 @@ const baseState: K3RelayHostState = {
 const makeActions = () =>
   ({
     setEnabled: vi.fn(),
+    setNotifications: vi.fn(),
     setRelayUrl: vi.fn(),
     createOffer: vi.fn(),
     cancelOffer: vi.fn(),
@@ -212,5 +214,39 @@ describe("K3RelaySettingsView", () => {
     await expect
       .element(screen.getByText(/Devices paired through the relay can still reach this machine/))
       .toBeVisible();
+  });
+
+  it("turns relay notifications off and shows which devices receive them", async () => {
+    const actions = makeActions();
+    await using screen = await render(
+      <K3RelaySettingsView
+        canWrite
+        busy={false}
+        offer={null}
+        networkAccessEnabled
+        actions={actions}
+        state={{
+          ...baseState,
+          enabled: true,
+          devices: [
+            {
+              deviceId: "c".repeat(32),
+              name: "Phone",
+              alg: "ed25519",
+              createdAt: NOW,
+              lastSeenAt: null,
+              status: "active",
+              revokedAt: null,
+              connectedSessions: 0,
+              notifications: true,
+            },
+          ],
+        }}
+      />,
+    );
+    await expect.element(screen.getByTestId("k3relay-device-notifications")).toBeVisible();
+    await expect.element(screen.getByText(/end-to-end encrypted to its device/)).toBeVisible();
+    await screen.getByRole("switch", { name: "Turn relay notifications on or off" }).click();
+    expect(actions.setNotifications).toHaveBeenCalledWith(false);
   });
 });

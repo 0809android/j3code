@@ -279,6 +279,8 @@ export const K3RelayHostState = Schema.Struct({
   reachableWhenNetworkAccessOff: Schema.Boolean,
   /** New devices always need approval with compared codes; on by default (spec §20.3). */
   requireApproval: Schema.Boolean,
+  /** End-to-end encrypted notifications to devices that registered for them (spec §13). */
+  notifications: Schema.Boolean.pipe(Schema.withDecodingDefaultKey(Effect.succeed(false))),
   pairing: K3RelayPairingState,
   devices: Schema.Array(K3RelayDevice),
 });

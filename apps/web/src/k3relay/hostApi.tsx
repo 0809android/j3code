@@ -58,6 +58,7 @@ const settle = async <A, E>(pending: Promise<AtomCommandResult<A, E>>): K3RelayH
 
 export interface K3RelayHostActions {
   readonly setEnabled: (enabled: boolean) => K3RelayHostCall;
+  readonly setNotifications: (notifications: boolean) => K3RelayHostCall;
   readonly setRelayUrl: (url: string) => K3RelayHostCall;
   readonly createOffer: () => K3RelayHostCall<K3RelayPairingOffer>;
   readonly cancelOffer: () => K3RelayHostCall;
@@ -80,6 +81,8 @@ export function useK3RelayHostActions(environmentId: EnvironmentId): K3RelayHost
   return {
     setEnabled: (enabled) =>
       settle(updateSettings({ environmentId, input: { patch: { relay: { enabled } } } })),
+    setNotifications: (notifications) =>
+      settle(updateSettings({ environmentId, input: { patch: { relay: { notifications } } } })),
     setRelayUrl: (url) =>
       settle(updateSettings({ environmentId, input: { patch: { relay: { url } } } })),
     createOffer: () => settle(createPairingOffer({ environmentId, input: {} })),

@@ -12981,5 +12981,10 @@
   "27d76249d09eb69f": "Review-Leitfaden bereit",
   "faa3bb26abb39c93": "Review-Leitfaden fehlgeschlagen",
   "b7df38b7d8792d78": "Leitfaden öffnen",
-  "9e91e9a77b664e4e": "Review-Leitfaden konnte nicht gestartet werden"
+  "9e91e9a77b664e4e": "Review-Leitfaden konnte nicht gestartet werden",
+  "e28e72a08ef671f4": "Benachrichtigungen über das Relay",
+  "43d21ea5d95279c9": "Gekoppelte Telefone mit aktivierten Relay-Benachrichtigungen erfahren von Freigaben, Eingabeanfragen und beendeten oder fehlgeschlagenen Läufen. Jede Benachrichtigung ist Ende-zu-Ende für ihr Gerät verschlüsselt; das Relay, Apple und Google können sie nicht lesen, und sie enthält nie Thread-Titel oder Dateiinhalte.",
+  "ea59b6afbc856df4": "Relay-Benachrichtigungen ein- oder ausschalten",
+  "28ec637365a62040": "Relay-Benachrichtigungen konnten nicht geändert werden",
+  "edd5ea9481ebd306": "Benachrichtigungen an ·"
 }
