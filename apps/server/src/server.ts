@@ -45,7 +45,7 @@ import {
   rejectRequestsUntilServing,
 } from "./httpResponseErrorGuard.ts";
 import { resolveLauncherPath } from "./cloud/pinnedRuntime.ts";
-import { fixPath } from "./os-jank.ts";
+import { fixPath, refreshPathFromLoginShell } from "./os-jank.ts";
 import * as Ws from "./ws.ts";
 import * as AgentScopeLive from "./process/agentScope.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
@@ -779,7 +779,6 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   layerProviderInstallationRefresh,
   ProviderInstallation.layer,
   ReplayMarkers.layer,
-  Layer.effectDiscard(ProjectSettingsOverrideSweep.sweep),
 ).pipe(
   Layer.provideMerge(layerOrchestrationApplication),
   // One hub, which the feeders above and the workflow store inside the runtime publish to.
@@ -1407,6 +1406,14 @@ const layerMakeServer = Layer.unwrap(
       withRootRequestSpans,
       Layer.tap(() => Deferred.succeed(routesReady, undefined).pipe(Effect.orDie)),
     );
+    const layerProjectSettingsOverrideSweep = Layer.effectDiscard(
+      ServerActivation.forkParked(ProjectSettingsOverrideSweep.sweep.pipe(Effect.ignore)),
+    );
+    const layerBackgroundShellPathRefresh = config.shellEnvironmentPrepared
+      ? Layer.empty
+      : Layer.effectDiscard(
+          ServerActivation.forkParked(refreshPathFromLoginShell().pipe(Effect.ignore)),
+        );
     const layerServerApplication = Layer.mergeAll(
       layerRoutes,
       layerHttpListening,
@@ -1414,6 +1421,8 @@ const layerMakeServer = Layer.unwrap(
       layerRuntimeState.pipe(Layer.provide(layerLauncher)),
       layerTailscaleServe,
       layerCloudDesiredLinkReconcile,
+      layerProjectSettingsOverrideSweep,
+      layerBackgroundShellPathRefresh,
       HeapSnapshot.layer,
     );
 

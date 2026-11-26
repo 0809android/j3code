@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off - The test observes a real cleanup-shell spawn failure.
 import * as NodeChildProcess from "node:child_process";
+import * as NodePath from "node:path";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as Config from "effect/Config";
@@ -150,6 +151,150 @@ it.layer(Layer.mergeAll(NodeServices.layer, NetService.layer))("t3 uninstall com
       );
       assert.deepStrictEqual(uninstalls, input.removed);
       assert.include(output, input.output);
+    }),
+  );
+
+  const bootServiceFor = (homeDir: string, baseDir: string, uninstalls: Array<true>) =>
+    Layer.succeed(
+      BootService.BootService,
+      BootService.BootService.of({
+        status: Effect.succeed({
+          supported: true,
+          installed: true,
+          current: true,
+          installedBaseDir: baseDir,
+          unitPath: NodePath.join(homeDir, ".config/systemd/user/k3code.service"),
+          logPath: NodePath.join(baseDir, "userdata/logs/boot-service.log"),
+        }),
+        withStopped: (operation) => operation,
+        restart: Effect.die("unexpected restart"),
+        install: () => Effect.die("unexpected install"),
+        uninstall: Effect.sync(() => {
+          uninstalls.push(true);
+          return true;
+        }),
+      }),
+    );
+
+  const runUninstallAll = (homeDir: string, baseDir: string) =>
+    Command.runWith(uninstallCommand, { version: packageJson.version })([
+      "--base-dir",
+      baseDir,
+      "--all",
+      "--yes",
+    ]).pipe(
+      Effect.andThen(TestConsole.logLines),
+      Effect.map((lines) => lines.join("\n")),
+      Effect.provideService(HostProcess.Platform, "linux"),
+      Effect.provideService(HostProcess.HomeDirectory, homeDir),
+      Effect.provideService(HostProcess.Environment, {}),
+      Effect.provideService(HostProcess.IsExecutable, false),
+      Effect.provide(
+        Layer.mergeAll(
+          ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })),
+          Layer.fresh(TestConsole.layer),
+        ),
+      ),
+    );
+
+  it.effect(
+    "removes only K3 Code's baseDir, caches, app data, and desktop shim with --all --yes, never T3 Code's",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const homeDir = yield* fs.makeTempDirectoryScoped({ prefix: "k3-uninstall-all-home-" });
+        const baseDir = path.join(homeDir, ".k3code");
+        const userdataFile = path.join(baseDir, "userdata", "statev2.sqlite");
+        const cacheFile = path.join(homeDir, ".cache", "k3code", "cache.bin");
+        const configFile = path.join(homeDir, ".config", "k3code-v2", "Preferences");
+        const desktopShim = path.join(homeDir, ".local", "bin", "t3");
+        const unrelatedFile = path.join(homeDir, "keep-me.txt");
+        const t3Shim = path.join(homeDir, "bin", "t3");
+        const t3Files = [
+          path.join(homeDir, ".t3", "userdata", "statev2.sqlite"),
+          path.join(homeDir, ".cache", "t3code", "cache.bin"),
+          path.join(homeDir, ".config", "t3code-v2", "Preferences"),
+          path.join(homeDir, ".config", "T3 Code (Alpha)", "Preferences"),
+          path.join(
+            homeDir,
+            ".local",
+            "share",
+            "gnome-shell",
+            "extensions",
+            "snap-shot@t3.codes",
+            "metadata.json",
+          ),
+          t3Shim,
+        ];
+
+        for (const file of [
+          userdataFile,
+          cacheFile,
+          configFile,
+          desktopShim,
+          unrelatedFile,
+          ...t3Files,
+        ]) {
+          yield* fs.makeDirectory(path.dirname(file), { recursive: true });
+        }
+        yield* fs.writeFileString(userdataFile, "sqlite");
+        yield* fs.writeFileString(cacheFile, "cache");
+        yield* fs.writeFileString(configFile, "{}");
+        yield* fs.writeFileString(
+          desktopShim,
+          "#!/bin/sh\n# Written by K3 Code: runs the desktop app's bundled t3 CLI.\n",
+        );
+        yield* fs.writeFileString(unrelatedFile, "untouched");
+        for (const file of t3Files) {
+          yield* fs.writeFileString(
+            file,
+            file === t3Shim
+              ? "#!/bin/sh\n# Written by T3 Code: runs the desktop app's bundled t3 CLI.\n"
+              : "t3 data",
+          );
+        }
+
+        const uninstalls: Array<true> = [];
+        vi.spyOn(BootService, "layer").mockReturnValue(
+          bootServiceFor(homeDir, baseDir, uninstalls),
+        );
+
+        const output = yield* runUninstallAll(homeDir, baseDir);
+
+        assert.deepStrictEqual(uninstalls, [true]);
+        assert.isFalse(yield* fs.exists(baseDir));
+        assert.isFalse(yield* fs.exists(path.join(homeDir, ".cache", "k3code")));
+        assert.isFalse(yield* fs.exists(path.join(homeDir, ".config", "k3code-v2")));
+        assert.isFalse(yield* fs.exists(desktopShim));
+        assert.isTrue(yield* fs.exists(unrelatedFile));
+        for (const file of t3Files) {
+          assert.isTrue(yield* fs.exists(file), `${file} belongs to T3 Code and must be kept`);
+        }
+        assert.notInclude(output, "/.t3");
+        assert.notInclude(output, "t3code");
+        assert.notInclude(output, "T3 Code (Alpha)");
+        assert.notInclude(output, t3Shim);
+        assert.include(output, "K3 Code has been completely uninstalled.");
+      }),
+  );
+
+  it.effect("refuses --all when the base directory is T3 Code's home", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const homeDir = yield* fs.makeTempDirectoryScoped({ prefix: "k3-uninstall-t3-home-" });
+      const t3Home = path.join(homeDir, ".t3");
+      const t3File = path.join(t3Home, "userdata", "statev2.sqlite");
+      yield* fs.makeDirectory(path.dirname(t3File), { recursive: true });
+      yield* fs.writeFileString(t3File, "sqlite");
+
+      vi.spyOn(BootService, "layer").mockReturnValue(bootServiceFor(homeDir, t3Home, []));
+
+      const error = yield* runUninstallAll(homeDir, t3Home).pipe(Effect.flip);
+
+      assert.include(String(error), "Refusing to remove");
+      assert.isTrue(yield* fs.exists(t3File));
     }),
   );
 });

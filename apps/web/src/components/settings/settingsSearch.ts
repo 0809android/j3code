@@ -330,6 +330,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     environmentOnly: true,
   },
   {
+    id: "default-thread-environment",
+    title: msg("Environment"),
+    to: "/settings/threads",
+    scope: "environment-defaults",
+    searchTerms: [msg("default thread environment new threads machine server host")],
+  },
+  {
     id: "default-permissions",
     title: msg("Permissions"),
     to: "/settings/threads",
@@ -1015,6 +1022,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "open-source-licenses",
     title: msg("Open source licenses"),
     to: "/settings/about",
+  },
+  {
+    id: "uninstall-app",
+    title: msg("Uninstall K3 Code"),
+    to: "/settings/about",
+    desktopOnly: true,
+    searchTerms: [msg("uninstall remove delete purge wipe reset completely")],
   },
   {
     id: "keybindings",

@@ -645,6 +645,21 @@ it.effect("keeps the reader read-only even if a statement turns query_only off",
   ),
 );
 
+it.effect("applies every reader PRAGMA, not just the first", () =>
+  withReaderClient((sql) =>
+    Effect.gen(function* () {
+      const [cache] = yield* sql<{ readonly cache_size: number }>`PRAGMA cache_size`.pipe(
+        SqliteClient.readOnly,
+      );
+      const [temp] = yield* sql<{ readonly temp_store: number }>`PRAGMA temp_store`.pipe(
+        SqliteClient.readOnly,
+      );
+      assert.equal(cache?.cache_size, -32000);
+      assert.equal(temp?.temp_store, 2);
+    }),
+  ),
+);
+
 it.effect("keeps read-only work inside a write transaction on the writer", () =>
   withReaderClient((sql) =>
     sql.withTransaction(

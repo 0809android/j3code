@@ -180,6 +180,7 @@ export interface Preferences {
   readonly toolCallVisibility?: ToolCallVisibility;
   readonly workingShelfEnabled?: boolean;
   readonly useLastProjectForNewThreads?: boolean;
+  readonly defaultThreadEnvironmentId?: EnvironmentId | null;
   readonly lastThreadProject?: typeof ThreadProject.Type;
   readonly modelFavorites?: ReadonlyArray<{
     readonly provider: ProviderInstanceId;
@@ -270,6 +271,7 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     toolCallVisibility?: ToolCallVisibility;
     workingShelfEnabled?: boolean;
     useLastProjectForNewThreads?: boolean;
+    defaultThreadEnvironmentId?: EnvironmentId | null;
     lastThreadProject?: typeof ThreadProject.Type;
     modelFavorites?: Preferences["modelFavorites"];
     threadListSettledShelfExpanded?: boolean;
@@ -406,6 +408,16 @@ function sanitizePreferences(parsed: Preferences): Preferences {
   }
   if (typeof parsed.useLastProjectForNewThreads === "boolean") {
     preferences.useLastProjectForNewThreads = parsed.useLastProjectForNewThreads;
+  }
+  if (parsed.defaultThreadEnvironmentId === null) {
+    preferences.defaultThreadEnvironmentId = null;
+  } else if (
+    typeof parsed.defaultThreadEnvironmentId === "string" &&
+    parsed.defaultThreadEnvironmentId.trim().length > 0
+  ) {
+    preferences.defaultThreadEnvironmentId = EnvironmentId.make(
+      parsed.defaultThreadEnvironmentId.trim(),
+    );
   }
   if (isThreadProject(parsed.lastThreadProject)) {
     preferences.lastThreadProject = parsed.lastThreadProject;
