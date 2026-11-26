@@ -11,6 +11,11 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import { Command, Flag, GlobalFlag, Prompt } from "effect/cli";
 
+import {
+  collectK3SystemPaths,
+  filterSafeRemovalPaths,
+  isSafeRemovalPath,
+} from "@t3tools/shared/uninstallTargets";
 import * as BootService from "../cloud/bootService.ts";
 import {
   findPosixLauncher,
@@ -39,9 +44,70 @@ export interface UninstallPlan {
   readonly otherHomeService: string | undefined;
   readonly versionsDir: string;
   readonly launchers: ReadonlyArray<string>;
+  readonly desktopShims: ReadonlyArray<string>;
   readonly runtimeDir: string | undefined;
   readonly userdataDir: string;
+  readonly baseDir: string | undefined;
+  readonly completePaths: ReadonlyArray<string>;
 }
+
+// The desktop app's `t3` launcher carries this line. T3 Code writes a different one, so a
+// `t3` that belongs to T3 Code is never matched.
+const DESKTOP_CLI_SHIM_MARKER = "Written by K3 Code: runs the desktop app's bundled t3 CLI.";
+
+/** Candidate OS-level desktop app, cache, preference, and state paths removed by `--all`. */
+export function collectCompleteRemovalCandidates(input: {
+  readonly path: Path.Path;
+  readonly platform: NodeJS.Platform;
+  readonly homeDir: string;
+  readonly env: Readonly<Record<string, string | undefined>>;
+}): ReadonlyArray<string> {
+  const context = {
+    path: input.path,
+    platform: input.platform,
+    homeDirectory: input.homeDir,
+    env: input.env,
+  };
+  return filterSafeRemovalPaths(
+    context,
+    collectK3SystemPaths(context, { includeAppBundles: true }),
+  );
+}
+
+/** Finds desktop-installed CLI symlinks/shims in standard user bin directories. */
+export const findDesktopShimLaunchers = Effect.fn("cli.uninstall.find_desktop_shims")(function* () {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const platform = yield* HostProcess.Platform;
+  const homeDir = yield* HostProcess.HomeDirectory;
+  const dirs =
+    platform === "darwin"
+      ? [
+          path.join(homeDir, ".local", "bin"),
+          path.join(homeDir, "bin"),
+          "/opt/homebrew/bin",
+          "/usr/local/bin",
+        ]
+      : platform === "win32"
+        ? [path.join(homeDir, ".local", "bin")]
+        : [path.join(homeDir, ".local", "bin"), path.join(homeDir, "bin")];
+  const names = platform === "win32" ? ["t3.cmd"] : ["t3"];
+  const found: Array<string> = [];
+  for (const dir of dirs) {
+    for (const name of names) {
+      const candidate = path.join(dir, name);
+      const info = yield* fs.stat(candidate).pipe(Effect.option);
+      if (Option.isNone(info) || info.value.type !== "File" || Number(info.value.size) > 16_384) {
+        continue;
+      }
+      const contents = yield* fs.readFileString(candidate).pipe(Effect.orElseSucceed(() => ""));
+      if (contents.includes(DESKTOP_CLI_SHIM_MARKER)) {
+        found.push(candidate);
+      }
+    }
+  }
+  return found;
+});
 
 /** Delete only launchers targeting this home's runtime/versions. */
 export const findOwnedLauncher = Effect.fn("cli.uninstall.find_launcher")(function* (input: {
@@ -148,9 +214,13 @@ export function spawnWindowsRemoval(comspec: string, dir: string) {
 
 const planUninstall = Effect.fn("cli.uninstall.plan")(function* (input: {
   readonly baseDir: string;
+  readonly complete: boolean;
 }) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
+  const platform = yield* HostProcess.Platform;
+  const homeDir = yield* HostProcess.HomeDirectory;
+  const env = yield* HostProcess.Environment;
   const service = yield* BootService.BootService;
   const status = yield* service.status;
   const installedBaseDir =
@@ -160,6 +230,30 @@ const planUninstall = Effect.fn("cli.uninstall.plan")(function* (input: {
   const runtimeDir = path.dirname(versionsDir);
   const launchedAs = (yield* HostProcess.IsExecutable) ? yield* resolveLauncherPath : undefined;
   const launchedFrom = yield* findOwnedLauncher({ launchedAs, versionsDir });
+  const baseDirExists = yield* fs.exists(input.baseDir).pipe(Effect.orElseSucceed(() => false));
+  const completePaths: Array<string> = [];
+  let desktopShims: ReadonlyArray<string> = [];
+  if (input.complete && baseDirExists) {
+    // --base-dir or K3CODE_HOME can point anywhere, including T3 Code's ~/.t3 or the home directory.
+    const safeToRemove = isSafeRemovalPath(
+      { path, platform, homeDirectory: homeDir, env },
+      input.baseDir,
+    );
+    if (!safeToRemove) {
+      return yield* new CliUninstallError({
+        reason: `Refusing to remove ${input.baseDir}: it is the home directory, a shared system folder, or T3 Code's data.`,
+      });
+    }
+  }
+  if (input.complete) {
+    desktopShims = yield* findDesktopShimLaunchers();
+    const candidates = collectCompleteRemovalCandidates({ path, platform, homeDir, env });
+    for (const candidate of candidates) {
+      if (yield* fs.exists(candidate).pipe(Effect.orElseSucceed(() => false))) {
+        completePaths.push(candidate);
+      }
+    }
+  }
   const plan: UninstallPlan = {
     service: servesThisHome,
     otherHomeService: servesThisHome ? undefined : installedBaseDir,
@@ -170,16 +264,26 @@ const planUninstall = Effect.fn("cli.uninstall.plan")(function* (input: {
         ...(yield* findRecordedLaunchers(versionsDir)),
       ]),
     ],
+    desktopShims,
     runtimeDir: (yield* fs.exists(runtimeDir).pipe(Effect.orElseSucceed(() => false)))
       ? runtimeDir
       : undefined,
     userdataDir: path.join(input.baseDir, "userdata"),
+    baseDir: input.complete && baseDirExists ? input.baseDir : undefined,
+    completePaths,
   };
   return plan;
 });
 
 export const uninstallCommand = Command.make("uninstall", {
   ...projectLocationFlags,
+  all: Flag.Boolean("all").pipe(
+    Flag.withAlias("a"),
+    Flag.withDescription(
+      "Completely remove K3 Code: also delete all user data, databases, settings, caches, preferences, and the desktop app.",
+    ),
+    Flag.withDefault(false),
+  ),
   yes: Flag.Boolean("yes").pipe(
     Flag.withAlias("y"),
     Flag.withDescription(
@@ -189,15 +293,17 @@ export const uninstallCommand = Command.make("uninstall", {
   ),
 }).pipe(
   Command.withDescription(
-    "Remove t3 from this machine: the background service, the launcher, and every downloaded version. Your projects and threads are kept.",
+    "Remove K3 Code from this machine: the background service, launchers, and downloaded versions. Pass --all to also remove user data, caches, preferences, and the desktop app.",
   ),
   Command.withHandler((flags) =>
     Effect.gen(function* () {
       const logLevel = yield* GlobalFlag.LogLevel;
       const config = yield* resolveCliAuthConfig(flags, logLevel);
-      return yield* runUninstall({ baseDir: config.baseDir, assumeYes: flags.yes }).pipe(
-        Effect.provide(CliService.layer(config)),
-      );
+      return yield* runUninstall({
+        baseDir: config.baseDir,
+        complete: flags.all,
+        assumeYes: flags.yes,
+      }).pipe(Effect.provide(CliService.layer(config)));
     }),
   ),
 );
@@ -211,19 +317,28 @@ const logOtherHomeService = (plan: UninstallPlan) =>
 
 const runUninstall = Effect.fn("cli.uninstall.run")(function* (input: {
   readonly baseDir: string;
+  readonly complete: boolean;
   readonly assumeYes: boolean;
 }) {
   const fs = yield* FileSystem.FileSystem;
   const platform = yield* HostProcess.Platform;
   const environment = yield* HostProcess.Environment;
   const service = yield* BootService.BootService;
-  const plan = yield* planUninstall({ baseDir: input.baseDir });
+  const plan = yield* planUninstall({ baseDir: input.baseDir, complete: input.complete });
 
-  if (!plan.service && plan.launchers.length === 0 && plan.runtimeDir === undefined) {
-    yield* Console.log(`Nothing to remove: t3 is not installed for ${input.baseDir}.`);
+  const hasNothing =
+    !plan.service &&
+    plan.launchers.length === 0 &&
+    plan.desktopShims.length === 0 &&
+    plan.runtimeDir === undefined &&
+    plan.baseDir === undefined &&
+    plan.completePaths.length === 0;
+
+  if (hasNothing) {
+    yield* Console.log(`Nothing to remove: K3 Code is not installed for ${input.baseDir}.`);
     if (!(yield* HostProcess.IsExecutable)) {
       yield* Console.log(
-        "  This t3 runs from a Node script, so it was installed by npm or built from source. Remove it the same way (`npm uninstall -g t3`, or delete the checkout).",
+        "  This CLI runs from a Node script, so it was installed by npm or built from source. Remove it the same way (`npm uninstall -g t3`, or delete the checkout).",
       );
     }
     yield* logOtherHomeService(plan);
@@ -233,12 +348,20 @@ const runUninstall = Effect.fn("cli.uninstall.run")(function* (input: {
   yield* Console.log("This will remove:");
   if (plan.service) yield* Console.log("  the background service (stopping it first)");
   for (const launcher of plan.launchers) yield* Console.log(`  the launcher at ${launcher}`);
-  if (plan.runtimeDir !== undefined) {
+  for (const shim of plan.desktopShims) yield* Console.log(`  the desktop CLI launcher at ${shim}`);
+  if (plan.baseDir !== undefined) {
+    yield* Console.log(`  all K3 Code data, settings, and versions under ${plan.baseDir}`);
+  } else if (plan.runtimeDir !== undefined) {
     yield* Console.log(`  every downloaded version under ${plan.runtimeDir}`);
   }
-  yield* Console.log(
-    `Your projects, threads, and settings under ${plan.userdataDir} are kept. Delete that directory yourself if you want them gone too.`,
-  );
+  for (const target of plan.completePaths) {
+    yield* Console.log(`  ${target}`);
+  }
+  if (!input.complete) {
+    yield* Console.log(
+      `Your projects, threads, and settings under ${plan.userdataDir} are kept. Pass --all to remove K3 Code completely, including user data, caches, preferences, and the desktop app.`,
+    );
+  }
 
   if (!input.assumeYes) {
     if (!(process.stdin.isTTY && process.stdout.isTTY)) {
@@ -248,7 +371,12 @@ const runUninstall = Effect.fn("cli.uninstall.run")(function* (input: {
       });
     }
     const confirmed = yield* Prompt.run(
-      Prompt.Confirm({ message: "Remove t3 from this machine?", initial: false }),
+      Prompt.Confirm({
+        message: input.complete
+          ? "Permanently remove K3 Code and ALL its data from this machine?"
+          : "Remove K3 Code from this machine?",
+        initial: false,
+      }),
     ).pipe(Effect.catchTags({ QuitError: () => Effect.succeed(false) }));
     if (!confirmed) {
       yield* Console.log("Left as is.");
@@ -265,7 +393,7 @@ const runUninstall = Effect.fn("cli.uninstall.run")(function* (input: {
   }
   for (const launcher of plan.launchers) {
     if (!(yield* ownsLauncher(launcher, plan.versionsDir))) {
-      yield* Console.log(`Left ${launcher}: it no longer runs this t3.`);
+      yield* Console.log(`Left ${launcher}: it no longer runs this installation.`);
       continue;
     }
     yield* fs
@@ -277,31 +405,58 @@ const runUninstall = Effect.fn("cli.uninstall.run")(function* (input: {
       );
     yield* Console.log(`Removed ${launcher}.`);
   }
-  if (plan.runtimeDir !== undefined) {
+  for (const shim of plan.desktopShims) {
+    yield* fs
+      .remove(shim, { force: true })
+      .pipe(
+        Effect.mapError(
+          () =>
+            new CliUninstallError({
+              reason: `Could not remove the desktop CLI launcher at ${shim}.`,
+            }),
+        ),
+      );
+    yield* Console.log(`Removed ${shim}.`);
+  }
+  for (const target of plan.completePaths) {
+    yield* fs
+      .remove(target, { recursive: true, force: true })
+      .pipe(
+        Effect.mapError(
+          () => new CliUninstallError({ reason: `Could not remove ${target}.` }),
+        ),
+      );
+    yield* Console.log(`Removed ${target}.`);
+  }
+  const dirToRemove = plan.baseDir ?? plan.runtimeDir;
+  if (dirToRemove !== undefined) {
     // Windows refuses to unlink this running executable; a detached shell removes it after exit.
     if (platform === "win32") {
-      const runtimeDir = plan.runtimeDir;
       const comspec = environment["ComSpec"] ?? environment["COMSPEC"] ?? "cmd.exe";
       const notScheduled = () =>
         new CliUninstallError({
-          reason: `Could not schedule removal of ${runtimeDir}. Delete it yourself once this window is closed.`,
+          reason: `Could not schedule removal of ${dirToRemove}. Delete it yourself once this window is closed.`,
         });
-      yield* awaitDetachedSpawn(() => spawnWindowsRemoval(comspec, runtimeDir)).pipe(
+      yield* awaitDetachedSpawn(() => spawnWindowsRemoval(comspec, dirToRemove)).pipe(
         Effect.mapError(notScheduled),
       );
-      yield* Console.log(`${runtimeDir} will be removed once t3 exits.`);
+      yield* Console.log(`${dirToRemove} will be removed once the CLI exits.`);
     } else {
       yield* fs
-        .remove(plan.runtimeDir, { recursive: true, force: true })
+        .remove(dirToRemove, { recursive: true, force: true })
         .pipe(
           Effect.mapError(
-            () => new CliUninstallError({ reason: `Could not remove ${plan.runtimeDir}.` }),
+            () => new CliUninstallError({ reason: `Could not remove ${dirToRemove}.` }),
           ),
         );
-      yield* Console.log(`Removed ${plan.runtimeDir}.`);
+      yield* Console.log(`Removed ${dirToRemove}.`);
     }
   }
   yield* Console.log("");
-  yield* Console.log("t3 is uninstalled. Thanks for trying K3 Code.");
+  yield* Console.log(
+    input.complete
+      ? "K3 Code has been completely uninstalled."
+      : "K3 Code is uninstalled. Thanks for trying K3 Code.",
+  );
   yield* logOtherHomeService(plan);
 });
