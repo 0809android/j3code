@@ -60,6 +60,7 @@ import {
   WindowsPackagedPayloadValidationError,
   stageCursorSdkPlatformPackages,
   WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT,
+  WINDOWS_SERVER_COMPILE_CACHE_RESOURCE,
   WINDOWS_SERVER_ASAR_IGNORE_GLOBS,
   WINDOWS_SERVER_ASAR_RESOURCE,
   WSL_RUNTIME_ARCHIVE_EXTRA_RESOURCE,
@@ -1386,6 +1387,40 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         assert.isAbove(error.fileCount ?? 0, 2);
       }),
     ),
+  );
+
+  it.effect("leaves a natively prepared server compile cache out of the file-count budget", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const fixture = yield* makeWindowsPayloadFixture({ copyUnpackedNatives: true });
+        const input = {
+          stageDistDir: fixture.stageDistDir,
+          appExecutableName: fixture.appExecutableName,
+          targetArch: "x64",
+          appVersion: WINDOWS_PAYLOAD_FIXTURE_VERSION,
+        } as const;
+        const withoutCache = yield* validateWindowsPackagedPayload(input);
+        const cacheDir = path.join(
+          fixture.packagedAppDir,
+          "resources",
+          WINDOWS_SERVER_COMPILE_CACHE_RESOURCE,
+        );
+        yield* fs.makeDirectory(cacheDir, { recursive: true });
+        for (const name of ["manifest.json", "0a1b2c3d", "4e5f6a7b"]) {
+          yield* fs.writeFileString(path.join(cacheDir, name), "cache");
+        }
+
+        const withCache = yield* validateWindowsPackagedPayload({
+          ...input,
+          fileLimit: withoutCache.fileCount,
+        });
+
+        assert.equal(withCache.fileCount, withoutCache.fileCount);
+        assert.equal(withCache.compileCacheFileCount, 3);
+      }),
+    ).pipe(Effect.provideService(HostProcess.Platform, "linux")),
   );
 
   it.effect("rejects a sidecar whose extracted server bundle cannot resolve", () =>

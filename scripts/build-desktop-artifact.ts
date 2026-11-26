@@ -1049,6 +1049,9 @@ export function resolveWindowsServerAsarIgnoreGlobs(arch: typeof BuildArch.Type)
 }
 
 export const WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT = 80;
+// このキャッシュは Windows の上で作ったときだけ入る（リリースの CI は Linux で作るので入らない）。
+// 数はサーバーの分割ファイルの数で決まるので、ファイル数の上限には数えない。
+export const WINDOWS_SERVER_COMPILE_CACHE_RESOURCE = "server-compile-cache";
 export const WINDOWS_SERVER_RESOURCE_SOURCE_DIR = "apps/desktop/prod-resources/windows-server";
 export const WINDOWS_SERVER_EXTRA_RESOURCES = [
   {
@@ -3506,7 +3509,15 @@ export const validateWindowsPackagedPayload = Effect.fn(
     }
   }
 
-  const fileCount = yield* countPayloadFiles(packagedAppDir);
+  const compileCacheDir = path.join(
+    packagedAppDir,
+    "resources",
+    WINDOWS_SERVER_COMPILE_CACHE_RESOURCE,
+  );
+  const compileCacheFileCount = (yield* fs.exists(compileCacheDir))
+    ? yield* countPayloadFiles(compileCacheDir)
+    : 0;
+  const fileCount = (yield* countPayloadFiles(packagedAppDir)) - compileCacheFileCount;
   if (fileCount > fileLimit) {
     return yield* new WindowsPackagedPayloadValidationError({
       reason: "file-limit-exceeded",
@@ -3524,9 +3535,9 @@ export const validateWindowsPackagedPayload = Effect.fn(
   });
 
   yield* Effect.log(
-    `[desktop-artifact] Validated Windows payload (${String(fileCount)} files, ${String(unpackedFiles.length)} sidecar natives).`,
+    `[desktop-artifact] Validated Windows payload (${String(fileCount)} files, ${String(unpackedFiles.length)} sidecar natives, ${String(compileCacheFileCount)} compile cache files).`,
   );
-  return { packagedAppDir, fileCount, unpackedFiles } as const;
+  return { packagedAppDir, fileCount, compileCacheFileCount, unpackedFiles } as const;
 });
 
 export class MacPackagedAppMissingError extends Schema.TaggedError<MacPackagedAppMissingError>()(
