@@ -85,10 +85,7 @@ export function UninstallSettingsSection() {
   };
 
   const canConfirm =
-    !loadingPlan &&
-    !running &&
-    plan !== null &&
-    confirmationText.trim() === CONFIRMATION_PHRASE;
+    !loadingPlan && !running && plan !== null && confirmationText.trim() === CONFIRMATION_PHRASE;
 
   return (
     <>
@@ -138,14 +135,12 @@ export function UninstallSettingsSection() {
                     <p className="font-medium text-foreground text-xs">
                       <T>Items to be removed:</T>
                     </p>
-                    <ul className="max-h-44 overflow-y-auto rounded-lg border bg-muted/40 p-2.5 font-mono text-[11px] leading-relaxed text-foreground">
+                    <ul className="max-h-44 overflow-y-auto rounded-lg border bg-muted/40 p-2.5 font-mono text-2xs leading-relaxed text-foreground">
                       {plan.hasBackgroundService ? (
                         <li>{gt("Background service (stopped and unregistered)")}</li>
                       ) : null}
                       {plan.cliCommandPath ? (
-                        <li>
-                          {gt("CLI command: {path}", { path: plan.cliCommandPath })}
-                        </li>
+                        <li>{gt("CLI command: {path}", { path: plan.cliCommandPath })}</li>
                       ) : null}
                       {plan.paths.map((targetPath) => (
                         <li key={targetPath} className="break-all">

@@ -120,7 +120,7 @@ it.layer(NodeServices.layer)("DesktopUninstall path resolution", (it) => {
     }),
   );
 
-  it.effect("collects macOS packaged bundle, baseDir, userData, caches, preferences, and launch agent", () =>
+  it.effect("collects the macOS bundle, data, caches, preferences, and launch agent", () =>
     Effect.gen(function* () {
       const path = yield* Path.Path;
       const home = "/Users/alice";
@@ -185,7 +185,7 @@ it.layer(NodeServices.layer)("DesktopUninstall path resolution", (it) => {
         path,
         platform: "darwin",
         isPackaged: false,
-        executablePath: "/repo/apps/desktop/.electron-runtime/K3 Code (Dev).app/Contents/MacOS/Electron",
+        executablePath: "/repo/.electron-runtime/K3 Code (Dev).app/Contents/MacOS/Electron",
         homeDirectory: home,
         baseDir: `${home}/.k3code`,
         userDataPath: `${appData}/k3code-dev`,
@@ -196,7 +196,7 @@ it.layer(NodeServices.layer)("DesktopUninstall path resolution", (it) => {
       });
 
       assert.isNull(result.appBundlePath);
-      assert.notInclude(result.paths, "/repo/apps/desktop/.electron-runtime/K3 Code (Dev).app");
+      assert.notInclude(result.paths, "/repo/.electron-runtime/K3 Code (Dev).app");
     }),
   );
 
@@ -222,7 +222,7 @@ it.layer(NodeServices.layer)("DesktopUninstall path resolution", (it) => {
     }),
   );
 
-  it.effect("collects Linux AppImage, caches, desktop entry, and systemd unit without T3 Code or the shared GNOME extension", () =>
+  it.effect("collects Linux K3 Code paths without T3 Code or the shared GNOME extension", () =>
     Effect.gen(function* () {
       const path = yield* Path.Path;
       const home = "/home/alice";
