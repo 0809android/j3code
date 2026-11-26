@@ -2365,10 +2365,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     options?: { readonly allowRemoteOfCurrent?: boolean },
     trace?: { dependsOnRemoteOfCurrent: boolean; degraded: boolean },
   ) {
-    const [configuredBaseRef, configuredBaseBranchValue] = yield* Effect.all(
-      [readConfigValue(cwd, `branch.${refName}.t3-merge-base-ref`), readBranchBase(cwd, refName)],
-      { concurrency: 2 },
-    );
+    const configuredBaseRef = yield* readConfigValue(cwd, `branch.${refName}.t3-merge-base-ref`);
     if (
       configuredBaseRef?.startsWith("refs/heads/") ||
       configuredBaseRef?.startsWith("refs/remotes/")
@@ -2383,7 +2380,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       }
     }
 
-    const configuredBaseBranch = configuredBaseBranchValue ?? "";
+    const configuredBaseBranch = (yield* readBranchBase(cwd, refName)) ?? "";
     const configuredBase = yield* resolveComparisonBaseRef(cwd, configuredBaseBranch);
     if (
       configuredBase !== null &&
@@ -5315,14 +5312,8 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const readBranchBase: GitVcsDriver.GitVcsDriver["Service"]["readBranchBase"] = Effect.fn(
     "GitVcsDriver.readBranchBase",
   )(function* (cwd, branch) {
-    const [base, legacyBase] = yield* Effect.all(
-      [
-        readConfigValue(cwd, branchBaseConfigKey(branch)),
-        readConfigValue(cwd, legacyBranchBaseConfigKey(branch)),
-      ],
-      { concurrency: 2 },
-    );
-    return base ?? legacyBase;
+    const base = yield* readConfigValue(cwd, branchBaseConfigKey(branch));
+    return base ?? (yield* readConfigValue(cwd, legacyBranchBaseConfigKey(branch)));
   });
 
   const resolveBranchBase = Effect.fn("GitVcsDriver.resolveBranchBase")(function* (

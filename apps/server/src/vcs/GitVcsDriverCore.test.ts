@@ -1014,6 +1014,47 @@ it.effect("resolves a branch's base once while its refs and branch config are un
   ).pipe(Effect.provide(layerTest)),
 );
 
+it.effect("reads the branch base keys only when the configured base ref does not resolve", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const delegate = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const spawnedArgs: Array<ReadonlyArray<string>> = [];
+      const spawner = ChildProcessSpawner.make((command) => {
+        if (ChildProcess.isStandardCommand(command)) spawnedArgs.push(command.args.map(String));
+        return delegate.spawn(command);
+      });
+      const driver = yield* makeGitVcsDriverCore().pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+      );
+      const cwd = yield* makeTmpDir();
+      yield* initRepoWithCommit(cwd);
+      yield* git(cwd, ["checkout", "-b", "feature/x"]);
+      yield* writeTextFile(cwd, "feature.txt", "feature\n");
+      yield* git(cwd, ["add", "."]);
+      yield* git(cwd, ["commit", "-m", "feature"]);
+      const baseLookups = (key: string) =>
+        spawnedArgs.filter((args) => args.includes(`branch.feature/x.${key}`)).length;
+
+      // The configured base ref resolves, so neither base key is read.
+      yield* git(cwd, ["config", "branch.feature/x.t3-merge-base-ref", "refs/heads/main"]);
+      spawnedArgs.length = 0;
+      yield* driver.statusDetailsLocal(cwd);
+      assert.equal(baseLookups("t3-merge-base-ref"), 1);
+      assert.equal(baseLookups("t3-merge-base"), 0);
+      assert.equal(baseLookups("gh-merge-base"), 0);
+
+      // Without a configured base ref, the new key is read, and the legacy key only when it is unset.
+      yield* git(cwd, ["config", "--unset", "branch.feature/x.t3-merge-base-ref"]);
+      yield* git(cwd, ["config", "branch.feature/x.t3-merge-base", "main"]);
+      yield* git(cwd, ["config", "branch.feature/x.gh-merge-base", "main"]);
+      spawnedArgs.length = 0;
+      yield* driver.getReviewDiffPreview({ cwd });
+      assert.isAbove(baseLookups("t3-merge-base"), 0);
+      assert.equal(baseLookups("gh-merge-base"), 0);
+    }),
+  ).pipe(Effect.provide(layerTest)),
+);
+
 it.effect.each([
   { kind: "working-tree", request: { sourceKind: "working-tree" } },
   { kind: "commit", request: { sourceKind: "commit", commitSha: "HEAD" } },
