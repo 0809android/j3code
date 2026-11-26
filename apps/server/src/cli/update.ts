@@ -632,9 +632,12 @@ export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
   let servicePlan: BootService.BootServicePlan | undefined;
   if (serviceInstalled && !serviceCurrent) {
     // From inside the service, pausing would interrupt the turn running this update.
-    let pausedRuns: number | undefined;
+    let pauseRequested = false;
     if (restartService && foreground === undefined && !environment[SERVICE_UNIT_ENV]) {
-      pausedRuns = yield* input.pauseLiveServerRuns;
+      // A slow answer reads as undefined, yet the server may still finish pausing (it cannot abort
+      // one), so any request means a failed install must ask for a resume.
+      pauseRequested = true;
+      const pausedRuns = yield* input.pauseLiveServerRuns;
       if (pausedRuns !== undefined && pausedRuns > 0) {
         yield* Console.log(
           pausedRuns === 1
@@ -652,7 +655,7 @@ export const runUpdate = Effect.fn("cli.update.run")(function* (input: {
       Effect.flatMap((target) =>
         target.install({ allowDowngrade: input.allowDowngrade, start: restartService }),
       ),
-      Effect.tapCause(() => (pausedRuns === undefined ? Effect.void : input.resumeLiveServerRuns)),
+      Effect.tapCause(() => (pauseRequested ? input.resumeLiveServerRuns : Effect.void)),
       Effect.provide(
         BootService.layer({
           baseDir: input.baseDir,

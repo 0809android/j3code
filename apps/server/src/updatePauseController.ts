@@ -21,7 +21,8 @@ type PauseState =
   | { readonly _tag: "stopping" };
 
 export interface UpdatePauseDependencies {
-  readonly closeCommands: Effect.Effect<void>;
+  /** Resolves false when the server cannot pause yet, such as while it is still starting up. */
+  readonly closeCommands: Effect.Effect<boolean>;
   readonly reopenCommands: Effect.Effect<void>;
   readonly stopEffectWorker: Effect.Effect<void>;
   readonly startEffectWorker: Effect.Effect<void>;
@@ -71,7 +72,9 @@ export const makeUpdatePauseController = Effect.fn("UpdatePause.makeController")
         const current = yield* Ref.get(state);
         if (current._tag === "paused") return { pausedRuns: current.pausedRuns };
         if (current._tag === "stopping") return { pausedRuns: 0 };
-        yield* deps.closeCommands;
+        // Before the server is ready, startup still owns the worker and the continuations are not
+        // yet deliverable; pausing then would race startup, so the update proceeds without it.
+        if (!(yield* deps.closeCommands)) return { pausedRuns: 0 };
         yield* deps.stopEffectWorker;
         const turns = yield* deps.recovery.prepareForUpdate.pipe(
           Effect.catchCause((cause) =>
