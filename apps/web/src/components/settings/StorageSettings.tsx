@@ -1,9 +1,10 @@
-import type {
-  EnvironmentId,
-  StorageCleanupReport,
-  StorageCleanupSettings,
-  ThreadHistoryTrimReport,
-  WorktreeCleanupRules,
+import {
+  SUGGESTED_THREAD_HISTORY_AFTER_DAYS,
+  type EnvironmentId,
+  type StorageCleanupReport,
+  type StorageCleanupSettings,
+  type ThreadHistoryTrimReport,
+  type WorktreeCleanupRules,
 } from "@t3tools/contracts";
 import { resolvePastedPath } from "@t3tools/shared/path";
 import { resolveWorktreeCleanup } from "@t3tools/shared/projectSettings";
@@ -739,7 +740,7 @@ function ThreadHistorySection() {
             <RetentionControl
               label={gt("Trim old threads")}
               value={settings.threadHistoryAfterDays}
-              defaultDays={30}
+              defaultDays={SUGGESTED_THREAD_HISTORY_AFTER_DAYS}
               onChange={(threadHistoryAfterDays, onFailed) =>
                 update({ threadHistoryAfterDays }, { onFailed })
               }
