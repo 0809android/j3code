@@ -71,17 +71,6 @@ export function isShownUnderParent(
   return !isListedThreadLineage(lineage) || delegatedUnderParent.has(threadKey(ref));
 }
 
-/**
- * Whether a thread has a parent of any kind: a subagent, a side chat, a workflow step, or a task
- * a linked environment delegated here, whether or not this client can list the parent. A fork
- * starts a new top-level thread.
- */
-export function hasParentThread(
-  thread: Pick<OrchestrationV2ThreadShell, "lineage" | "delegatedFrom">,
-): boolean {
-  return !isListedThreadLineage(thread.lineage) || thread.delegatedFrom != null;
-}
-
 // Subagents, side chats and tasks delegated from a listed parent have no list row,
 // so an open one is represented by its nearest listed ancestor. A broken chain
 // (missing or archived parent, cycle) resolves to the thread itself, which then matches no row.

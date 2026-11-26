@@ -61,6 +61,9 @@ vi.mock(import("../state/threads"), async (original) => {
     environmentThreadShells: {
       ...actual.environmentThreadShells,
       pendingSubagentRequestsAtom: (() => noRequestsAtom) as never,
+      get delegatedUnderParentAtom() {
+        return delegatedUnderParentAtom as never;
+      },
     },
   };
 });
@@ -88,6 +91,7 @@ let registry: AtomRegistry.AtomRegistry;
 const shellAtom = Atom.family((_id: string) => Atom.make<unknown>(null));
 const environmentIdsAtom = Atom.make<ReadonlyArray<string>>([]);
 const noRequestsAtom = Atom.make(new Map());
+const delegatedUnderParentAtom = Atom.make<ReadonlySet<string>>(new Set<string>());
 state.shells = { set: (id, value) => registry.set(shellAtom(id), value) };
 
 class TestNotification extends EventTarget {
@@ -193,6 +197,7 @@ function setup() {
   registry = AtomRegistry.make();
   const testRegistry = registry;
   stack.defer(() => testRegistry.dispose());
+  registry.set(delegatedUnderParentAtom, new Set<string>());
   state.mode = "notifications";
   state.inApp = false;
   state.settingsListeners.clear();
@@ -413,22 +418,20 @@ it.each(["hasPendingApprovals", "hasPendingUserInput"] as const)(
   },
 );
 
-it("notifies only for top-level threads, never for subagents, side chats or delegated tasks", async () => {
-  await using app = setup();
-  app.start();
-  const child = (id: string, title: string, overrides: Partial<typeof thread>, extra: object) => ({
+const delegatedAndChildThreads = (overrides: Partial<typeof thread>) => {
+  const child = (id: string, title: string, extra: object) => ({
     ...toV2ThreadShell({ ...thread, ...overrides, id, title }),
     ...extra,
   });
-  const snapshot = (overrides: Partial<typeof thread>) => ({
+  return {
     status: "live",
     snapshot: Option.some({
       threads: [
         toV2ThreadShell({ ...thread, ...overrides, id: "root", title: "Root" }),
-        child("subagent", "Subagent", overrides, {
+        child("subagent", "Subagent", {
           lineage: { rootThreadId: "root", parentThreadId: "root", relationshipToParent: "subagent" },
         }),
-        child("side", "Side chat", overrides, {
+        child("side", "Side chat", {
           lineage: {
             rootThreadId: "root",
             parentThreadId: "root",
@@ -436,20 +439,38 @@ it("notifies only for top-level threads, never for subagents, side chats or dele
             sideChat: true,
           },
         }),
-        child("delegated", "Delegated", overrides, {
+        child("delegated", "Delegated", {
           delegatedFrom: { environmentId: "elsewhere", threadId: "parent", title: "Parent" },
         }),
       ],
     }),
-  });
-  state.shells.set("one", snapshot({}));
-  state.shells.set("one", snapshot({ hasPendingUserInput: true }));
-  state.shells.set(
-    "one",
-    snapshot({
-      latestTurn: { turnId: "turn", state: "completed", completedAt: "2026-09-13T07:00:01.000Z" },
-    }),
-  );
+  };
+};
+const completedOverrides = {
+  latestTurn: { turnId: "turn", state: "completed", completedAt: "2026-09-13T07:00:01.000Z" },
+};
+
+it("notifies for a delegated task whose parent this client cannot list, but not for subagents or side chats", async () => {
+  await using app = setup();
+  app.start();
+  state.shells.set("one", delegatedAndChildThreads({}));
+  state.shells.set("one", delegatedAndChildThreads({ hasPendingUserInput: true }));
+  state.shells.set("one", delegatedAndChildThreads(completedOverrides));
+  expect(TestNotification.sent.map(({ title, options }) => [title, options.body])).toEqual([
+    ["Input needed", "Root"],
+    ["Input needed", "Delegated"],
+    ["Thread completed", "Root"],
+    ["Thread completed", "Delegated"],
+  ]);
+});
+
+it("does not notify for a delegated task shown under its parent", async () => {
+  await using app = setup();
+  registry.set(delegatedUnderParentAtom, new Set(["one\u0000delegated"]));
+  app.start();
+  state.shells.set("one", delegatedAndChildThreads({}));
+  state.shells.set("one", delegatedAndChildThreads({ hasPendingUserInput: true }));
+  state.shells.set("one", delegatedAndChildThreads(completedOverrides));
   expect(TestNotification.sent.map(({ title, options }) => [title, options.body])).toEqual([
     ["Input needed", "Root"],
     ["Thread completed", "Root"],
