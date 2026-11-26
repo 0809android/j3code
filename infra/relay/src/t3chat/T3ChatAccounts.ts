@@ -115,11 +115,9 @@ export const make = Effect.gen(function* () {
   const lookupClerkPrimaryEmail = Effect.fn("relay.t3chat.lookup_clerk_primary_email")(function* (
     _userId: string,
   ) {
-    return yield* Effect.fail(
-      new ClerkUserLookupFailed({
-        cause: new Error("Clerk authentication has been removed from this fork."),
-      }),
-    );
+    return yield* new ClerkUserLookupFailed({
+      cause: new Error("Clerk authentication has been removed from this fork."),
+    });
   });
 
   return T3ChatAccounts.of({
