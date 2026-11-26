@@ -164,6 +164,7 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
       restartScheduled: false,
     })),
     waitForReady: () => Effect.succeed(true),
+    pauseRunsForUpdate: Effect.succeedNone,
   };
   const layerBackend = DesktopBackendPool.layerTest(
     options.backendInstances ??

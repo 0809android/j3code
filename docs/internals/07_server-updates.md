@@ -42,3 +42,16 @@ backend.
 - Cap consecutive crash recoveries per unfinished turn so a crashing turn cannot loop forever.
 - Never auto-continue a turn that is archived, settled, snoozed, user-stopped, or waiting on a
   blocking user action (approval, question, or secret).
+
+## Pausing turns before an update
+
+- Before a launcher or desktop update stops a server, the updater asks it to pause
+  ([`updatePauseController.ts`](../../apps/server/src/updatePauseController.ts)). The server refuses
+  commands, records an `update` continuation in the outbox, then interrupts running turns. Shutdown
+  keeps those continuations; the next server delivers each once.
+- A pause is bounded. If no restart follows (the updater reports failure, or the deadline passes),
+  the server undoes it in place through the same reconcile and continuation path a restart uses.
+  The continuation compares the version it paused on with the running one to tell "updated" from
+  "did not install".
+- Pausing is best effort: an old server or a missing control channel means the update proceeds
+  without it, and the ordinary shutdown path still records continuations.

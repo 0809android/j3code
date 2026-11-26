@@ -203,13 +203,13 @@ export function getDesktopUpdateInstallConfirmationMessage(
   return version
     ? resolve(
         msg(
-          "Install update {version} and restart K3 Code?\n\nAny running tasks will be interrupted. Make sure you're ready before continuing.",
+          "Install update {version} and restart K3 Code?\n\nRunning turns pause first and resume after the restart.",
           { version },
         ),
       )
     : resolve(
         msg(
-          "Install update and restart K3 Code?\n\nAny running tasks will be interrupted. Make sure you're ready before continuing.",
+          "Install update and restart K3 Code?\n\nRunning turns pause first and resume after the restart.",
         ),
       );
 }

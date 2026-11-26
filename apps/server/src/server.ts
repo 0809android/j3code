@@ -52,6 +52,7 @@ import * as ExternalLauncher from "./process/externalLauncher.ts";
 import * as SpawnWorker from "./process/SpawnWorker.ts";
 import * as NodePtyAdapter from "./terminal/NodePtyAdapter.ts";
 import * as PullRequestHttp from "./pullRequest/http.ts";
+import * as UpdatePauseHttp from "./updatePauseHttp.ts";
 import * as SpeechModelStore from "./speech/SpeechModelStore.ts";
 import * as SpeechService from "./speech/SpeechService.ts";
 import * as CloudSpeech from "./speech/CloudSpeech.ts";
@@ -899,6 +900,7 @@ const layerMakeRoutes = Layer.mergeAll(
       Layer.provide(CloudHttp.layer),
       Layer.provide(OrchestrationHttp.layer),
       Layer.provide(PullRequestHttp.layer),
+      Layer.provide(UpdatePauseHttp.layer),
       Layer.provide(ProjectHttp.layer),
       Layer.provide(speechHttpApiLayer),
       Layer.provide(ServerHttp.layerServerEnvironmentHttpApi),
@@ -1002,6 +1004,17 @@ const layerMakeServer = Layer.unwrap(
         yield* startup.awaitCommandReady.pipe(
           Effect.andThen(receiver.announceServerReady),
           Effect.ignore,
+          Effect.forkScoped,
+        );
+        yield* receiver.pauseRequests.pipe(
+          Stream.runForEach((requestId) =>
+            startup.pauseRunsForUpdate.pipe(
+              Effect.flatMap(({ pausedRuns }) => receiver.reportRunsPaused(requestId, pausedRuns)),
+              Effect.catchCause((cause) =>
+                Effect.logWarning("Failed to pause runs for desktop update", { cause }),
+              ),
+            ),
+          ),
           Effect.forkScoped,
         );
       }),
@@ -1428,7 +1441,9 @@ const layerMakeServer = Layer.unwrap(
 
     return layerServerApplication.pipe(
       Layer.provide(CloudLink.layer.pipe(Layer.provideMerge(ConnectReachability.layer))),
-      Layer.provideMerge(layerRuntimeServices),
+      Layer.provideMerge(
+        ServerRuntimeStartup.layerUpdatePause.pipe(Layer.provideMerge(layerRuntimeServices)),
+      ),
       Layer.provideMerge(
         McpSessionRegistry.layer.pipe(
           Layer.provide(ServerEnvironment.layer.pipe(Layer.provide(ServerSecretStore.layer))),

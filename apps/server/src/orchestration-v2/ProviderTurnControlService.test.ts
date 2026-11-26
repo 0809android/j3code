@@ -209,6 +209,8 @@ function layerSessions(
     ProviderSessionManager.ProviderSessionManagerV2,
     ProviderSessionManager.ProviderSessionManagerV2.of({
       shutdown: Effect.void,
+      interruptForShutdown: () => Effect.void,
+      resumeEventIngestion: Effect.void,
       open: () => Effect.die("unused open"),
       get: (providerSessionId) =>
         Effect.succeed(providerSessionId === liveSessionId ? Option.some(runtime) : Option.none()),
