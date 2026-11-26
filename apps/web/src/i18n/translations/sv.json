@@ -2432,6 +2432,7 @@
   "5c1866def8628dd9": "{providers} verkar fortfarande vara inaktuella. Se leverantörsinställningarna för mer information.",
   "c9f2e5710d16c208": "{providers} kunde inte uppdateras. Se leverantörsinställningarna för mer information.",
   "c09b8a11907974c5": "Uppdateringen misslyckades.",
+  "d7d0546ec98632a6": "Inget svar efter {seconds} sekunder.",
   "a59e47bb47674a54": "Kunde inte söka efter leverantörsuppdateringar",
   "764dfb165791b02e": "Uppdaterar…",
   "d3ce1a00115898a6": "Uppdatera alla",

@@ -2432,6 +2432,7 @@
   "5c1866def8628dd9": "{providers} aún parecen desactualizados. Revisa los ajustes de los proveedores para ver los detalles.",
   "c9f2e5710d16c208": "No se pudo actualizar {providers}. Revisa los ajustes del proveedor para ver los detalles.",
   "c09b8a11907974c5": "Falló la actualización.",
+  "d7d0546ec98632a6": "Sin respuesta después de {seconds} segundos.",
   "a59e47bb47674a54": "No se pudieron comprobar las actualizaciones de proveedores",
   "764dfb165791b02e": "Actualizando…",
   "d3ce1a00115898a6": "Actualizar todo",

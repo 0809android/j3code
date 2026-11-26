@@ -2432,6 +2432,7 @@
   "5c1866def8628dd9": "{providers} still appear outdated. Review provider settings for details.",
   "c9f2e5710d16c208": "{providers} failed to update. Check provider settings for details.",
   "c09b8a11907974c5": "Refresh failed.",
+  "d7d0546ec98632a6": "No answer after {seconds} seconds.",
   "a59e47bb47674a54": "Could not check provider updates",
   "764dfb165791b02e": "Updating…",
   "d3ce1a00115898a6": "Update all",
