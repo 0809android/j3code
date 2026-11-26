@@ -650,18 +650,33 @@ it.layer(NodeServices.layer)("t3 update with a background service", (it) => {
 
 it.layer(NodeServices.layer)("t3 update pauses running turns", (it) => {
   it.effect.each([
-    { name: "before restarting the service", environment: {}, pauses: 1, installFails: false },
+    {
+      name: "before restarting the service",
+      environment: {},
+      pauses: 1,
+      installFails: false,
+      answer: 2,
+    },
     {
       name: "and resumes them when the restart fails",
       environment: {},
       pauses: 1,
       installFails: true,
+      answer: 2,
+    },
+    {
+      name: "and resumes them when the restart fails after the pause answer timed out",
+      environment: {},
+      pauses: 1,
+      installFails: true,
+      answer: undefined,
     },
     {
       name: "except from inside the service it restarts",
       environment: { [SERVICE_UNIT_ENV]: "t3code.service" },
       pauses: 0,
       installFails: false,
+      answer: 2,
     },
   ])("$name", (row) =>
     Effect.gen(function* () {
@@ -720,7 +735,7 @@ it.layer(NodeServices.layer)("t3 update pauses running turns", (it) => {
       const output = yield* runUpdate({
         pauseLiveServerRuns: Effect.sync(() => {
           events.push("pause");
-          return 2;
+          return row.answer;
         }),
         resumeLiveServerRuns: Effect.sync(() => {
           events.push("resume");
@@ -759,7 +774,7 @@ it.layer(NodeServices.layer)("t3 update pauses running turns", (it) => {
       ]);
       assert.equal(
         output.includes("Paused 2 running turns; they resume after the restart."),
-        row.pauses === 1,
+        row.pauses === 1 && row.answer === 2,
       );
     }).pipe(
       Effect.provideService(HostProcess.Platform, "linux"),
