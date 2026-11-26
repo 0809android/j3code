@@ -203,7 +203,7 @@ const make = Effect.gen(function* () {
             OR COALESCE(recent.completed_at, '') >= ${input.idleBefore}
           )
       )
-      AND (${input.threadId !== undefined} OR EXISTS (
+      AND (${input.threadId !== undefined ? sql`1` : sql`0`} OR EXISTS (
         SELECT 1 FROM orchestration_v2_projection_turn_items AS item
         WHERE item.thread_id = thread.thread_id
           AND item.type IN ${sql.in(TRIMMED_ITEM_TYPES)}

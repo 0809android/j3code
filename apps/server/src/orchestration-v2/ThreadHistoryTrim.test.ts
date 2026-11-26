@@ -438,6 +438,20 @@ it.layer(layerTest(30))("ThreadHistoryTrim", (it) => {
     }),
   );
 
+  // The pass lists candidates without a thread id, then re-reads each one with its id before trimming.
+  it.effect("trims every idle thread, both when listing and when re-reading one by id", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(DateTime.toEpochMillis(now));
+      const first = yield* seedThread("idle-a");
+      const second = yield* seedThread("idle-b");
+
+      const report = yield* trim;
+      assert.equal(report.threadCount, 2);
+      assert.deepEqual(yield* itemTitles(first.threadId), trimmedItems);
+      assert.deepEqual(yield* itemTitles(second.threadId), trimmedItems);
+    }),
+  );
+
   it.effect("leaves threads that are in use, pinned, snoozed, or waiting on a pull request", () =>
     Effect.gen(function* () {
       yield* TestClock.setTime(DateTime.toEpochMillis(now));
