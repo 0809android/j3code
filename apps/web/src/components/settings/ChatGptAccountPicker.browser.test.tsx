@@ -39,7 +39,7 @@ const renderPicker = (methods: readonly ProviderAuthMethod[], onSelect: (id: str
 const continueWithChatGpt = async () => {
   const button = page.getByRole("button", { name: "Continue with ChatGPT" });
   await expect.element(button).toBeVisible();
-  button.element().click();
+  button.element().dispatchEvent(new MouseEvent("click", { bubbles: true }));
 };
 
 it("preselects a verified connection over a newer incomplete one", async () => {
