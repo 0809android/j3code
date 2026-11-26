@@ -5,7 +5,7 @@ import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
-export const STATUS_LABEL = "k3relay-v1/status";
+const STATUS_LABEL = "k3relay-v1/status";
 const STATUS_TIMEOUT_MS = 8_000;
 
 /**

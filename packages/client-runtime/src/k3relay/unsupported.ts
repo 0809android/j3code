@@ -10,7 +10,7 @@ export const isK3RelayConnection = (prepared: Pick<PreparedConnection, "target">
   prepared.target._tag === "K3RelayConnectionTarget";
 
 /** Why a feature is off through the relay, in the words the screen shows. */
-export function k3relayUnsupportedMessage(feature: K3RelayUnsupportedFeature) {
+function k3relayUnsupportedMessage(feature: K3RelayUnsupportedFeature) {
   switch (feature) {
     case "device-hub":
       return msg(

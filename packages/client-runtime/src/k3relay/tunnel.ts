@@ -53,7 +53,7 @@ export interface K3RelayTunnel {
   readonly closed: Effect.Effect<MuxConnectionClosedError>;
 }
 
-export const k3relaySocketUrl = (
+const k3relaySocketUrl = (
   relayUrl: string,
   hostId: string,
   entrance: boolean | "account",
@@ -120,7 +120,7 @@ export const makeK3RelayE2eeSocket = Effect.fn("K3Relay.makeE2eeSocket")(functio
 });
 
 /** The reason to show for a tunnel that failed or closed. */
-export const k3relayTunnelFailureReason = (error: unknown): K3RelayFailureReason =>
+const k3relayTunnelFailureReason = (error: unknown): K3RelayFailureReason =>
   findK3RelayFailureReason(error) ?? "relay-unreachable";
 
 export const openK3RelayTunnel: (

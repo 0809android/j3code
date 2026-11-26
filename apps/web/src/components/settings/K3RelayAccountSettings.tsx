@@ -67,8 +67,7 @@ export interface K3RelayAccountSettingsActions {
   readonly setApproval: (requireApproval: boolean) => void;
 }
 
-/** Stateless, for tests: signed in or out, approval on or off, an account device waiting. */
-export function K3RelayAccountSettingsView({
+function K3RelayAccountSettingsView({
   state,
   canWrite,
   busy,

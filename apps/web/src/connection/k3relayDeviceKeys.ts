@@ -40,7 +40,7 @@ const store = async (mode: IDBTransactionMode) =>
   (await openDatabase()).transaction(STORE, mode).objectStore(STORE);
 
 /** IndexedDB keeps `CryptoKey` objects structured-cloned, so a non-extractable key stays one. */
-export const indexedDbDeviceKeyRecords: WebDeviceKeyRecordStore = {
+const indexedDbDeviceKeyRecords: WebDeviceKeyRecordStore = {
   get: async (keyId) => {
     const keys = await store("readonly");
     return (await request(() => keys.get(keyId))) as WebDeviceKeyRecord | undefined;
@@ -65,7 +65,7 @@ export interface DesktopK3RelayDeviceKeys {
 const vaultError = (operation: DeviceKeyStoreError["operation"]) => () =>
   new DeviceKeyStoreError({ operation, detail: "The desktop key store is unavailable." });
 
-export const desktopDeviceSecretVault = (bridge: DesktopK3RelayDeviceKeys): DeviceSecretVault => ({
+const desktopDeviceSecretVault = (bridge: DesktopK3RelayDeviceKeys): DeviceSecretVault => ({
   read: (keyId) =>
     Effect.tryPromise({ try: () => bridge.read(keyId), catch: vaultError("load") }).pipe(
       Effect.map(Option.fromNullishOr),

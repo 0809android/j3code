@@ -203,20 +203,17 @@ function readSessionClerkToken(
   );
 }
 
-const SIGN_IN_BEFORE = {
-  deregister: msg("Sign in to T3 Connect before deregistering an environment."),
-  "link-t3chat": msg("Sign in to T3 Connect before linking T3 Chat."),
-  "unlink-t3chat": msg("Sign in to T3 Connect before unlinking T3 Chat."),
-};
-
 function requireSessionClerkToken(
   registry: AtomRegistry.AtomRegistry,
   accountId: string,
-  action: "deregister" | "link-t3chat" | "unlink-t3chat",
 ): Effect.Effect<string, ManagedRelaySessionError> {
   const session = registry.get(managedRelaySessionAtom);
   if (!session || session.accountId !== accountId) {
-    return Effect.fail(new ManagedRelaySessionError(translatableMessage(SIGN_IN_BEFORE[action])));
+    return Effect.fail(
+      new ManagedRelaySessionError(
+        translatableMessage(msg("Sign in to T3 Connect before deregistering an environment.")),
+      ),
+    );
   }
   return readSessionClerkToken(session);
 }
@@ -227,27 +224,10 @@ export const deregisterManagedRelayEnvironment = Effect.fn(
   registry: AtomRegistry.AtomRegistry,
   input: { readonly accountId: string; readonly environmentId: EnvironmentId },
 ) {
-  const clerkToken = yield* requireSessionClerkToken(registry, input.accountId, "deregister");
+  const clerkToken = yield* requireSessionClerkToken(registry, input.accountId);
   const relay = yield* ManagedRelay.ManagedRelayClient;
   yield* relay.unlinkEnvironment({ clerkToken, environmentId: input.environmentId });
 });
-
-/** Returns the T3 Chat page URL where the signed-in user confirms the link. */
-export const createManagedRelayT3ChatLinkRequest = Effect.fn(
-  "clientRuntime.managedRelaySession.createT3ChatLinkRequest",
-)(function* (registry: AtomRegistry.AtomRegistry, input: { readonly accountId: string }) {
-  const clerkToken = yield* requireSessionClerkToken(registry, input.accountId, "link-t3chat");
-  const relay = yield* ManagedRelay.ManagedRelayClient;
-  return (yield* relay.createT3ChatLinkRequest({ clerkToken })).url;
-});
-
-export const unlinkManagedRelayT3Chat = Effect.fn("clientRuntime.managedRelaySession.unlinkT3Chat")(
-  function* (registry: AtomRegistry.AtomRegistry, input: { readonly accountId: string }) {
-    const clerkToken = yield* requireSessionClerkToken(registry, input.accountId, "unlink-t3chat");
-    const relay = yield* ManagedRelay.ManagedRelayClient;
-    yield* relay.unlinkT3Chat({ clerkToken });
-  },
-);
 
 function requireClerkToken(
   get: Atom.AtomContext,

@@ -61,7 +61,7 @@ export class RelayNotifyWatcher extends Context.Service<
   }
 >()("t3/relay/k3relay/RelayNotifyWatcher") {}
 
-export const make = Effect.gen(function* () {
+const make = Effect.gen(function* () {
   const threads = yield* ThreadManagement.ThreadManagementService;
   const projects = yield* ProjectService.ProjectService;
   const notifier = yield* RelayNotifier.RelayNotifier;

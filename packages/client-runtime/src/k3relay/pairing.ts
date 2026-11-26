@@ -239,7 +239,7 @@ export const runK3RelayDevicePairing = Effect.fn("K3Relay.runDevicePairing")(fun
   );
 });
 
-export const k3relayConnectionIdFor = (hostId: string, signer: E2eeDeviceSigner) =>
+const k3relayConnectionIdFor = (hostId: string, signer: E2eeDeviceSigner) =>
   `k3relay:${hostId}:${deviceIdFromPublicKey(signer.alg, signer.publicKey)}`;
 
 /** Redeems the bootstrap credential over the new grant's tunnel and builds what gets saved. */

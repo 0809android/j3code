@@ -26,13 +26,15 @@ class RelayNotifyHpkeTest {
 
   @Test
   fun opensTheRfcVector() {
-    assertArrayEquals(pt, Hpke.open(skRm, pkRm, enc, info, aad, ct))
+    val keys = Hpke.KeyPair(skRm, pkRm)
+    assertArrayEquals(pt, Hpke.open(keys, Hpke.Envelope(enc, info, aad, ct)))
   }
 
   @Test
   fun refusesATamperedCiphertextOrAad() {
+    val keys = Hpke.KeyPair(skRm, pkRm)
     val tampered = ct.copyOf().also { it[0] = (it[0].toInt() xor 1).toByte() }
-    assertNull(Hpke.open(skRm, pkRm, enc, info, aad, tampered))
-    assertNull(Hpke.open(skRm, pkRm, enc, info, hex("00"), ct))
+    assertNull(Hpke.open(keys, Hpke.Envelope(enc, info, aad, tampered)))
+    assertNull(Hpke.open(keys, Hpke.Envelope(enc, info, hex("00"), ct)))
   }
 }

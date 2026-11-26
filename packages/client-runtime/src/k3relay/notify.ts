@@ -28,8 +28,8 @@ import { k3relayEndpointUrl } from "./status.ts";
  * both, so the relay cannot read a notification and the host never learns the push token.
  */
 
-export const PUSH_REGISTER_LABEL = "k3relay-v1/push-register";
-export const PUSH_REMOVE_LABEL = "k3relay-v1/push-remove";
+const PUSH_REGISTER_LABEL = "k3relay-v1/push-register";
+const PUSH_REMOVE_LABEL = "k3relay-v1/push-remove";
 const RELAY_TIMEOUT_MS = 8_000;
 
 export type K3RelayPushPlatform = "ios" | "ios-sandbox" | "android";

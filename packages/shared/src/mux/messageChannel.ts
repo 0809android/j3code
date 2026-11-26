@@ -16,8 +16,8 @@ import type { MuxStream } from "./session.ts";
 const FLAG_BINARY = 0b01;
 const FLAG_FINAL = 0b10;
 const FRAGMENT_BYTES = MUX_DATA_CHUNK_BYTES - 1;
-export const MUX_MAX_MESSAGE_BYTES = 32 * 1024 * 1024;
-export const WS_CLOSE_NO_STATUS = 1005;
+const MUX_MAX_MESSAGE_BYTES = 32 * 1024 * 1024;
+const WS_CLOSE_NO_STATUS = 1005;
 const WS_CLOSE_REASON_BYTES = 123;
 
 export type MuxMessage = string | Uint8Array;

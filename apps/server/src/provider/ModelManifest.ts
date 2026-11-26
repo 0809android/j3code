@@ -140,16 +140,6 @@ export function resolveProviderCatalog(
   return { models, defaultChatModel: catalog.defaults?.chat };
 }
 
-const ManifestCacheFile = Schema.Struct({
-  fetchedAtMs: Schema.Number,
-  manifest: ModelManifestSchema,
-});
-export const encodeManifestCache = Schema.encodeEffect(
-  Schema.fromJsonString(
-    ManifestCacheFile as unknown as Schema.Codec<typeof ManifestCacheFile.Type>,
-  ),
-);
-
 export class ModelManifest extends Context.Service<
   ModelManifest,
   {

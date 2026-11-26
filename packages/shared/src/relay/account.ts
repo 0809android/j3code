@@ -9,7 +9,6 @@ import {
   labeledMessage,
   verifyDeviceSignature,
 } from "../socketE2eeDevice.ts";
-import { timingSafeEqual } from "../socketE2eeRecord.ts";
 import {
   decodeBase64url,
   encodeBase64url,
@@ -37,10 +36,10 @@ import {
  * user (§20.3), so a lying relay gets as far as the approval screen and no further.
  */
 
-export const ACCOUNT_TOKEN_PREFIX = "k3a1";
+const ACCOUNT_TOKEN_PREFIX = "k3a1";
 export const ACCOUNT_APP_REDIRECT = "k3relay://account/callback";
 export const ACCOUNT_LOOPBACK_PATH = "/k3relay/account/callback";
-export const ACCOUNT_PROVIDERS = ["github", "google", "apple"] as const;
+const ACCOUNT_PROVIDERS = ["github", "google", "apple"] as const;
 export type AccountProvider = (typeof ACCOUNT_PROVIDERS)[number];
 
 const LABEL_TOKEN = "k3relay-v1/account-token";
@@ -420,7 +419,3 @@ export const createAccountClaim = Effect.fn("relay.createAccountClaim")(function
   };
   return { state, claim, confirmationCode: code };
 });
-
-/** Constant-time comparison of two relay key encodings. */
-export const sameAccountKey = (a: Uint8Array, b: Uint8Array): boolean =>
-  a.length === b.length && timingSafeEqual(a, b);

@@ -42,7 +42,7 @@ export const K3_RELAY_ASSET_ROUTE_PREFIX = "/api/assets/file";
 export const K3_RELAY_UPLOAD_ROUTE_PREFIX = "/api/attachments/upload/relay";
 
 /** The `code` of a host's answer to a request that cannot work through the relay. */
-export const K3_RELAY_UNSUPPORTED_CODE = "relay-unsupported";
+const K3_RELAY_UNSUPPORTED_CODE = "relay-unsupported";
 
 /** What cannot work through the relay, and so is refused there with this reason. */
 export const K3RelayUnsupportedFeature = Schema.Literals([
@@ -68,7 +68,7 @@ export const K3RelayUnsupportedResponse = Schema.Struct({
 });
 export type K3RelayUnsupportedResponse = typeof K3RelayUnsupportedResponse.Type;
 
-export const k3RelayUnsupportedMessage = (feature: K3RelayUnsupportedFeature): string => {
+const k3RelayUnsupportedMessage = (feature: K3RelayUnsupportedFeature): string => {
   switch (feature) {
     case "signed-url":
       return "Signed URLs are not issued through the K3 relay.";

@@ -20,8 +20,6 @@ import {
 
 export type E2eeDeviceAlgorithm = "ed25519" | "p256";
 
-export const E2EE_DEVICE_ALGORITHMS: ReadonlyArray<E2eeDeviceAlgorithm> = ["ed25519", "p256"];
-
 /** P-256 public keys are uncompressed X9.63 points. */
 const P256_PUBLIC_KEY_LENGTH = 65;
 const P256_UNCOMPRESSED_PREFIX = 0x04;
@@ -141,7 +139,7 @@ export const verifyDeviceSignature = (
   }
 };
 
-export const devicePublicKeyFromSecretKey = (
+const devicePublicKeyFromSecretKey = (
   alg: E2eeDeviceAlgorithm,
   secretKey: Uint8Array,
 ): Uint8Array =>

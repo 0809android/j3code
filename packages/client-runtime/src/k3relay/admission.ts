@@ -21,7 +21,7 @@ import { k3relayCloseReason } from "./failure.ts";
 
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
-export const CLIENT_AUTH_LABEL = "k3relay-v1/client";
+const CLIENT_AUTH_LABEL = "k3relay-v1/client";
 const ADMISSION_TIMEOUT = "15 seconds";
 
 export class K3RelayAdmissionError extends Schema.TaggedError<K3RelayAdmissionError>()(

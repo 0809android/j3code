@@ -18,19 +18,19 @@ import {
  * and written out in infra/k3-relay/docs/NOTIFICATIONS.md; change it only with a new version.
  */
 
-export const NOTIFY_ENVELOPE_VERSION = 1;
-export const NOTIFY_KEY_ID_BYTES = 8;
+const NOTIFY_ENVELOPE_VERSION = 1;
+const NOTIFY_KEY_ID_BYTES = 8;
 export const NOTIFY_HEADER_BYTES = 1 + NOTIFY_KEY_ID_BYTES;
-export const NOTIFY_PAD_BUCKETS = [256, 512, 1024] as const;
+const NOTIFY_PAD_BUCKETS = [256, 512, 1024] as const;
 const MAX_PADDED = NOTIFY_PAD_BUCKETS[NOTIFY_PAD_BUCKETS.length - 1]!;
 export const NOTIFY_MAX_ENVELOPE_BYTES =
   NOTIFY_HEADER_BYTES + HPKE_ENC_BYTES + MAX_PADDED + HPKE_TAG_BYTES;
-export const NOTIFY_MIN_ENVELOPE_BYTES =
+const NOTIFY_MIN_ENVELOPE_BYTES =
   NOTIFY_HEADER_BYTES + HPKE_ENC_BYTES + NOTIFY_PAD_BUCKETS[0] + HPKE_TAG_BYTES;
 export const NOTIFY_TEXT_MAX_CHARS = 120;
 /** An alert older than this is dropped: it is stale, or the relay is replaying it. */
 export const NOTIFY_MAX_AGE_MS = 24 * 60 * 60 * 1000;
-export const NOTIFY_FUTURE_SKEW_MS = 5 * 60 * 1000;
+const NOTIFY_FUTURE_SKEW_MS = 5 * 60 * 1000;
 
 const INFO = new TextEncoder().encode("k3relay-v1/notify");
 const KEY_ID_LABEL = new TextEncoder().encode("k3relay-v1/notify-key-id");
@@ -38,7 +38,7 @@ const ID_PATTERN = /^[A-Za-z0-9_-]{22}$/u;
 const REF_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/u;
 
 /** `device`: a device joined the host by introduction; sent regardless of the device's choices. */
-export const NOTIFY_KINDS = ["approval", "input", "completed", "failed", "test", "device"] as const;
+const NOTIFY_KINDS = ["approval", "input", "completed", "failed", "test", "device"] as const;
 export type NotifyKind = (typeof NOTIFY_KINDS)[number];
 
 /**

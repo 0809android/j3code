@@ -332,12 +332,14 @@ describe("mux fetch", () => {
       const probe = yield* makeProbe;
       const { fetch } = yield* start(probe);
       const controller = makeController();
-      const request = yield* Effect.sync(() =>
-        fetch("/slow-head", { signal: controller.signal }).catch((error: unknown) => error),
-      );
+      const request = yield* Effect.sync(() => ({
+        promise: fetch("/slow-head", { signal: controller.signal }).catch(
+          (error: unknown) => error,
+        ),
+      }));
       yield* Deferred.await(probe.started);
       controller.abort(new Error("stop"));
-      assert.equal(((yield* Effect.promise(() => request)) as Error).message, "stop");
+      assert.equal(((yield* Effect.promise(() => request.promise)) as Error).message, "stop");
       assert.equal(yield* Deferred.await(probe.interrupted), "head");
 
       const done = makeController();

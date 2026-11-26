@@ -52,7 +52,7 @@ export const pendingK3RelayAccountCallbackAtom = Atom.make<string | null>(null).
 );
 
 /** How the browser tab the provider returned to hands the callback to the tab that signed in. */
-export const K3RELAY_ACCOUNT_CALLBACK_CHANNEL = "k3relay-account-callback";
+const K3RELAY_ACCOUNT_CALLBACK_CHANNEL = "k3relay-account-callback";
 
 /**
  * On the sign-in's return page (`/k3relay/account/callback`), passes the URL to the tab that

@@ -25,13 +25,13 @@ import {
  * authentication, which are the source of truth.
  */
 
-export const GRANT_LABEL = "k3relay-v1/grant";
-export const REVOKE_LABEL = "k3relay-v1/revoke";
+const GRANT_LABEL = "k3relay-v1/grant";
+const REVOKE_LABEL = "k3relay-v1/revoke";
 
 const DAY_MS = 86_400_000;
 export const GRANT_DEFAULT_TTL_MS = 90 * DAY_MS;
 /** Grants never outlive the default; renewal issues a new one instead. */
-export const GRANT_MAX_TTL_MS = GRANT_DEFAULT_TTL_MS;
+const GRANT_MAX_TTL_MS = GRANT_DEFAULT_TTL_MS;
 /** A device that connects with less than this left gets a fresh grant inside the E2E channel. */
 export const GRANT_RENEW_BEFORE_MS = 30 * DAY_MS;
 /** The relay refuses grants issued further than this in its future. */

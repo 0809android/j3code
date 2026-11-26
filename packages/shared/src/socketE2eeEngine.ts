@@ -22,7 +22,7 @@ import {
  * frame through the channel it produced. Protocol versions plug in a handshake.
  */
 
-export const E2EE_HANDSHAKE_TIMEOUT = "15 seconds";
+const E2EE_HANDSHAKE_TIMEOUT = "15 seconds";
 
 /** Binary frames of the current connection, one at a time, during the handshake. */
 export interface E2eeFrameSource {

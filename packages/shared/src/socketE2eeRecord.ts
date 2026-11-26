@@ -9,7 +9,7 @@ import type * as Socket from "effect/socket/Socket";
 export const KEY_LENGTH = 32;
 export const NONCE_LENGTH = 32;
 export const SIGNATURE_LENGTH = 64;
-export const RECORD_COUNTER_LENGTH = 8;
+const RECORD_COUNTER_LENGTH = 8;
 export const RECORD_HEADER_LENGTH = 1 + RECORD_COUNTER_LENGTH;
 export const TAG_LENGTH = 16;
 export const DIRECTION_C2S = 0x01;
@@ -30,7 +30,7 @@ export class E2eeProtocolError extends Schema.TaggedError<E2eeProtocolError>()(
   }
 }
 
-export const E2EE_IDENTITY_MISMATCH_CODE = "E2EE_IDENTITY_MISMATCH";
+const E2EE_IDENTITY_MISMATCH_CODE = "E2EE_IDENTITY_MISMATCH";
 
 /** The server identity key differs from the pinned one: a re-paired server, or a MITM. */
 export class E2eeIdentityMismatchError extends Schema.TaggedError<E2eeIdentityMismatchError>()(

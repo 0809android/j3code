@@ -22,7 +22,7 @@ import { serverEnvironment } from "../state/server";
 import { useAtomCommand } from "../state/use-atom-command";
 
 /** The host's relay over its RPCs; on/off and the URL are server settings. */
-export const k3RelayEnvironment = createK3RelayEnvironmentAtoms(connectionAtomRuntime);
+const k3RelayEnvironment = createK3RelayEnvironmentAtoms(connectionAtomRuntime);
 
 export interface K3RelayHostStateView {
   readonly state: K3RelayHostState | null;

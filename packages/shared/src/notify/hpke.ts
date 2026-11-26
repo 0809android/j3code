@@ -11,9 +11,9 @@ import { sha256 } from "@noble/hashes/sha2.js";
  * seals. Synchronous, pure TypeScript: it runs on the host, in React Native and in tests alike.
  */
 
-export const HPKE_KEM_ID = 0x0020;
-export const HPKE_KDF_ID = 0x0001;
-export const HPKE_AEAD_ID = 0x0003;
+const HPKE_KEM_ID = 0x0020;
+const HPKE_KDF_ID = 0x0001;
+const HPKE_AEAD_ID = 0x0003;
 export const HPKE_ENC_BYTES = 32;
 export const HPKE_KEY_BYTES = 32;
 export const HPKE_TAG_BYTES = 16;

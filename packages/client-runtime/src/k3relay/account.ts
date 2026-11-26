@@ -75,7 +75,7 @@ const failure = (reason: K3RelayAccountFailureReason, detail: string) =>
   new K3RelayAccountClientError({ reason, detail });
 
 /** `wss://relay…` (as settings spell it) to the relay's HTTPS origin. */
-export const k3relayHttpOrigin = (relayUrl: string): string | null => {
+const k3relayHttpOrigin = (relayUrl: string): string | null => {
   let url: URL;
   try {
     url = new URL(relayUrl);
@@ -335,22 +335,6 @@ export const listK3RelayAccountHosts = Effect.fn("K3RelayAccount.listHosts")(fun
     result.push({ hostId: entry.hostId, hostIdentityKey: key });
   }
   return result;
-});
-
-export const removeK3RelayAccountHost = Effect.fn("K3RelayAccount.removeHost")(function* (
-  session: K3RelayAccountSession,
-  hostId: string,
-) {
-  const reply = yield* accountCall(session, "/v1/account/hosts/remove", [["hostId", hostId]]);
-  if (reply.status !== 200) return yield* failure("invalid-reply", "The relay refused.");
-});
-
-/** Deletes the account at the relay: its identities and host list. Hosts and grants stay. */
-export const deleteK3RelayAccount = Effect.fn("K3RelayAccount.delete")(function* (
-  session: K3RelayAccountSession,
-) {
-  const reply = yield* accountCall(session, "/v1/account/delete");
-  if (reply.status !== 200) return yield* failure("invalid-reply", "The relay refused.");
 });
 
 /**

@@ -6,9 +6,9 @@ import * as DesktopWindow from "../window/DesktopWindow.ts";
 import * as DesktopWebLinks from "./DesktopWebLinks.ts";
 
 /** Pairing links a host shares (spec §8): `k3relay://pair?…#s=…`. */
-export const K3RELAY_LINK_SCHEME = "k3relay";
+const K3RELAY_LINK_SCHEME = "k3relay";
 
-export const isK3RelayLink = (value: string) =>
+const isK3RelayLink = (value: string) =>
   value.trim().toLowerCase().startsWith(`${K3RELAY_LINK_SCHEME}:`);
 
 /**

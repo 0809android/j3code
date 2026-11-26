@@ -310,7 +310,7 @@ export const approveK3RelayIntroduction = Effect.fn("K3RelayIntroduction.approve
 });
 
 /** Withdraws every window; a new device waiting on one is refused. */
-export const cancelK3RelayIntroduction = (session: K3RelayIntroductionSession) =>
+const cancelK3RelayIntroduction = (session: K3RelayIntroductionSession) =>
   Effect.forEach(
     session.opened,
     (window) =>

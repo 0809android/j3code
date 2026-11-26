@@ -10,30 +10,12 @@ import {
  * E2EE signing inputs, which use a u16. Device and host ids follow the relay in both layers.
  */
 
-const BASE32_ALPHABET = "abcdefghijklmnopqrstuvwxyz234567";
 const BASE64URL_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 const BASE64URL_PATTERN = /^[A-Za-z0-9_-]*$/u;
 const MAX_BASE64URL_TEXT = 4096;
 const ID_PATTERN = /^[a-z2-7]{32}$/u;
 
 const utf8 = (value: string): Uint8Array => new TextEncoder().encode(value);
-
-/** RFC 4648 base32, lowercase and unpadded, as the relay spells ids. */
-export const base32 = (bytes: Uint8Array): string => {
-  let out = "";
-  let buffer = 0;
-  let bits = 0;
-  for (const byte of bytes) {
-    buffer = ((buffer << 8) | byte) & 0xffff;
-    bits += 8;
-    while (bits >= 5) {
-      out += BASE32_ALPHABET[(buffer >>> (bits - 5)) & 31];
-      bits -= 5;
-    }
-  }
-  if (bits > 0) out += BASE32_ALPHABET[(buffer << (5 - bits)) & 31];
-  return out;
-};
 
 export const encodeBase64url = (bytes: Uint8Array): string => {
   let out = "";

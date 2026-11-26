@@ -133,45 +133,114 @@ object RelayNotify {
     null
   }
 
+  private class KeyRecord(
+    val env: String,
+    val secret: ByteArray,
+    val publicKey: ByteArray,
+    val label: String?
+  )
+
+  private class ParsedEnvelope(
+    val header: ByteArray,
+    val keyId: String,
+    val enc: ByteArray,
+    val ciphertext: ByteArray
+  )
+
   private fun openUnsafe(context: Context, text: String, now: Long): Opened? {
     // XDH and its key specs arrive in API 33; older devices get the plain notification.
-    if (Build.VERSION.SDK_INT < 33) return null
-    val envelope = base64url(text) ?: return null
-    if (envelope.size < HEADER_BYTES + ENC_BYTES + 256 + 16 ||
-      envelope.size > HEADER_BYTES + ENC_BYTES + 1024 + 16 ||
-      envelope[0] != 1.toByte()
-    ) {
-      return null
+    val parsed = if (Build.VERSION.SDK_INT >= 33) parseEnvelope(text) else null
+    val record = parsed?.let { readKeyRecord(context, it.keyId) }
+    val padded = if (parsed != null && record != null) {
+      Hpke.open(
+        Hpke.KeyPair(record.secret, record.publicKey),
+        Hpke.Envelope(parsed.enc, INFO, parsed.header, parsed.ciphertext)
+      )
+    } else {
+      null
     }
-    val header = envelope.copyOfRange(0, HEADER_BYTES)
-    val keyId = header.copyOfRange(1, HEADER_BYTES).joinToString("") { "%02x".format(it) }
-    val record = JSONObject(readKey(context, "k3relay.notify.$keyId") ?: return null)
-    if (record.optInt("v") != 1) return null
-    val secret = base64url(record.getString("sk")) ?: return null
-    val publicKey = base64url(record.getString("pk")) ?: return null
-    if (secret.size != 32 || publicKey.size != 32) return null
-    val enc = envelope.copyOfRange(HEADER_BYTES, HEADER_BYTES + ENC_BYTES)
-    val ciphertext = envelope.copyOfRange(HEADER_BYTES + ENC_BYTES, envelope.size)
-    val padded = Hpke.open(secret, publicKey, enc, INFO, header, ciphertext) ?: return null
-    if (padded.size !in BUCKETS) return null
-    val length = ((padded[0].toInt() and 0xff) shl 8) or (padded[1].toInt() and 0xff)
-    if (length + 2 > padded.size) return null
-    for (index in 2 + length until padded.size) if (padded[index] != 0.toByte()) return null
-    val payload = JSONObject(String(padded, 2, length, Charsets.UTF_8))
-    if (payload.optInt("v") != 1) return null
+    val payload = padded?.let(::unpadEnvelope)
+    return if (record != null && payload != null) parseOpened(payload, record, now) else null
+  }
+
+  private fun parseEnvelope(text: String): ParsedEnvelope? {
+    val envelope = base64url(text)
+    val minSize = HEADER_BYTES + ENC_BYTES + 256 + 16
+    val maxSize = HEADER_BYTES + ENC_BYTES + 1024 + 16
+    val valid = envelope != null &&
+      envelope.size in minSize..maxSize &&
+      envelope[0] == 1.toByte()
+    return if (!valid || envelope == null) {
+      null
+    } else {
+      val header = envelope.copyOfRange(0, HEADER_BYTES)
+      val keyId = header.copyOfRange(1, HEADER_BYTES).joinToString("") { "%02x".format(it) }
+      ParsedEnvelope(
+        header = header,
+        keyId = keyId,
+        enc = envelope.copyOfRange(HEADER_BYTES, HEADER_BYTES + ENC_BYTES),
+        ciphertext = envelope.copyOfRange(HEADER_BYTES + ENC_BYTES, envelope.size)
+      )
+    }
+  }
+
+  private fun readKeyRecord(context: Context, keyId: String): KeyRecord? {
+    val raw = readKey(context, "k3relay.notify.$keyId") ?: return null
+    val json = JSONObject(raw)
+    val secret = base64url(json.getString("sk"))
+    val publicKey = base64url(json.getString("pk"))
+    val valid = json.optInt("v") == 1 &&
+      secret != null && secret.size == 32 &&
+      publicKey != null && publicKey.size == 32
+    return if (!valid || secret == null || publicKey == null) {
+      null
+    } else {
+      KeyRecord(
+        env = json.optString("env"),
+        secret = secret,
+        publicKey = publicKey,
+        label = if (json.isNull("label")) null else json.optString("label")
+      )
+    }
+  }
+
+  private fun unpadEnvelope(padded: ByteArray): JSONObject? {
+    val length = if (padded.size in BUCKETS) {
+      ((padded[0].toInt() and 0xff) shl 8) or (padded[1].toInt() and 0xff)
+    } else {
+      -1
+    }
+    val validPadding = length >= 0 &&
+      length + 2 <= padded.size &&
+      (2 + length until padded.size).all { padded[it] == 0.toByte() }
+    return if (validPadding) {
+      JSONObject(String(padded, 2, length, Charsets.UTF_8))
+    } else {
+      null
+    }
+  }
+
+  private fun parseOpened(payload: JSONObject, record: KeyRecord, now: Long): Opened? {
     val kind = payload.optString("kind")
     val environmentId = payload.optString("env")
     val ts = payload.optLong("ts", -1)
     val id = payload.optString("id")
-    if (kind !in KINDS || environmentId != record.optString("env") || id.length != 22) return null
-    if (ts < now - MAX_AGE_MS || ts > now + FUTURE_SKEW_MS) return null
-    return Opened(
-      id = id,
-      kind = kind,
-      environmentId = environmentId,
-      threadId = payload.optString("thread").takeIf { it.isNotEmpty() },
-      hostLabel = if (record.isNull("label")) null else record.optString("label")
-    )
+    val valid = payload.optInt("v") == 1 &&
+      kind in KINDS &&
+      environmentId == record.env &&
+      id.length == 22 &&
+      ts in (now - MAX_AGE_MS)..(now + FUTURE_SKEW_MS)
+    return if (valid) {
+      Opened(
+        id = id,
+        kind = kind,
+        environmentId = environmentId,
+        threadId = payload.optString("thread").takeIf { it.isNotEmpty() },
+        hostLabel = record.label
+      )
+    } else {
+      null
+    }
   }
 
   private fun post(context: Context, scheme: String, opened: Opened?) {
@@ -227,6 +296,15 @@ object RelayNotify {
 
 /** Base-mode HPKE open for the one suite the host uses. */
 internal object Hpke {
+  internal class KeyPair(val secretKey: ByteArray, val publicKey: ByteArray)
+
+  internal class Envelope(
+    val enc: ByteArray,
+    val info: ByteArray,
+    val aad: ByteArray,
+    val ciphertext: ByteArray
+  )
+
   private const val KEM_ID = 0x0020
   private const val KDF_ID = 0x0001
   private const val AEAD_ID = 0x0003
@@ -235,21 +313,25 @@ internal object Hpke {
   private val SUITE = "HPKE".toByteArray() + i2osp(KEM_ID, 2) + i2osp(KDF_ID, 2) +
     i2osp(AEAD_ID, 2)
 
-  fun open(
-    secretKey: ByteArray,
-    publicKey: ByteArray,
-    enc: ByteArray,
-    info: ByteArray,
-    aad: ByteArray,
-    ciphertext: ByteArray
-  ): ByteArray? {
-    val dh = x25519(secretKey, enc) ?: return null
-    if (dh.all { it == 0.toByte() }) return null
+  fun open(keys: KeyPair, envelope: Envelope): ByteArray? {
+    val dh = x25519(keys.secretKey, envelope.enc)?.takeUnless { bytes ->
+      bytes.all { it == 0.toByte() }
+    }
+    return dh?.let { decrypt(keys.publicKey, envelope, it) }
+  }
+
+  private fun decrypt(publicKey: ByteArray, envelope: Envelope, dh: ByteArray): ByteArray? {
     val eaePrk = labeledExtract(KEM_SUITE, ByteArray(0), "eae_prk", dh)
-    val shared = labeledExpand(KEM_SUITE, eaePrk, "shared_secret", enc + publicKey, 32)
+    val shared = labeledExpand(
+      KEM_SUITE,
+      eaePrk,
+      "shared_secret",
+      envelope.enc + publicKey,
+      32
+    )
     val context = byteArrayOf(0) +
       labeledExtract(SUITE, ByteArray(0), "psk_id_hash", ByteArray(0)) +
-      labeledExtract(SUITE, ByteArray(0), "info_hash", info)
+      labeledExtract(SUITE, ByteArray(0), "info_hash", envelope.info)
     val secret = labeledExtract(SUITE, shared, "secret", ByteArray(0))
     val key = labeledExpand(SUITE, secret, "key", context, 32)
     // Sequence 0: the nonce is the base nonce itself.
@@ -261,8 +343,8 @@ internal object Hpke {
         Cipher.getInstance("ChaCha20-Poly1305")
       }
       cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "ChaCha20"), IvParameterSpec(nonce))
-      cipher.updateAAD(aad)
-      cipher.doFinal(ciphertext)
+      cipher.updateAAD(envelope.aad)
+      cipher.doFinal(envelope.ciphertext)
     } catch (_: Exception) {
       null
     }

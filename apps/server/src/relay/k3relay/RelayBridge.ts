@@ -147,7 +147,7 @@ const refusalHeaders: MuxHeaders = [
  * The most a relayed request body may carry. Uploads stream through with backpressure, so this
  * bounds what one request can make the host write, not what it holds in memory.
  */
-export const RELAY_MAX_REQUEST_BODY_BYTES = 64 * 1024 * 1024;
+const RELAY_MAX_REQUEST_BODY_BYTES = 64 * 1024 * 1024;
 
 const responseHeaders = (headers: Headers): MuxHeaders => {
   const out: Array<readonly [string, string]> = [];

@@ -35,17 +35,17 @@ import {
  * `Dk` per host; the code covers all of them, and the introducer signs each host's approval.
  */
 
-export const INTRODUCTION_LINK_HOST = "introduce";
+const INTRODUCTION_LINK_HOST = "introduce";
 export const INTRODUCTION_TTL_MS = 5 * 60_000;
 /** Devices a host approves by introduction in any 24 hours. */
 export const INTRODUCTION_DAILY_LIMIT = 3;
 /** Windows a host opens in any 24 hours, approved or not. */
 export const INTRODUCTION_DAILY_OPEN_LIMIT = 10;
 export const INTRODUCTION_DAY_MS = 24 * 60 * 60_000;
-export const INTRODUCTION_MAX_HOSTS = 8;
+const INTRODUCTION_MAX_HOSTS = 8;
 export const INTRODUCTION_MAX_FAILED_ATTEMPTS = 10;
-export const INTRODUCTION_CODE_LABEL = "k3relay-v1/introduction-code";
-export const INTRODUCTION_APPROVAL_LABEL = "k3relay-v1/introduction-approval";
+const INTRODUCTION_CODE_LABEL = "k3relay-v1/introduction-code";
+const INTRODUCTION_APPROVAL_LABEL = "k3relay-v1/introduction-approval";
 
 const SECRET_BYTES = 16;
 const TRANSCRIPT_BYTES = 32;
@@ -70,10 +70,10 @@ const hasExactKeys = (
 };
 
 /** A 16-byte random introduction id, base64url: what the host hands out and later consumes. */
-export const isIntroductionId = (value: unknown): value is string =>
+const isIntroductionId = (value: unknown): value is string =>
   typeof value === "string" && ID_PATTERN.test(value);
 
-export const isIntroductionSecret = (value: unknown): value is Uint8Array =>
+const isIntroductionSecret = (value: unknown): value is Uint8Array =>
   value instanceof Uint8Array && value.length === SECRET_BYTES;
 
 export const decodeIntroductionSecret = (value: unknown): Uint8Array | null =>
@@ -179,7 +179,7 @@ export interface IntroductionPeerWire {
 }
 
 /** Sorted by host id, the one order both sides hash in. */
-export const sortIntroductionPeers = (
+const sortIntroductionPeers = (
   peers: ReadonlyArray<IntroductionPeer>,
 ): ReadonlyArray<IntroductionPeer> =>
   [...peers].sort((a, b) => (a.hostId < b.hostId ? -1 : a.hostId > b.hostId ? 1 : 0));
@@ -194,7 +194,7 @@ export const encodeIntroductionPeers = (
   }));
 
 /** Strict: 1–8 peers, canonical keys, host ids strictly ascending (so no duplicates). */
-export const parseIntroductionPeers = (value: unknown): ReadonlyArray<IntroductionPeer> | null => {
+const parseIntroductionPeers = (value: unknown): ReadonlyArray<IntroductionPeer> | null => {
   if (!Array.isArray(value) || value.length === 0 || value.length > INTRODUCTION_MAX_HOSTS) {
     return null;
   }
@@ -227,7 +227,7 @@ export const introductionCode = (
     sha256(relaySigningInput(INTRODUCTION_CODE_LABEL, secret, ...peerParts(peers))),
   );
 
-export const sameIntroductionPeers = (
+const sameIntroductionPeers = (
   a: ReadonlyArray<IntroductionPeer>,
   b: ReadonlyArray<IntroductionPeer>,
 ): boolean => {
@@ -245,7 +245,7 @@ export const sameIntroductionPeers = (
   });
 };
 
-export const introductionProof = (input: {
+const introductionProof = (input: {
   readonly secret: Uint8Array;
   readonly transcriptHash: Uint8Array;
   readonly alg: E2eeDeviceAlgorithm;
@@ -266,7 +266,7 @@ export const introductionProof = (input: {
     ),
   );
 
-export const introductionKeyProofMessage = (
+const introductionKeyProofMessage = (
   transcriptHash: Uint8Array,
   alg: E2eeDeviceAlgorithm,
   devicePublicKey: Uint8Array,
@@ -550,7 +550,7 @@ export const submitIntroductionClaim = (
 };
 
 /** What the introducer signs for one host (spec §18.2): bound to everything it approved. */
-export const introductionApprovalMessage = (input: {
+const introductionApprovalMessage = (input: {
   readonly hostId: string;
   readonly introductionId: string;
   readonly introducerDeviceId: string;

@@ -69,7 +69,7 @@ const decodeSoftwareKey = Schema.decodeUnknownOption(SoftwareKeyRecord);
 
 const PUBLIC_KEY_LENGTH: Record<E2eeDeviceAlgorithm, number> = { ed25519: 32, p256: 65 };
 
-export const encodeSoftwareDeviceKey = (keypair: E2eeDeviceKeypair): string =>
+const encodeSoftwareDeviceKey = (keypair: E2eeDeviceKeypair): string =>
   encodeSoftwareKey({
     v: 1,
     alg: keypair.alg,
@@ -77,7 +77,7 @@ export const encodeSoftwareDeviceKey = (keypair: E2eeDeviceKeypair): string =>
     pk: encodeBase64url(keypair.publicKey),
   });
 
-export const decodeSoftwareDeviceKey = (stored: string): E2eeDeviceKeypair | null => {
+const decodeSoftwareDeviceKey = (stored: string): E2eeDeviceKeypair | null => {
   const record = Option.getOrNull(decodeSoftwareKey(stored));
   if (record === null) return null;
   const secretKey = decodeBase64url(record.sk, 32);
@@ -153,7 +153,7 @@ const P256_ALGORITHM = { name: "ECDSA", namedCurve: "P-256" } as const;
 const P256_SIGN = { name: "ECDSA", hash: "SHA-256" } as const;
 
 /** WebCrypto ECDSA already returns the raw `r‖s` signature the E2EE layer wants (no DER). */
-export const webCryptoP256Signer = Effect.fn("DeviceKeyStore.webCryptoP256Signer")(function* (
+const webCryptoP256Signer = Effect.fn("DeviceKeyStore.webCryptoP256Signer")(function* (
   keyPair: CryptoKeyPair,
   subtle: SubtleCrypto,
 ) {

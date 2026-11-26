@@ -239,7 +239,7 @@ const makeV1Channel = (
 };
 
 /** v1 receive failures surface as protocol errors, never as raw AEAD errors. */
-export const mapV1ReceiveError = (error: E2eeFailure): E2eeFailure =>
+const mapV1ReceiveError = (error: E2eeFailure): E2eeFailure =>
   isProtocolError(error)
     ? error
     : new E2eeProtocolError({ detail: "E2EE record decryption failed." });

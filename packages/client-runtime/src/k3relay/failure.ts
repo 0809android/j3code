@@ -1,4 +1,3 @@
-import type { E2eeRejectionReason } from "@t3tools/shared/socketE2ee";
 import { mFallback, msg } from "gt-i18n";
 import type { MFunctionType } from "gt-i18n/types";
 
@@ -12,7 +11,7 @@ import {
 } from "../connection/model.ts";
 
 /** The relay's own close codes (`infra/k3-relay` README, "WebSocket"). */
-export const K3_RELAY_CLOSE = {
+const K3_RELAY_CLOSE = {
   badRequest: 4400,
   unauthorized: 4401,
   revoked: 4403,
@@ -45,8 +44,6 @@ export function k3relayCloseReason(code: number, reason = ""): K3RelayFailureRea
       return null;
   }
 }
-
-export const k3relayRejectionReason = (reason: E2eeRejectionReason): K3RelayFailureReason => reason;
 
 /** Failures a retry can fix on its own; the rest wait for the user. */
 const TRANSIENT: ReadonlySet<K3RelayFailureReason> = new Set([
