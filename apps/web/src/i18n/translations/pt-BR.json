@@ -13049,5 +13049,10 @@
   "27d76249d09eb69f": "Guia de revisão pronto",
   "faa3bb26abb39c93": "O guia de revisão falhou",
   "b7df38b7d8792d78": "Abrir guia",
-  "9e91e9a77b664e4e": "Não foi possível iniciar um guia de revisão"
+  "9e91e9a77b664e4e": "Não foi possível iniciar um guia de revisão",
+  "531f72b2bd297543": "Ambiente padrão para novos tópicos. Automático usa o último ambiente utilizado ou o ambiente principal.",
+  "afd6fde0d17ff8a8": "Redefinir ambiente padrão para automático",
+  "5ed0e86a59502f46": "Ambiente padrão de tópicos",
+  "5f35cdb6701a255d": "Automático",
+  "3785db86873e6d44": "ambiente padrão de tópicos novos tópicos máquina servidor host"
 }

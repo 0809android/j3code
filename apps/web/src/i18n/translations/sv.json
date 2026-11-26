@@ -13056,5 +13056,10 @@
   "27d76249d09eb69f": "Granskningsguiden är klar",
   "faa3bb26abb39c93": "Granskningsguiden misslyckades",
   "b7df38b7d8792d78": "Öppna guiden",
-  "9e91e9a77b664e4e": "Kunde inte starta en granskningsguide"
+  "9e91e9a77b664e4e": "Kunde inte starta en granskningsguide",
+  "531f72b2bd297543": "Standardmiljö för nya trådar. Automatisk använder din senast använda eller primära miljö.",
+  "afd6fde0d17ff8a8": "Återställ standardmiljö till automatisk",
+  "5ed0e86a59502f46": "Standardmiljö för trådar",
+  "5f35cdb6701a255d": "Automatisk",
+  "3785db86873e6d44": "standardmiljö nya trådar maskin server värd"
 }

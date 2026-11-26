@@ -13052,5 +13052,10 @@
   "27d76249d09eb69f": "Review-Leitfaden bereit",
   "faa3bb26abb39c93": "Review-Leitfaden fehlgeschlagen",
   "b7df38b7d8792d78": "Leitfaden öffnen",
-  "9e91e9a77b664e4e": "Review-Leitfaden konnte nicht gestartet werden"
+  "9e91e9a77b664e4e": "Review-Leitfaden konnte nicht gestartet werden",
+  "531f72b2bd297543": "Standardumgebung für neue Threads. Automatisch verwendet die zuletzt genutzte oder primäre Umgebung.",
+  "afd6fde0d17ff8a8": "Standardumgebung auf Automatisch zurücksetzen",
+  "5ed0e86a59502f46": "Standard-Thread-Umgebung",
+  "5f35cdb6701a255d": "Automatisch",
+  "3785db86873e6d44": "Standard-Thread-Umgebung neue Threads Maschine Server Host"
 }

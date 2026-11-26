@@ -13044,5 +13044,10 @@
   "27d76249d09eb69f": "Guía de revisión lista",
   "faa3bb26abb39c93": "Falló la guía de revisión",
   "b7df38b7d8792d78": "Abrir guía",
-  "9e91e9a77b664e4e": "No se pudo iniciar una guía de revisión"
+  "9e91e9a77b664e4e": "No se pudo iniciar una guía de revisión",
+  "531f72b2bd297543": "Entorno predeterminado para nuevos hilos. Automático usa tu último entorno usado o el principal.",
+  "afd6fde0d17ff8a8": "Restablecer entorno predeterminado a automático",
+  "5ed0e86a59502f46": "Entorno predeterminado de hilos",
+  "5f35cdb6701a255d": "Automático",
+  "3785db86873e6d44": "entorno predeterminado de hilos nuevos hilos máquina servidor host"
 }
