@@ -1,6 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 
 import {
@@ -16,6 +17,7 @@ import {
   K3_WINDOWS_LOCAL_APP_DATA_NAMES,
   collectK3SystemPaths,
   filterSafeRemovalPaths,
+  isK3HomeDirectory,
   isSafeRemovalPath,
   touchesT3Data,
   type UninstallPathContext,
@@ -126,5 +128,28 @@ describe("isSafeRemovalPath", () => {
         assert.isTrue(isSafeRemovalPath(ctx, target), target);
       }
     }).pipe(Effect.provide(NodeServices.layer)),
+  );
+});
+
+describe("isK3HomeDirectory", () => {
+  it.effect("accepts only a folder whose userdata holds a K3 Code store", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "k3-home-shape-" });
+      const repo = path.join(root, "repo");
+      yield* fs.makeDirectory(path.join(repo, "userdata"), { recursive: true });
+      yield* fs.writeFileString(path.join(repo, "userdata", "notes.txt"), "mine");
+      const empty = path.join(root, "empty");
+      yield* fs.makeDirectory(empty);
+      const home = path.join(root, "home");
+      yield* fs.makeDirectory(path.join(home, "userdata"), { recursive: true });
+      yield* fs.writeFileString(path.join(home, "userdata", "statev2.sqlite"), "sqlite");
+
+      assert.isFalse(yield* isK3HomeDirectory(repo));
+      assert.isFalse(yield* isK3HomeDirectory(empty));
+      assert.isFalse(yield* isK3HomeDirectory(path.join(root, "missing")));
+      assert.isTrue(yield* isK3HomeDirectory(home));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });

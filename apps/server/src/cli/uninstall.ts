@@ -14,6 +14,7 @@ import { Command, Flag, GlobalFlag, Prompt } from "effect/cli";
 import {
   collectK3SystemPaths,
   filterSafeRemovalPaths,
+  isK3HomeDirectory,
   isSafeRemovalPath,
 } from "@t3tools/shared/uninstallTargets";
 import * as BootService from "../cloud/bootService.ts";
@@ -25,6 +26,7 @@ import {
   readPosixLauncherTarget,
   resolveLauncherPath,
 } from "../cloud/pinnedRuntime.ts";
+import { stateDirOwned } from "../serviceLauncher.ts";
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
 import * as CliService from "./service.ts";
 import { awaitDetachedSpawn } from "../process/windowsVerbatimSpawn.ts";
@@ -244,6 +246,11 @@ const planUninstall = Effect.fn("cli.uninstall.plan")(function* (input: {
         reason: `Refusing to remove ${input.baseDir}: it is the home directory, a shared system folder, or T3 Code's data.`,
       });
     }
+    if (!(yield* isK3HomeDirectory(input.baseDir))) {
+      return yield* new CliUninstallError({
+        reason: `Refusing to remove ${input.baseDir}: it does not look like a K3 Code home (no userdata/ folder with K3 Code's data). Nothing was removed. Point --base-dir or K3CODE_HOME at the K3 Code home, or run without --all.`,
+      });
+    }
   }
   if (input.complete) {
     desktopShims = yield* findDesktopShimLaunchers();
@@ -273,6 +280,83 @@ const planUninstall = Effect.fn("cli.uninstall.plan")(function* (input: {
     completePaths,
   };
   return plan;
+});
+
+/** Reads `serviceManaged` from the running server's `server-runtime.json`. */
+const readServiceManaged = Effect.fn("cli.uninstall.read_service_managed")(function* (
+  baseDir: string,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const text = yield* fs
+    .readFileString(path.join(baseDir, "userdata", "server-runtime.json"))
+    .pipe(Effect.orElseSucceed(() => ""));
+  try {
+    const record: unknown = JSON.parse(text);
+    return (
+      typeof record === "object" &&
+      record !== null &&
+      "serviceManaged" in record &&
+      record.serviceManaged === true
+    );
+  } catch {
+    return false;
+  }
+});
+
+/**
+ * Refuses to delete a home whose server is running, which is how the desktop app (or any
+ * `t3 serve`) shows itself: its server holds the home's ownership lock. A server started by the
+ * background service is fine, since the uninstall stops that service first.
+ */
+export const ensureNoRunningServer = Effect.fn("cli.uninstall.ensure_no_running_server")(
+  function* (input: { readonly baseDir: string; readonly serviceWillBeRemoved: boolean }) {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const stateDir = path.join(input.baseDir, "userdata");
+    const traces = yield* Effect.all([
+      fs.exists(path.join(stateDir, "server-owner.sqlite")),
+      fs.exists(path.join(stateDir, "server-runtime.json")),
+    ]).pipe(Effect.orElseSucceed(() => [false, false]));
+    if (!traces.some(Boolean)) return;
+    const owned = yield* Effect.tryPromise(() => stateDirOwned(input.baseDir)).pipe(
+      Effect.orElseSucceed(() => false),
+    );
+    if (!owned) return;
+    if (input.serviceWillBeRemoved && (yield* readServiceManaged(input.baseDir))) return;
+    return yield* new CliUninstallError({
+      reason: `K3 Code is running and using ${input.baseDir} (the desktop app, or a server started with \`t3 serve\`). Quit it first, then run uninstall again. Nothing was removed.`,
+    });
+  },
+);
+
+interface RemovalTarget {
+  readonly path: string;
+  readonly describe: string;
+  readonly recursive: boolean;
+}
+
+/**
+ * Removes every target, recording a failure and moving on so one locked file does not leave
+ * the rest installed. Returns the descriptions of what could not be removed.
+ */
+export const removeBestEffort = Effect.fn("cli.uninstall.remove_best_effort")(function* (
+  targets: ReadonlyArray<RemovalTarget>,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const failures: Array<string> = [];
+  for (const target of targets) {
+    yield* fs.remove(target.path, { recursive: target.recursive, force: true }).pipe(
+      Effect.matchEffect({
+        onSuccess: () => Console.log(`Removed ${target.path}.`),
+        onFailure: () =>
+          Effect.sync(() => failures.push(target.describe)).pipe(
+            Effect.andThen(Console.log(`Could not remove ${target.path}.`)),
+          ),
+      }),
+    );
+  }
+  return failures;
 });
 
 export const uninstallCommand = Command.make("uninstall", {
@@ -320,11 +404,13 @@ const runUninstall = Effect.fn("cli.uninstall.run")(function* (input: {
   readonly complete: boolean;
   readonly assumeYes: boolean;
 }) {
-  const fs = yield* FileSystem.FileSystem;
   const platform = yield* HostProcess.Platform;
   const environment = yield* HostProcess.Environment;
   const service = yield* BootService.BootService;
   const plan = yield* planUninstall({ baseDir: input.baseDir, complete: input.complete });
+  if (input.complete && plan.baseDir !== undefined) {
+    yield* ensureNoRunningServer({ baseDir: plan.baseDir, serviceWillBeRemoved: plan.service });
+  }
 
   const hasNothing =
     !plan.service &&
@@ -391,66 +477,64 @@ const runUninstall = Effect.fn("cli.uninstall.run")(function* (input: {
     yield* service.uninstall;
     yield* Console.log("Removed the background service.");
   }
+  const failures: Array<string> = [];
+  const launchersToRemove: Array<RemovalTarget> = [];
   for (const launcher of plan.launchers) {
     if (!(yield* ownsLauncher(launcher, plan.versionsDir))) {
       yield* Console.log(`Left ${launcher}: it no longer runs this installation.`);
       continue;
     }
-    yield* fs
-      .remove(launcher, { force: true })
-      .pipe(
-        Effect.mapError(
-          () => new CliUninstallError({ reason: `Could not remove the launcher at ${launcher}.` }),
-        ),
-      );
-    yield* Console.log(`Removed ${launcher}.`);
+    launchersToRemove.push({
+      path: launcher,
+      describe: `the launcher at ${launcher}`,
+      recursive: false,
+    });
   }
-  for (const shim of plan.desktopShims) {
-    yield* fs
-      .remove(shim, { force: true })
-      .pipe(
-        Effect.mapError(
-          () =>
-            new CliUninstallError({
-              reason: `Could not remove the desktop CLI launcher at ${shim}.`,
-            }),
-        ),
-      );
-    yield* Console.log(`Removed ${shim}.`);
-  }
-  for (const target of plan.completePaths) {
-    yield* fs
-      .remove(target, { recursive: true, force: true })
-      .pipe(
-        Effect.mapError(
-          () => new CliUninstallError({ reason: `Could not remove ${target}.` }),
-        ),
-      );
-    yield* Console.log(`Removed ${target}.`);
-  }
+  failures.push(
+    ...(yield* removeBestEffort([
+      ...launchersToRemove,
+      ...plan.desktopShims.map((shim) => ({
+        path: shim,
+        describe: `the desktop CLI launcher at ${shim}`,
+        recursive: false,
+      })),
+      ...plan.completePaths.map((target) => ({
+        path: target,
+        describe: target,
+        recursive: true,
+      })),
+    ])),
+  );
   const dirToRemove = plan.baseDir ?? plan.runtimeDir;
   if (dirToRemove !== undefined) {
     // Windows refuses to unlink this running executable; a detached shell removes it after exit.
     if (platform === "win32") {
       const comspec = environment["ComSpec"] ?? environment["COMSPEC"] ?? "cmd.exe";
-      const notScheduled = () =>
-        new CliUninstallError({
-          reason: `Could not schedule removal of ${dirToRemove}. Delete it yourself once this window is closed.`,
-        });
       yield* awaitDetachedSpawn(() => spawnWindowsRemoval(comspec, dirToRemove)).pipe(
-        Effect.mapError(notScheduled),
+        Effect.matchEffect({
+          onSuccess: () => Console.log(`${dirToRemove} will be removed once the CLI exits.`),
+          onFailure: () =>
+            Effect.sync(() =>
+              failures.push(`${dirToRemove} (delete it yourself once this window is closed)`),
+            ).pipe(Effect.andThen(Console.log(`Could not schedule removal of ${dirToRemove}.`))),
+        }),
       );
-      yield* Console.log(`${dirToRemove} will be removed once the CLI exits.`);
     } else {
-      yield* fs
-        .remove(dirToRemove, { recursive: true, force: true })
-        .pipe(
-          Effect.mapError(
-            () => new CliUninstallError({ reason: `Could not remove ${dirToRemove}.` }),
-          ),
-        );
-      yield* Console.log(`Removed ${dirToRemove}.`);
+      failures.push(
+        ...(yield* removeBestEffort([
+          { path: dirToRemove, describe: dirToRemove, recursive: true },
+        ])),
+      );
     }
+  }
+  if (failures.length > 0) {
+    yield* Console.log("");
+    yield* Console.log("These could not be removed:");
+    for (const failure of failures) yield* Console.log(`  ${failure}`);
+    yield* logOtherHomeService(plan);
+    return yield* new CliUninstallError({
+      reason: `Uninstall finished, but ${failures.length} item(s) could not be removed (listed above). Close anything using them and run uninstall again.`,
+    });
   }
   yield* Console.log("");
   yield* Console.log(
