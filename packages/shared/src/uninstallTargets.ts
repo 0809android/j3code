@@ -291,20 +291,68 @@ export const isK3HomeDirectory = Effect.fn("uninstallTargets.isK3HomeDirectory")
   return false;
 });
 
-const WINDOWS_PID_WAIT_SECONDS = 15;
+/** How long a cleanup helper waits for the app to exit before it gives up without deleting. */
+export const CLEANUP_PID_WAIT_SECONDS = 60;
 
 /**
- * The cmd.exe command line (for `cmd /d /v:off /s /c`) that waits up to 15 seconds for `pid` to
+ * The cmd.exe command line (for `cmd /d /v:off /s /c`) that waits up to 60 seconds for `pid` to
  * exit and then deletes the path in each named environment variable. Only a tasklist line naming
- * the PID keeps the wait going, so a localized "no tasks" message ends it.
+ * the PID keeps the wait going, so a localized "no tasks" message ends it. If the PID is still
+ * alive after the wait, nothing is deleted: the command appends a line to the file named by
+ * `logPathEnvName` (when given) and exits with code 1.
+ *
+ * With `uninstaller`, the NSIS uninstaller named by `exePathEnvName` runs silently after the
+ * deletions (`_?=` keeps it in place and makes `start /wait` wait for it), then `dirPathEnvName`
+ * is removed to clear what the uninstaller leaves behind. A missing uninstaller is skipped.
  */
 export function buildWindowsWaitAndRemoveCommand(input: {
   readonly pid: number;
   readonly pathEnvNames: ReadonlyArray<string>;
+  readonly logPathEnvName?: string;
+  readonly uninstaller?: {
+    readonly exePathEnvName: string;
+    readonly dirPathEnvName: string;
+  };
 }): string {
-  const waitStep = `for /l %i in (1,1,${WINDOWS_PID_WAIT_SECONDS}) do (tasklist /FI "PID eq ${input.pid}" /NH 2>nul | findstr /C:" ${input.pid} " >nul && ping -n 2 127.0.0.1 >nul)`;
-  const deleteSteps = input.pathEnvNames.map(
-    (key) => `if exist "%${key}%" (rmdir /s /q "%${key}%" 2>nul || del /f /q "%${key}%" 2>nul)`,
-  );
-  return `"${waitStep} & ping -n 2 127.0.0.1 >nul & ${deleteSteps.join(" & ")}"`;
+  const alive = `tasklist /FI "PID eq ${input.pid}" /NH 2>nul | findstr /C:" ${input.pid} " >nul`;
+  const waitStep = `for /l %i in (1,1,${CLEANUP_PID_WAIT_SECONDS}) do (${alive} && ping -n 2 127.0.0.1 >nul)`;
+  const logStep =
+    input.logPathEnvName === undefined
+      ? ""
+      : `echo K3 Code uninstall cleanup skipped: process ${input.pid} did not exit within ${CLEANUP_PID_WAIT_SECONDS} seconds. Nothing was deleted.>>"%${input.logPathEnvName}%" & `;
+  const abortStep = `${alive} && (${logStep}exit 1)`;
+  const removeDir = (key: string) =>
+    `if exist "%${key}%" (rmdir /s /q "%${key}%" 2>nul || del /f /q "%${key}%" 2>nul)`;
+  const steps = input.pathEnvNames.map(removeDir);
+  if (input.uninstaller !== undefined) {
+    const { exePathEnvName, dirPathEnvName } = input.uninstaller;
+    steps.push(
+      `if exist "%${exePathEnvName}%" start "" /wait "%${exePathEnvName}%" /S _?=%${dirPathEnvName}%`,
+      removeDir(dirPathEnvName),
+    );
+  }
+  return `"${waitStep} & ping -n 2 127.0.0.1 >nul & ${abortStep} & ${steps.join(" & ")}"`;
 }
+
+/**
+ * The `/bin/sh -c` script that waits up to 60 seconds for the PID in `$1` to exit and then deletes
+ * every path from `$3` on. `$2` is a log file; if the PID is still alive after the wait, the
+ * script records that there and deletes nothing.
+ */
+export const POSIX_CLEANUP_SCRIPT = [
+  'pid="$1"',
+  'log="$2"',
+  "shift 2",
+  "i=0",
+  `while [ "$i" -lt ${CLEANUP_PID_WAIT_SECONDS * 10} ] && kill -0 "$pid" 2>/dev/null; do`,
+  "  sleep 0.1",
+  "  i=$((i + 1))",
+  "done",
+  'if kill -0 "$pid" 2>/dev/null; then',
+  `  echo "K3 Code uninstall cleanup skipped: process $pid did not exit within ${CLEANUP_PID_WAIT_SECONDS} seconds. Nothing was deleted." >> "$log" 2>/dev/null`,
+  "  exit 1",
+  "fi",
+  'for target in "$@"; do',
+  '  [ -n "$target" ] && rm -rf -- "$target" 2>/dev/null || true',
+  "done",
+].join("\n");

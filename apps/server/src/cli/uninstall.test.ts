@@ -349,6 +349,62 @@ it.layer(Layer.mergeAll(NodeServices.layer, NetService.layer))("t3 uninstall com
       assert.deepStrictEqual(uninstalls, []);
     }),
   );
+
+  it.effect("refuses --all for a missing base directory while the default home is running", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const homeDir = yield* fs.makeTempDirectoryScoped({ prefix: "k3-uninstall-other-home-" });
+      const defaultStateDir = path.join(homeDir, ".k3code", "userdata");
+      yield* fs.makeDirectory(defaultStateDir, { recursive: true });
+      yield* fs.writeFileString(path.join(defaultStateDir, "statev2.sqlite"), "sqlite");
+      const lock = new NodeSqlite.DatabaseSync(path.join(defaultStateDir, "server-owner.sqlite"));
+      lock.exec("BEGIN EXCLUSIVE;");
+      // A desktop folder the uninstall would otherwise delete.
+      const appData = path.join(homeDir, ".config", "k3code-v2");
+      yield* fs.makeDirectory(appData, { recursive: true });
+
+      const missingBaseDir = path.join(homeDir, "no-such-home");
+      const uninstalls: Array<true> = [];
+      vi.spyOn(BootService, "layer").mockReturnValue(
+        bootServiceFor(homeDir, missingBaseDir, uninstalls),
+      );
+
+      const error = yield* runUninstallAll(homeDir, missingBaseDir).pipe(
+        Effect.flip,
+        Effect.ensuring(Effect.sync(() => lock.close())),
+      );
+
+      assert.include(String(error), "Quit it first");
+      assert.isTrue(yield* fs.exists(appData));
+      assert.isTrue(yield* fs.exists(path.join(defaultStateDir, "statev2.sqlite")));
+      assert.deepStrictEqual(uninstalls, []);
+    }),
+  );
+
+  it.effect("refuses --all while the desktop app holds its user-data folder", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const homeDir = yield* fs.makeTempDirectoryScoped({ prefix: "k3-uninstall-electron-" });
+      const appData = path.join(homeDir, ".config", "k3code-v2");
+      yield* fs.makeDirectory(appData, { recursive: true });
+      // Chromium's marker is a symlink `<host>-<pid>`; this test process is the live pid.
+      yield* fs.symlink(`testhost-${process.pid}`, path.join(appData, "SingletonLock"));
+
+      const missingBaseDir = path.join(homeDir, "no-such-home");
+      const uninstalls: Array<true> = [];
+      vi.spyOn(BootService, "layer").mockReturnValue(
+        bootServiceFor(homeDir, missingBaseDir, uninstalls),
+      );
+
+      const error = yield* runUninstallAll(homeDir, missingBaseDir).pipe(Effect.flip);
+
+      assert.include(String(error), "desktop app is running");
+      assert.isTrue(yield* fs.exists(appData));
+      assert.deepStrictEqual(uninstalls, []);
+    }),
+  );
 });
 
 it.layer(NodeServices.layer)("t3 uninstall launcher", (it) => {
