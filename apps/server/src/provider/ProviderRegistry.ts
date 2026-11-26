@@ -66,6 +66,9 @@ export class ProviderRegistry extends Context.Service<
       provider?: ProviderDriverKind,
     ) => Effect.Effect<ReadonlyArray<ServerProvider>>;
 
+    /** Re-reads the host PATH; instances still missing their CLI are rebuilt when it changed. */
+    readonly refreshHostPath: Effect.Effect<void>;
+
     /** Unknown instance ids return the cached list without error. */
     readonly refreshInstance: (
       instanceId: ProviderInstanceId,
@@ -1366,6 +1369,7 @@ export const layer = Layer.effect(
       getProviders: Ref.get(providersRef),
       refresh: (provider?: ProviderDriverKind) =>
         refresh(provider).pipe(Effect.catchCause(recoverRefreshFailure)),
+      refreshHostPath: refreshHostPath.pipe(Effect.ignore),
       refreshInstance: (instanceId: ProviderInstanceId) =>
         refreshInstance(instanceId).pipe(Effect.catchCause(recoverRefreshFailure)),
       reloadSecretsAndRefresh: (instanceId?: ProviderInstanceId) =>

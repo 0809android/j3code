@@ -2583,7 +2583,7 @@ it.layer(
         return yield* effect(shell);
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
 
-    it.effect.each([
+    const hosts = [
       {
         name: "Windows PATH",
         platform: "win32" as const,
@@ -2596,7 +2596,16 @@ it.layer(
         path: "/usr/bin",
         expectedPath: "/opt/late:/usr/bin",
       },
-    ])("rebuilds only instances missing their CLI when a refresh finds a new $name", (host) =>
+    ];
+    type Registry = ProviderRegistry.ProviderRegistry["Service"];
+    const triggers = [
+      { via: "refresh", run: (registry: Registry) => registry.refresh() },
+      { via: "refreshHostPath", run: (registry: Registry) => registry.refreshHostPath },
+    ];
+
+    it.effect.each(hosts.flatMap((host) => triggers.map((trigger) => ({ ...host, ...trigger }))))(
+      "rebuilds only instances missing their CLI when $via finds a new $name",
+      (host) =>
       withLateLoginShell((shell) => {
         const env: NodeJS.ProcessEnv = { PATH: host.path, SHELL: shell };
         return Effect.gen(function* () {
@@ -2669,7 +2678,7 @@ it.layer(
             ),
           );
 
-          yield* registry.refresh();
+          yield* host.run(registry);
 
           assert.strictEqual(env.PATH, host.expectedPath);
           assert.deepStrictEqual(rebuilt, [[ProviderInstanceId.make("missing")]]);

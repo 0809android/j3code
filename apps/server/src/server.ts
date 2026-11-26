@@ -45,7 +45,7 @@ import {
   rejectRequestsUntilServing,
 } from "./httpResponseErrorGuard.ts";
 import { resolveLauncherPath } from "./cloud/pinnedRuntime.ts";
-import { fixPath, refreshPathFromLoginShell } from "./os-jank.ts";
+import { fixPath } from "./os-jank.ts";
 import * as Ws from "./ws.ts";
 import * as AgentScopeLive from "./process/agentScope.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
@@ -1425,7 +1425,10 @@ const layerMakeServer = Layer.unwrap(
     const layerBackgroundShellPathRefresh = config.shellEnvironmentPrepared
       ? Layer.empty
       : Layer.effectDiscard(
-          ServerActivation.forkParked(refreshPathFromLoginShell().pipe(Effect.ignore)),
+          Effect.gen(function* () {
+            const providers = yield* ProviderRegistry.ProviderRegistry;
+            yield* ServerActivation.forkParked(providers.refreshHostPath);
+          }),
         );
     const layerServerApplication = Layer.mergeAll(
       layerRoutes,

@@ -37,15 +37,11 @@ const LOGIN_SHELL_TIMEOUT = Duration.seconds(15);
 const SLOW_LOGIN_SHELL_TIMEOUT_MS = 20_000;
 
 function readSlowLoginShellEnvironment(shell: string): Partial<Record<string, string>> {
-  return readEnvironmentFromLoginShell(
-    shell,
-    LOGIN_SHELL_ENV_NAMES,
-    (file, args, options) =>
-      NodeChildProcess.execFileSync(file, args, {
-        ...options,
-        timeout: SLOW_LOGIN_SHELL_TIMEOUT_MS,
-      }),
-    { interactive: false },
+  return readEnvironmentFromLoginShell(shell, LOGIN_SHELL_ENV_NAMES, (file, args, options) =>
+    NodeChildProcess.execFileSync(file, args, {
+      ...options,
+      timeout: SLOW_LOGIN_SHELL_TIMEOUT_MS,
+    }),
   );
 }
 
@@ -79,12 +75,7 @@ function hydratePosixPath(env: NodeJS.ProcessEnv, platform: NodeJS.Platform): vo
   let waitedForSlowShell = false;
   for (const shell of listLoginShellCandidates(platform, env.SHELL)) {
     try {
-      // Use a non-interactive login shell (-lc) on the synchronous startup path to avoid
-      // blocking for seconds on heavy ~/.zshrc interactive setups; interactive-only PATH
-      // entries are merged asynchronously via refreshPathFromLoginShell.
-      shellEnvironment = readEnvironmentFromLoginShell(shell, LOGIN_SHELL_ENV_NAMES, undefined, {
-        interactive: false,
-      });
+      shellEnvironment = readEnvironmentFromLoginShell(shell, LOGIN_SHELL_ENV_NAMES);
     } catch (error) {
       logPathHydrationWarning(`Failed to read PATH from login shell ${shell}.`, error);
       // A profile can be slow only while the machine boots. Wait for it once,
