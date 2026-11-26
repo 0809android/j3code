@@ -6,9 +6,11 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 
 import {
+  buildWindowsCleanupCommand,
   collectDesktopUninstallCandidates,
   isSafeRemovalPath,
   resolveMacAppBundlePath,
+  windowsServiceTaskCommands,
 } from "./DesktopUninstall.ts";
 
 const T3_DATA_FRAGMENTS = [".t3", "t3code", "T3 Code", "com.t3tools.t3code", "snap-shot@t3.codes"];
@@ -295,3 +297,25 @@ it.layer(NodeServices.layer)("DesktopUninstall path resolution", (it) => {
     }),
   );
 });
+
+it.effect("plans to stop, disable, and delete the Windows background service task", () =>
+  Effect.sync(() => {
+    assert.deepStrictEqual(windowsServiceTaskCommands("k3code-PC-alice"), [
+      ["/End", "/TN", "k3code-PC-alice"],
+      ["/Change", "/TN", "k3code-PC-alice", "/DISABLE"],
+      ["/Delete", "/TN", "k3code-PC-alice", "/F"],
+    ]);
+  }),
+);
+
+it.effect("makes the Windows cleanup wait for the app PID before deleting", () =>
+  Effect.sync(() => {
+    const command = buildWindowsCleanupCommand({ pid: 4242, targetCount: 2 });
+    const wait = command.indexOf('tasklist /FI "PID eq 4242"');
+    assert.isAbove(wait, -1);
+    assert.include(command, "(1,1,15)");
+    assert.isAbove(command.indexOf("rmdir /s /q"), wait);
+    assert.include(command, "K3_UNINSTALL_TARGET_1");
+    assert.notInclude(command, "ping -n 4");
+  }),
+);

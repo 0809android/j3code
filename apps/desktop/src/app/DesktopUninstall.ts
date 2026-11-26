@@ -9,7 +9,9 @@ import {
   K3_MAC_LAUNCH_AGENT_LABELS,
   collectK3SystemPaths,
   filterSafeRemovalPaths,
+  isK3HomeDirectory,
   isSafeRemovalPath as isSafeK3RemovalPath,
+  k3WindowsServiceTaskName,
   type UninstallPathContext,
 } from "@t3tools/shared/uninstallTargets";
 import * as Context from "effect/Context";
@@ -178,6 +180,39 @@ const POSIX_CLEANUP_SCRIPT = [
   "done",
 ].join("\n");
 
+const WINDOWS_PID_WAIT_SECONDS = 15;
+
+/** schtasks invocations that stop, disable, and unregister K3 Code's Windows background service. */
+export function windowsServiceTaskCommands(
+  taskName: string,
+): ReadonlyArray<ReadonlyArray<string>> {
+  return [
+    ["/End", "/TN", taskName],
+    ["/Change", "/TN", taskName, "/DISABLE"],
+    ["/Delete", "/TN", taskName, "/F"],
+  ];
+}
+
+/**
+ * The cmd.exe command line that waits (up to 15 seconds) for `pid` to exit and then deletes each
+ * `K3_UNINSTALL_TARGET_<n>` environment path. Only a tasklist line naming the PID keeps the wait
+ * going, so a localized "no tasks" message ends it.
+ */
+export function buildWindowsCleanupCommand(input: {
+  readonly pid: number;
+  readonly targetCount: number;
+}): string {
+  const waitStep = `for /l %i in (1,1,${WINDOWS_PID_WAIT_SECONDS}) do (tasklist /FI "PID eq ${input.pid}" /NH 2>nul | findstr /C:" ${input.pid} " >nul && ping -n 2 127.0.0.1 >nul)`;
+  const deleteSteps: Array<string> = [];
+  for (let index = 0; index < input.targetCount; index += 1) {
+    const key = `K3_UNINSTALL_TARGET_${index}`;
+    deleteSteps.push(
+      `if exist "%${key}%" (rmdir /s /q "%${key}%" 2>nul || del /f /q "%${key}%" 2>nul)`,
+    );
+  }
+  return `"${waitStep} & ping -n 2 127.0.0.1 >nul & ${deleteSteps.join(" & ")}"`;
+}
+
 /**
  * Spawns a detached OS helper that waits for the Electron app PID to exit and then
  * deletes all scheduled K3 Code paths.
@@ -195,15 +230,13 @@ export function spawnDetachedDesktopCleanup(input: {
         ? (() => {
             const comspec = input.env.ComSpec ?? input.env.COMSPEC ?? "cmd.exe";
             const envVars: Record<string, string> = {};
-            const deleteSteps: Array<string> = [];
             for (const [index, target] of input.paths.entries()) {
-              const key = `K3_UNINSTALL_TARGET_${index}`;
-              envVars[key] = target;
-              deleteSteps.push(
-                `if exist "%${key}%" (rmdir /s /q "%${key}%" 2>nul || del /f /q "%${key}%" 2>nul)`,
-              );
+              envVars[`K3_UNINSTALL_TARGET_${index}`] = target;
             }
-            const command = `"ping -n 4 127.0.0.1 >nul & ${deleteSteps.join(" & ")}"`;
+            const command = buildWindowsCleanupCommand({
+              pid: input.pid,
+              targetCount: input.paths.length,
+            });
             return NodeChildProcess.spawn(comspec, ["/d", "/v:off", "/s", "/c", command], {
               env: { ...process.env, ...envVars },
               windowsVerbatimArguments: true,
@@ -270,6 +303,24 @@ export const make = Effect.gen(function* () {
         .pipe(Effect.flatMap((handle) => handle.exitCode.pipe(Effect.timeout("5 seconds")))),
     ).pipe(Effect.ignore);
 
+  const windowsTaskName = k3WindowsServiceTaskName(env.USERDOMAIN ?? "", env.USERNAME ?? "");
+
+  const hasWindowsServiceTask = Effect.scoped(
+    spawner
+      .spawn(
+        ChildProcess.make("schtasks", ["/Query", "/TN", windowsTaskName], {
+          stdin: "ignore",
+          stdout: "ignore",
+          stderr: "ignore",
+          forceKillAfter: "2 seconds",
+        }),
+      )
+      .pipe(Effect.flatMap((handle) => handle.exitCode.pipe(Effect.timeout("5 seconds")))),
+  ).pipe(
+    Effect.map((code) => Number(code) === 0),
+    Effect.orElseSucceed(() => false),
+  );
+
   const stopBackgroundServices = Effect.gen(function* () {
     if (environment.platform === "darwin") {
       const uid = typeof process.getuid === "function" ? process.getuid() : undefined;
@@ -290,6 +341,10 @@ export const make = Effect.gen(function* () {
         yield* runIgnore("systemctl", ["--user", "disable", "--now", unit]);
       }
       yield* runIgnore("systemctl", ["--user", "daemon-reload"]);
+    } else if (environment.platform === "win32") {
+      for (const args of windowsServiceTaskCommands(windowsTaskName)) {
+        yield* runIgnore("schtasks", args);
+      }
     }
   });
 
@@ -312,14 +367,28 @@ export const make = Effect.gen(function* () {
     });
 
     const existingPaths: Array<string> = [];
+    const resolvedBaseDir = environment.path.resolve(environment.baseDir);
     for (const candidate of candidates.paths) {
-      if (yield* exists(candidate)) {
-        existingPaths.push(candidate);
+      if (!(yield* exists(candidate))) continue;
+      // K3CODE_HOME can point at any folder; only one shaped like a K3 home is removed whole.
+      if (
+        candidate === resolvedBaseDir &&
+        !(yield* isK3HomeDirectory(candidate).pipe(
+          Effect.provideService(Path.Path, environment.path),
+          Effect.provideService(FileSystem.FileSystem, fs),
+        ))
+      ) {
+        yield* logWarning("keeping the base directory: it does not look like a K3 Code home", {
+          baseDir: candidate,
+        });
+        continue;
       }
+      existingPaths.push(candidate);
     }
 
-    let hasBackgroundService = false;
+    let hasBackgroundService = environment.platform === "win32" && (yield* hasWindowsServiceTask);
     for (const unitPath of candidates.serviceUnitPaths) {
+      if (hasBackgroundService) break;
       if (yield* exists(unitPath)) {
         hasBackgroundService = true;
         break;

@@ -1,6 +1,8 @@
 // K3 Code and T3 Code can be installed side by side. Only K3 Code names are listed here, and
 // isSafeRemovalPath additionally refuses anything that equals, contains, or sits inside T3 data.
-import type * as Path from "effect/Path";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 
 export const K3_PRODUCT_NAMES = [
   "K3 Code",
@@ -253,3 +255,36 @@ export function collectK3SystemPaths(
   }
   return candidates;
 }
+
+/** Task Scheduler names are machine-wide, so each Windows account runs its own K3 Code task. */
+export const k3WindowsServiceTaskName = (domain: string, userName: string) =>
+  `k3code-${domain}-${userName}`;
+
+/** Files K3 Code's server keeps in `<home>/userdata`; any one of them marks a K3 home. */
+export const K3_HOME_USERDATA_MARKERS = [
+  "statev2.sqlite",
+  "settings.json",
+  "server-owner.sqlite",
+  "server-runtime.json",
+] as const;
+
+/**
+ * Whether `baseDir` looks like a K3 Code home: a `userdata/` folder holding one of K3 Code's own
+ * stores. `--base-dir` and `K3CODE_HOME` can point anywhere, so a folder of another shape is
+ * never removed as a whole.
+ */
+export const isK3HomeDirectory = Effect.fn("uninstallTargets.isK3HomeDirectory")(function* (
+  baseDir: string,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const userdataDir = path.join(baseDir, "userdata");
+  const info = yield* fs.stat(userdataDir).pipe(Effect.option);
+  if (info._tag === "None" || info.value.type !== "Directory") return false;
+  for (const marker of K3_HOME_USERDATA_MARKERS) {
+    if (yield* fs.exists(path.join(userdataDir, marker)).pipe(Effect.orElseSucceed(() => false))) {
+      return true;
+    }
+  }
+  return false;
+});

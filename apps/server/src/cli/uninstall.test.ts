@@ -1,6 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off - The test observes a real cleanup-shell spawn failure.
 import * as NodeChildProcess from "node:child_process";
 import * as NodePath from "node:path";
+import * as NodeSqlite from "node:sqlite";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as Config from "effect/Config";
@@ -9,6 +10,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as PlatformError from "effect/PlatformError";
 import * as TestConsole from "effect/testing/TestConsole";
 import { Command } from "effect/cli";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -18,9 +20,12 @@ import { afterEach, expect, vi } from "vite-plus/test";
 import packageJson from "../../package.json" with { type: "json" };
 import * as BootService from "../cloud/bootService.ts";
 import { posixLauncherScript } from "../cloud/pinnedRuntime.ts";
+import { serviceTaskName } from "../serviceLauncher.ts";
+import { k3WindowsServiceTaskName } from "@t3tools/shared/uninstallTargets";
 import {
   findOwnedLauncher,
   findRecordedLaunchers,
+  removeBestEffort,
   spawnWindowsRemoval,
   uninstallCommand,
 } from "./uninstall.ts";
@@ -297,6 +302,53 @@ it.layer(Layer.mergeAll(NodeServices.layer, NetService.layer))("t3 uninstall com
       assert.isTrue(yield* fs.exists(t3File));
     }),
   );
+
+  it.effect("refuses --all for a base directory that is not shaped like a K3 Code home", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const homeDir = yield* fs.makeTempDirectoryScoped({ prefix: "k3-uninstall-shape-home-" });
+      const workDir = path.join(homeDir, "work");
+      const repoFile = path.join(workDir, "repo", "src", "index.ts");
+      yield* fs.makeDirectory(path.dirname(repoFile), { recursive: true });
+      yield* fs.writeFileString(repoFile, "export {};");
+
+      const uninstalls: Array<true> = [];
+      vi.spyOn(BootService, "layer").mockReturnValue(bootServiceFor(homeDir, workDir, uninstalls));
+
+      const error = yield* runUninstallAll(homeDir, workDir).pipe(Effect.flip);
+
+      assert.include(String(error), "does not look like a K3 Code home");
+      assert.isTrue(yield* fs.exists(repoFile));
+      assert.deepStrictEqual(uninstalls, []);
+    }),
+  );
+
+  it.effect("refuses --all while a server holds the home's ownership lock", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const homeDir = yield* fs.makeTempDirectoryScoped({ prefix: "k3-uninstall-running-home-" });
+      const baseDir = path.join(homeDir, ".k3code");
+      const stateDir = path.join(baseDir, "userdata");
+      yield* fs.makeDirectory(stateDir, { recursive: true });
+      yield* fs.writeFileString(path.join(stateDir, "statev2.sqlite"), "sqlite");
+      const lock = new NodeSqlite.DatabaseSync(path.join(stateDir, "server-owner.sqlite"));
+      lock.exec("BEGIN EXCLUSIVE;");
+
+      const uninstalls: Array<true> = [];
+      vi.spyOn(BootService, "layer").mockReturnValue(bootServiceFor(homeDir, baseDir, uninstalls));
+
+      const error = yield* runUninstallAll(homeDir, baseDir).pipe(
+        Effect.flip,
+        Effect.ensuring(Effect.sync(() => lock.close())),
+      );
+
+      assert.include(String(error), "Quit it first");
+      assert.isTrue(yield* fs.exists(path.join(stateDir, "statev2.sqlite")));
+      assert.deepStrictEqual(uninstalls, []);
+    }),
+  );
 });
 
 it.layer(NodeServices.layer)("t3 uninstall launcher", (it) => {
@@ -445,4 +497,44 @@ it.live.runIf(HostProcess.Platform.defaultValue() === "win32")(
 
       assert.isFalse(yield* fs.exists(runtimeDir));
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect("keeps removing after one path fails and lists what was left", () => {
+  const removed: Array<string> = [];
+  return Effect.gen(function* () {
+    const failures = yield* removeBestEffort([
+      { path: "/k3/a", describe: "a", recursive: true },
+      { path: "/k3/locked", describe: "the locked one", recursive: true },
+      { path: "/k3/c", describe: "c", recursive: false },
+    ]);
+    assert.deepStrictEqual(failures, ["the locked one"]);
+    assert.deepStrictEqual(removed, ["/k3/a", "/k3/c"]);
+  }).pipe(
+    Effect.provide(
+      Layer.mergeAll(
+        FileSystem.layerNoop({
+          remove: (target) =>
+            target === "/k3/locked"
+              ? Effect.fail(
+                  PlatformError.systemError({
+                    _tag: "PermissionDenied",
+                    module: "FileSystem",
+                    method: "remove",
+                    pathOrDescriptor: target,
+                  }),
+                )
+              : Effect.sync(() => {
+                  removed.push(target);
+                }),
+        }),
+        Layer.fresh(TestConsole.layer),
+      ),
+    ),
+  );
+});
+
+it.effect("the desktop and the service launcher agree on the Windows task name", () =>
+  Effect.sync(() => {
+    assert.equal(k3WindowsServiceTaskName("PC", "alice"), serviceTaskName("PC", "alice"));
+  }),
 );
