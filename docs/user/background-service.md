@@ -162,14 +162,16 @@ For failures after signing in to T3 Connect, see
 
 ## Trim old threads
 
-Tool output and agent reasoning take up most of the space a thread uses. After a
-thread goes 30 days without use, K3 Code deletes its finished tool output and
-reasoning and adds a short note to the thread saying older detail was trimmed.
+Tool output and agent reasoning take up most of the space a thread uses. This is
+off by default, because deleting them can't be undone. Once you turn on **Trim
+old threads** and set a number of days (30 is a good start), K3 Code deletes the
+finished tool output and reasoning of any thread that goes that long without
+use, and adds a short note to the thread saying older detail was trimmed.
 Messages, plans, file changes, attachments and checkpoints stay, so you can
 still read, search and continue the thread. Running, pinned and snoozed threads
 and threads with an open pull request are never trimmed.
 
-Change the days or turn trimming off with **Trim old threads** in Settings >
+Set the days or turn trimming off again with **Trim old threads** in Settings >
 Maintenance. It applies to the whole environment. A pass runs every 30 days;
 **Trim now** shows how many threads qualify and about how much space they use,
 and trims them once you confirm. Trimming can't be undone.

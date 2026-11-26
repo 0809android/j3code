@@ -1361,7 +1361,8 @@ export const StorageCleanupReport = Schema.Struct({
 });
 export type StorageCleanupReport = typeof StorageCleanupReport.Type;
 
-export const DEFAULT_THREAD_HISTORY_AFTER_DAYS = 30;
+/** Deleting history cannot be undone, so it starts only once someone sets days; this is the first value offered. */
+export const SUGGESTED_THREAD_HISTORY_AFTER_DAYS = 30;
 
 /** What a thread-history trim pass removes, or would remove when `dryRun`. */
 export const ThreadHistoryTrimReport = Schema.Struct({
@@ -1396,9 +1397,9 @@ export const StorageCleanupSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
   logsAfterDays: StorageRetentionDays.pipe(Schema.withDecodingDefault(Effect.succeed(null))),
-  /** Days a thread goes unused before its finished tool output and reasoning are deleted; null turns it off. */
+  /** Days a thread goes unused before its finished tool output and reasoning are deleted; null, the default, leaves it off. */
   threadHistoryAfterDays: StorageRetentionDays.pipe(
-    Schema.withDecodingDefault(Effect.succeed(DEFAULT_THREAD_HISTORY_AFTER_DAYS)),
+    Schema.withDecodingDefault(Effect.succeed(null)),
   ),
 });
 export type StorageCleanupSettings = typeof StorageCleanupSettings.Type;

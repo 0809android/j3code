@@ -864,6 +864,17 @@ it.layer(layerTest(0))("ThreadHistoryTrim turned off", (it) => {
       assert.deepEqual(yield* itemTitles(threadId), everyItem);
     }),
   );
+
+  it.effect("never runs the scheduled pass while the setting is off", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(DateTime.toEpochMillis(now));
+      const { threadId } = yield* seedThread("off-scheduled");
+      yield* afterWaiting("6 minutes");
+      yield* afterWaiting("31 days");
+      assert.deepEqual(yield* itemTitles(threadId), everyItem);
+      assert.isNull(yield* lastTrimmedAt);
+    }),
+  );
 });
 
 const lastTrimmedAt = Effect.gen(function* () {
