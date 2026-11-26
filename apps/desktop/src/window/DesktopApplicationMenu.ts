@@ -131,7 +131,7 @@ const checkForUpdatesFromMenu = Effect.gen(function* () {
           : m(msg("K3 Code {version} is ready to install."), { version }),
       detail: m(
         msg(
-          "K3 Code will restart to install it. Running turns pause first and resume after the restart.",
+          "K3 Code will restart to install it. If “Continue threads after restarts” is on, running turns pause first and resume after the restart.",
         ),
       ),
       buttons: [m(msg("Restart", { $context: "button, restarts the app" })), m(msg("Later"))],

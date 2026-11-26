@@ -72,7 +72,7 @@
   "bd6818c7f005654c": "Mise à jour prête",
   "e9ca999de6f2274a": "Une nouvelle version de K3 Code est prête à être installée.",
   "35eeed2f4ff67f4a": "K3 Code {version} est prêt à être installé.",
-  "a37ea30e4318f130": "K3 Code va redémarrer pour l’installer. Les tours en cours sont d’abord mis en pause, puis reprennent après le redémarrage.",
+  "a4c44d12da14ab69": "K3 Code va redémarrer pour l’installer. Si « Poursuivre les fils après un redémarrage » est activé, les tours en cours sont d’abord mis en pause, puis reprennent après le redémarrage.",
   "2f0a8211a72e29aa": "Redémarrer",
   "116a21f6cc215e5f": "Échec de la recherche de mises à jour",
   "32c88cd9421abf33": "Impossible de rechercher des mises à jour.",

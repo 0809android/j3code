@@ -4,6 +4,7 @@ import type { DesktopUpdateState } from "@t3tools/contracts";
 import {
   canCheckForUpdate,
   getDesktopUpdateButtonTooltip,
+  getDesktopUpdateInstallConfirmationMessage,
   getDesktopUpdateReleaseHistoryUrl,
   getDesktopUpdateActionError,
   getDesktopUpdateReleaseUrl,
@@ -175,5 +176,16 @@ describe("canCheckForUpdate", () => {
         downloadedVersion: "1.1.0",
       }),
     ).toBe(true);
+  });
+});
+
+describe("getDesktopUpdateInstallConfirmationMessage", () => {
+  it.each([
+    { availableVersion: "1.1.0", downloadedVersion: null },
+    { availableVersion: null, downloadedVersion: null },
+  ])("only promises a resume when continuing after the update is on (%o)", (state) => {
+    const message = getDesktopUpdateInstallConfirmationMessage(state);
+    expect(message).toContain("If \u201cContinue threads after restarts\u201d is on,");
+    expect(message).not.toMatch(/^Running turns pause first/m);
   });
 });
