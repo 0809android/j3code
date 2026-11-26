@@ -1,6 +1,8 @@
 import type {
+  EnvironmentId,
   StorageCleanupReport,
   StorageCleanupSettings,
+  ThreadHistoryTrimReport,
   WorktreeCleanupRules,
 } from "@t3tools/contracts";
 import { resolvePastedPath } from "@t3tools/shared/path";
@@ -19,6 +21,15 @@ import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { useNowMinute } from "../../hooks/useNowMinute";
 import { useDebouncedValue } from "../../state/queries";
 import { AnimatedHeight } from "../AnimatedHeight";
+import {
+  AlertDialog,
+  AlertDialogClose,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogPopup,
+  AlertDialogTitle,
+} from "../ui/alert-dialog";
 import { Button } from "../ui/button";
 import { toastManager } from "../ui/toast";
 import { msg, T, useGT, useMessages, Var } from "gt-react";
@@ -120,11 +131,13 @@ function RetentionControl({
   value,
   onChange,
   minimum = 1,
+  defaultDays = 8,
 }: {
   label: string;
   value: number | null;
   onChange: (value: number | null, onFailed: () => void) => void;
   minimum?: number;
+  defaultDays?: number;
 }) {
   const gt = useGT();
   const [draft, setDraft] = useState(value);
@@ -257,7 +270,7 @@ function RetentionControl({
         onMouseDown={(event) => event.preventDefault()}
         onCheckedChange={(enabled) => {
           if (enabled) {
-            setDraft(8);
+            setDraft(defaultDays);
             setEnabling("draft");
           } else switchOff();
         }}
@@ -557,6 +570,251 @@ function CleanupSection() {
           )}
         </FoldedSettingsSection>
       )}
+    </SettingsSection>
+  );
+}
+
+const threadHistoryTrimPermissionsAtom = environmentAtomList(
+  "web-thread-history-trim-permissions",
+  serverEnvironment.trimThreadHistory.permissionAtom,
+);
+const threadHistoryTrimStatusAtom = environmentAtomList(
+  "web-thread-history-trim-status",
+  (environmentId) => serverEnvironment.threadHistoryTrim({ environmentId, input: {} }),
+);
+
+const formatTrimDate = (iso: string) =>
+  new Date(iso).toLocaleDateString(undefined, { dateStyle: "medium" });
+
+interface TrimTarget {
+  readonly environmentId: EnvironmentId;
+  readonly label: string;
+}
+
+function ThreadHistorySection() {
+  const gt = useGT();
+  const setting = useSearchableSetting();
+  const { connectedEnvironments, targets } = useSettingsScope();
+  const scopedSettings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  const settings = scopedSettings.storageCleanup;
+  const preview = useAtomCommand(serverEnvironment.previewThreadHistoryTrim);
+  const trim = useAtomCommand(serverEnvironment.trimThreadHistory);
+  const nowMinute = useNowMinute();
+  const nowMs = Date.parse(`${nowMinute}:00.000Z`);
+  const environmentIds = environmentIdsKey(
+    connectedEnvironments.map(({ environmentId }) => environmentId),
+  );
+  const permissions = useAtomValue(threadHistoryTrimPermissionsAtom(environmentIds));
+  const statuses = useAtomValue(threadHistoryTrimStatusAtom(environmentIds));
+  const [pending, setPending] = useState<"preview" | "trim" | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirming, setConfirming] = useState<ReadonlyArray<{
+    readonly target: TrimTarget;
+    readonly report: ThreadHistoryTrimReport;
+  }> | null>(null);
+  const targetIdsKey = environmentIdsKey(targets.map((target) => target.environmentId).sort());
+  const mixed =
+    targets.length > 1 &&
+    targets.some(
+      (target) =>
+        target.settings.storageCleanup.threadHistoryAfterDays !== settings.threadHistoryAfterDays,
+    );
+  const settledMixed = useDebouncedValue(`${targetIdsKey}:${mixed}`, 300);
+  const mixedStatus =
+    targets.length > 1 && settledMixed === `${targetIdsKey}:true`
+      ? gt("Mixed across selected machines")
+      : undefined;
+
+  const supported = connectedEnvironments.filter(
+    (environment) => environment.serverConfig?.environment.capabilities.threadHistoryTrim === true,
+  );
+  const runnable = supported.filter(
+    (environment) =>
+      permissions[connectedEnvironments.indexOf(environment)] === true &&
+      environment.serverConfig?.settings.storageCleanup.threadHistoryAfterDays != null,
+  );
+  const schedule = supported.flatMap((environment) => {
+    const query = statuses[connectedEnvironments.indexOf(environment)];
+    if (query?._tag !== "Success") return [];
+    if (environment.serverConfig?.settings.storageCleanup.threadHistoryAfterDays == null) return [];
+    const { lastTrimmedAt, nextTrimAt } = query.value;
+    const text =
+      lastTrimmedAt === null || nextTrimAt === null
+        ? gt("Not trimmed yet. The first pass runs a few minutes after the server starts.")
+        : Date.parse(nextTrimAt) <= nowMs
+          ? gt("Last trimmed {last}. The next pass is due.", {
+              last: formatTrimDate(lastTrimmedAt),
+            })
+          : gt("Last trimmed {last}. Next pass {next}.", {
+              last: formatTrimDate(lastTrimmedAt),
+              next: formatTrimDate(nextTrimAt),
+            });
+    const label = settingsScopeEnvironmentLabel(environment, connectedEnvironments);
+    return [
+      {
+        environmentId: environment.environmentId,
+        text: connectedEnvironments.length > 1 ? `${label}: ${text}` : text,
+      },
+    ];
+  });
+
+  const runOn = async (
+    command: typeof trim,
+    list: ReadonlyArray<TrimTarget>,
+    failureTitle: (label: string) => string,
+  ) => {
+    const results = await Promise.all(
+      list.map(async (target) => {
+        const result = await command({ environmentId: target.environmentId, input: {} });
+        if (result._tag === "Success") return { target, report: result.value };
+        if (!isAtomCommandInterrupted(result)) {
+          toastManager.add({
+            type: "error",
+            title: failureTitle(target.label),
+            description: String(squashAtomCommandFailure(result)),
+          });
+        }
+        return null;
+      }),
+    );
+    return results.filter((result) => result !== null);
+  };
+  const runnableTargets = runnable.map((environment) => ({
+    environmentId: environment.environmentId,
+    label: environment.label,
+  }));
+
+  const checkTrim = async () => {
+    setPending("preview");
+    const results = await runOn(preview, runnableTargets, (label) =>
+      gt("Could not check old threads on {label}", { label }),
+    ).finally(() => setPending(null));
+    if (results.length === 0) return;
+    setConfirming(results);
+    setConfirmOpen(true);
+  };
+
+  const confirmTrim = async () => {
+    const list = (confirming ?? [])
+      .filter(({ report }) => report.threadCount > 0)
+      .map(({ target }) => target);
+    setConfirmOpen(false);
+    setPending("trim");
+    const results = await runOn(trim, list, (label) =>
+      gt("Could not trim threads on {label}", { label }),
+    ).finally(() => setPending(null));
+    if (results.length === 0) return;
+    const count = results.reduce((sum, { report }) => sum + report.threadCount, 0);
+    toastManager.add({
+      type: "success",
+      title: gt("{count, plural, one {Trimming {count} thread} other {Trimming {count} threads}}", {
+        count,
+      }),
+      description: gt("About {size} of tool output and reasoning is being removed.", {
+        size: formatBytes(results.reduce((sum, { report }) => sum + report.estimatedBytes, 0)),
+      }),
+    });
+  };
+
+  const threadCount = (confirming ?? []).reduce((sum, { report }) => sum + report.threadCount, 0);
+  const size = formatBytes(
+    (confirming ?? []).reduce((sum, { report }) => sum + report.estimatedBytes, 0),
+  );
+  const update = (patch: Partial<StorageCleanupSettings>, options: SaveOptions) =>
+    updateSettings({ storageCleanup: patch }, options);
+
+  return (
+    <SettingsSection id="storage-thread-history" title={gt("Thread history")}>
+      <AnimatedHeight>
+        <SettingsRow
+          title={setting("storage-thread-history").title}
+          status={mixedStatus}
+          managedPaths={["storageCleanup.threadHistoryAfterDays"]}
+          description={gt(
+            "After this many days without use, a thread's finished tool output and reasoning are deleted to save space. Messages, plans, file changes and attachments stay, and you can still search and continue the thread. Running, pinned and snoozed threads and threads with an open pull request are skipped.",
+          )}
+          serverScoped
+          control={
+            <RetentionControl
+              label={gt("Trim old threads")}
+              value={settings.threadHistoryAfterDays}
+              defaultDays={30}
+              onChange={(threadHistoryAfterDays, onFailed) =>
+                update({ threadHistoryAfterDays }, { onFailed })
+              }
+            />
+          }
+        />
+      </AnimatedHeight>
+      <SettingsRow
+        title={gt("Trim now")}
+        description={
+          <>
+            {gt("Shows how many threads qualify, then deletes their old output once you confirm.")}
+            {schedule.map(({ environmentId, text }) => (
+              <span key={environmentId} className="block">
+                {text}
+              </span>
+            ))}
+          </>
+        }
+        control={
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={pending !== null || runnable.length === 0}
+              onClick={() => void checkTrim()}
+            >
+              {pending === "preview"
+                ? gt("Checking…")
+                : pending === "trim"
+                  ? gt("Trimming…")
+                  : gt("Trim now")}
+            </Button>
+            <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+              <AlertDialogPopup>
+                {threadCount > 0 ? (
+                  <>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>{gt("Trim old threads?")}</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        {gt(
+                          "{count, plural, one {Delete tool output and reasoning from {count} unused thread, about {size}? Messages, plans, file changes and attachments are kept. This can't be undone.} other {Delete tool output and reasoning from {count} unused threads, about {size}? Messages, plans, file changes and attachments are kept. This can't be undone.}}",
+                          { count: threadCount, size },
+                        )}
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogClose render={<Button variant="outline" />}>
+                        {gt("Cancel")}
+                      </AlertDialogClose>
+                      <Button variant="destructive" onClick={() => void confirmTrim()}>
+                        {gt("Trim threads")}
+                      </Button>
+                    </AlertDialogFooter>
+                  </>
+                ) : (
+                  <>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>{gt("Nothing to trim")}</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        {gt("No threads have gone unused long enough yet.")}
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogClose render={<Button variant="outline" />}>
+                        {gt("Close")}
+                      </AlertDialogClose>
+                    </AlertDialogFooter>
+                  </>
+                )}
+              </AlertDialogPopup>
+            </AlertDialog>
+          </>
+        }
+      />
     </SettingsSection>
   );
 }
@@ -912,10 +1170,19 @@ export function StorageCleanupSections() {
       )}
     />
   );
+  const threadHistory =
+    connectedEnvironments.length > 0 &&
+    connectedEnvironments.every(
+      (environment) =>
+        environment.serverConfig?.environment.capabilities.threadHistoryTrim === true,
+    ) ? (
+      <ThreadHistorySection />
+    ) : null;
   if (!supportsStorageCleanup(connectedEnvironments)) {
     return (
       <>
         {databaseStorageNotice}
+        {threadHistory}
         <SettingsSection id="storage-artifacts" title={gt("Artifacts and logs")} variant="plain">
           <StorageCleanupScopeNotice />
         </SettingsSection>
@@ -926,6 +1193,7 @@ export function StorageCleanupSections() {
   return (
     <>
       {databaseStorageNotice}
+      {threadHistory}
       <SettingsSection id="storage-artifacts" title={gt("Artifacts and logs")}>
         <AnimatedHeight>
           <SettingsRow
