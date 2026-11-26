@@ -7,6 +7,7 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 import {
   K3_LINUX_SYSTEMD_UNITS,
   K3_MAC_LAUNCH_AGENT_LABELS,
+  POSIX_CLEANUP_SCRIPT,
   buildWindowsWaitAndRemoveCommand,
   collectK3SystemPaths,
   filterSafeRemovalPaths,
@@ -168,18 +169,14 @@ export function collectDesktopUninstallCandidates(input: {
   };
 }
 
-const POSIX_CLEANUP_SCRIPT = [
-  'pid="$1"',
-  "shift",
-  "i=0",
-  'while [ "$i" -lt 150 ] && kill -0 "$pid" 2>/dev/null; do',
-  "  sleep 0.1",
-  "  i=$((i + 1))",
-  "done",
-  'for target in "$@"; do',
-  '  [ -n "$target" ] && rm -rf -- "$target" 2>/dev/null || true',
-  "done",
-].join("\n");
+// electron-builder names the NSIS uninstaller `Uninstall <productFilename>.exe` in the install
+// directory; the product name carries the channel, e.g. `Uninstall K3 Code (Beta).exe`.
+const NSIS_UNINSTALLER_PATTERN = /^Uninstall K3 Code.*\.exe$/i;
+
+/** The NSIS uninstaller among the install directory's entries, if there is one. */
+export function findNsisUninstallerName(entries: ReadonlyArray<string>): string | undefined {
+  return entries.find((entry) => NSIS_UNINSTALLER_PATTERN.test(entry));
+}
 
 /** schtasks invocations that stop, disable, and unregister K3 Code's Windows background service. */
 export function windowsServiceTaskCommands(
@@ -196,6 +193,7 @@ export function windowsServiceTaskCommands(
 export function buildWindowsCleanupCommand(input: {
   readonly pid: number;
   readonly targetCount: number;
+  readonly withUninstaller?: boolean;
 }): string {
   return buildWindowsWaitAndRemoveCommand({
     pid: input.pid,
@@ -203,6 +201,15 @@ export function buildWindowsCleanupCommand(input: {
       { length: input.targetCount },
       (_, index) => `K3_UNINSTALL_TARGET_${index}`,
     ),
+    logPathEnvName: "K3_UNINSTALL_LOG",
+    ...(input.withUninstaller === true
+      ? {
+          uninstaller: {
+            exePathEnvName: "K3_UNINSTALL_NSIS_EXE",
+            dirPathEnvName: "K3_UNINSTALL_NSIS_DIR",
+          },
+        }
+      : {}),
   });
 }
 
@@ -214,21 +221,29 @@ export function spawnDetachedDesktopCleanup(input: {
   readonly platform: NodeJS.Platform;
   readonly pid: number;
   readonly paths: ReadonlyArray<string>;
+  readonly logPath: string;
+  /** Windows install directory and its NSIS uninstaller, run last; the folder is removed after. */
+  readonly nsisUninstaller?: { readonly exePath: string; readonly installDir: string };
   readonly env: Readonly<Record<string, string | undefined>>;
 }): Effect.Effect<void, DesktopUninstallError> {
-  if (input.paths.length === 0) return Effect.void;
+  if (input.paths.length === 0 && input.nsisUninstaller === undefined) return Effect.void;
   return Effect.callback<void, DesktopUninstallError>((resume) => {
     const child =
       input.platform === "win32"
         ? (() => {
             const comspec = input.env.ComSpec ?? input.env.COMSPEC ?? "cmd.exe";
-            const envVars: Record<string, string> = {};
+            const envVars: Record<string, string> = { K3_UNINSTALL_LOG: input.logPath };
+            if (input.nsisUninstaller !== undefined) {
+              envVars.K3_UNINSTALL_NSIS_EXE = input.nsisUninstaller.exePath;
+              envVars.K3_UNINSTALL_NSIS_DIR = input.nsisUninstaller.installDir;
+            }
             for (const [index, target] of input.paths.entries()) {
               envVars[`K3_UNINSTALL_TARGET_${index}`] = target;
             }
             const command = buildWindowsCleanupCommand({
               pid: input.pid,
               targetCount: input.paths.length,
+              withUninstaller: input.nsisUninstaller !== undefined,
             });
             return NodeChildProcess.spawn(comspec, ["/d", "/v:off", "/s", "/c", command], {
               env: { ...process.env, ...envVars },
@@ -240,7 +255,14 @@ export function spawnDetachedDesktopCleanup(input: {
           })()
         : NodeChildProcess.spawn(
             "/bin/sh",
-            ["-c", POSIX_CLEANUP_SCRIPT, "k3-desktop-uninstall", String(input.pid), ...input.paths],
+            [
+              "-c",
+              POSIX_CLEANUP_SCRIPT,
+              "k3-desktop-uninstall",
+              String(input.pid),
+              input.logPath,
+              ...input.paths,
+            ],
             {
               detached: true,
               stdio: "ignore",
@@ -439,11 +461,35 @@ export const make = Effect.gen(function* () {
       { concurrency: "unbounded" },
     );
 
-    // 4. Spawn detached cleanup helper that deletes all K3 Code paths once Electron exits.
+    // 4. Spawn detached cleanup helper that deletes all K3 Code paths once Electron exits. A
+    // packaged Windows install is removed through its NSIS uninstaller, last, so the registry
+    // entry and shortcuts go with it; without one the folder is deleted like any other path.
+    const installDir = plan.appBundlePath;
+    const uninstallerName =
+      environment.platform === "win32" && installDir !== null
+        ? findNsisUninstallerName(
+            yield* fs.readDirectory(installDir).pipe(Effect.orElseSucceed(() => [])),
+          )
+        : undefined;
+    const nsisUninstaller =
+      installDir !== null && uninstallerName !== undefined
+        ? {
+            exePath: environment.path.join(installDir, uninstallerName),
+            installDir,
+          }
+        : undefined;
     yield* spawnDetachedDesktopCleanup({
       platform: environment.platform,
       pid: process.pid,
-      paths: plan.paths,
+      paths:
+        nsisUninstaller === undefined
+          ? plan.paths
+          : plan.paths.filter((target) => target !== nsisUninstaller.installDir),
+      logPath: environment.path.join(
+        env.TMPDIR ?? env.TEMP ?? env.TMP ?? "/tmp",
+        "k3code-uninstall.log",
+      ),
+      ...(nsisUninstaller === undefined ? {} : { nsisUninstaller }),
       env,
     });
 

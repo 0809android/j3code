@@ -5,9 +5,12 @@ import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 
+import { POSIX_CLEANUP_SCRIPT } from "@t3tools/shared/uninstallTargets";
+
 import {
   buildWindowsCleanupCommand,
   collectDesktopUninstallCandidates,
+  findNsisUninstallerName,
   isSafeRemovalPath,
   resolveMacAppBundlePath,
   windowsServiceTaskCommands,
@@ -313,9 +316,66 @@ it.effect("makes the Windows cleanup wait for the app PID before deleting", () =
     const command = buildWindowsCleanupCommand({ pid: 4242, targetCount: 2 });
     const wait = command.indexOf('tasklist /FI "PID eq 4242"');
     assert.isAbove(wait, -1);
-    assert.include(command, "(1,1,15)");
+    assert.include(command, "(1,1,60)");
     assert.isAbove(command.indexOf("rmdir /s /q"), wait);
     assert.include(command, "K3_UNINSTALL_TARGET_1");
     assert.notInclude(command, "ping -n 4");
+  }),
+);
+
+it.effect("makes the Windows cleanup delete nothing when the app PID outlives the wait", () =>
+  Effect.sync(() => {
+    const command = buildWindowsCleanupCommand({ pid: 4242, targetCount: 2 });
+    const abort = command.indexOf("exit 1");
+    assert.isAbove(abort, command.indexOf("(1,1,60)"));
+    assert.isBelow(abort, command.indexOf("rmdir /s /q"));
+    assert.include(command, '>>"%K3_UNINSTALL_LOG%"');
+  }),
+);
+
+it.effect("makes the POSIX cleanup give up with a log line instead of deleting after the wait", () =>
+  Effect.sync(() => {
+    assert.include(POSIX_CLEANUP_SCRIPT, "-lt 600");
+    const abort = POSIX_CLEANUP_SCRIPT.indexOf("exit 1");
+    assert.isAbove(abort, POSIX_CLEANUP_SCRIPT.indexOf("done"));
+    assert.isBelow(abort, POSIX_CLEANUP_SCRIPT.indexOf("rm -rf"));
+    assert.include(POSIX_CLEANUP_SCRIPT, '>> "$log"');
+  }),
+);
+
+it.effect("runs the NSIS uninstaller silently after the deletions, then clears the folder", () =>
+  Effect.sync(() => {
+    const command = buildWindowsCleanupCommand({
+      pid: 4242,
+      targetCount: 1,
+      withUninstaller: true,
+    });
+    const data = command.indexOf("K3_UNINSTALL_TARGET_0");
+    const uninstaller = command.indexOf('start "" /wait "%K3_UNINSTALL_NSIS_EXE%" /S _?=');
+    assert.isAbove(uninstaller, data);
+    assert.include(command, 'if exist "%K3_UNINSTALL_NSIS_EXE%"');
+    assert.isAbove(command.lastIndexOf('rmdir /s /q "%K3_UNINSTALL_NSIS_DIR%"'), uninstaller);
+  }),
+);
+
+it.effect("leaves the uninstaller step out when the install folder has none", () =>
+  Effect.sync(() => {
+    const command = buildWindowsCleanupCommand({ pid: 4242, targetCount: 1 });
+    assert.notInclude(command, "/wait");
+    assert.notInclude(command, "K3_UNINSTALL_NSIS");
+  }),
+);
+
+it.effect("finds electron-builder's NSIS uninstaller by name", () =>
+  Effect.sync(() => {
+    assert.strictEqual(
+      findNsisUninstallerName(["K3 Code (Beta).exe", "Uninstall K3 Code (Beta).exe", "d3d.dll"]),
+      "Uninstall K3 Code (Beta).exe",
+    );
+    assert.strictEqual(
+      findNsisUninstallerName(["Uninstall K3 Code.exe"]),
+      "Uninstall K3 Code.exe",
+    );
+    assert.isUndefined(findNsisUninstallerName(["K3 Code.exe", "Uninstall T3 Code.exe"]));
   }),
 );

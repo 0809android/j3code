@@ -17,6 +17,8 @@ import {
   filterSafeRemovalPaths,
   isK3HomeDirectory,
   isSafeRemovalPath,
+  K3_APP_DATA_PROFILE_NAMES,
+  resolveAppDataDirectory,
 } from "@t3tools/shared/uninstallTargets";
 import * as BootService from "../cloud/bootService.ts";
 import {
@@ -326,6 +328,69 @@ export const ensureNoRunningServer = Effect.fn("cli.uninstall.ensure_no_running_
   },
 );
 
+const pidIsAlive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error instanceof Error && "code" in error && error.code === "EPERM";
+  }
+};
+
+/**
+ * Whether Electron is running on this user-data folder. Chromium marks it with a `SingletonLock`
+ * symlink (`<host>-<pid>`) on macOS and Linux, and holds `lockfile` open on Windows. Nothing is
+ * created: a missing marker means not running.
+ */
+export const desktopUserDataInUse = Effect.fn("cli.uninstall.desktop_user_data_in_use")(function* (
+  userDataDir: string,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const platform = yield* HostProcess.Platform;
+  if (platform === "win32") {
+    const lockfile = path.join(userDataDir, "lockfile");
+    if (!(yield* fs.exists(lockfile).pipe(Effect.orElseSucceed(() => false)))) return false;
+    // Chromium opens it without sharing, so a held lock refuses even this read-write open.
+    return yield* Effect.scoped(fs.open(lockfile, { flag: "r+" })).pipe(
+      Effect.as(false),
+      Effect.orElseSucceed(() => true),
+    );
+  }
+  const target = yield* fs
+    .readLink(path.join(userDataDir, "SingletonLock"))
+    .pipe(Effect.orElseSucceed(() => undefined));
+  if (target === undefined) return false;
+  const pid = Number(/-(\d+)$/.exec(target)?.[1]);
+  return Number.isInteger(pid) && pid > 0 && pidIsAlive(pid);
+});
+
+/**
+ * Before `--all` deletes the desktop app's folders, makes sure the desktop app is not running on
+ * another home. A `--base-dir` or `K3CODE_HOME` that points elsewhere (or nowhere) skips the check
+ * on the home being removed, yet the app data, caches, and app bundle are shared by every home.
+ */
+export const ensureNoRunningDesktop = Effect.fn("cli.uninstall.ensure_no_running_desktop")(
+  function* (input: { readonly baseDirs: ReadonlyArray<string> }) {
+    const path = yield* Path.Path;
+    const platform = yield* HostProcess.Platform;
+    const homeDir = yield* HostProcess.HomeDirectory;
+    const env = yield* HostProcess.Environment;
+    for (const baseDir of input.baseDirs) {
+      yield* ensureNoRunningServer({ baseDir, serviceWillBeRemoved: false });
+    }
+    const appData = resolveAppDataDirectory({ path, platform, homeDirectory: homeDir, env });
+    for (const name of K3_APP_DATA_PROFILE_NAMES) {
+      const userDataDir = path.join(appData, name);
+      if (yield* desktopUserDataInUse(userDataDir)) {
+        return yield* new CliUninstallError({
+          reason: `The K3 Code desktop app is running (it holds ${userDataDir}). Quit it first, then run uninstall again. Nothing was removed.`,
+        });
+      }
+    }
+  },
+);
+
 interface RemovalTarget {
   readonly path: string;
   readonly describe: string;
@@ -401,11 +466,23 @@ const runUninstall = Effect.fn("cli.uninstall.run")(function* (input: {
   readonly assumeYes: boolean;
 }) {
   const platform = yield* HostProcess.Platform;
+  const path = yield* Path.Path;
+  const homeDir = yield* HostProcess.HomeDirectory;
   const environment = yield* HostProcess.Environment;
   const service = yield* BootService.BootService;
   const plan = yield* planUninstall({ baseDir: input.baseDir, complete: input.complete });
   if (input.complete && plan.baseDir !== undefined) {
     yield* ensureNoRunningServer({ baseDir: plan.baseDir, serviceWillBeRemoved: plan.service });
+  }
+  if (input.complete && plan.completePaths.length > 0) {
+    // The desktop app's data, caches, and bundle go too, whichever home it runs on.
+    const defaultHome = path.join(homeDir, ".k3code");
+    yield* ensureNoRunningDesktop({
+      baseDirs:
+        plan.baseDir !== undefined && path.resolve(plan.baseDir) === path.resolve(defaultHome)
+          ? []
+          : [defaultHome],
+    });
   }
 
   const hasNothing =
