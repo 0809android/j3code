@@ -1,5 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult } from "effect/reactivity";
 import { msg, T, useGT, useMessages, Var } from "gt-react-native";
 import { useNavigation } from "@react-navigation/native";
 import { SettingsRow } from "./components/SettingsRow";
@@ -7,6 +7,7 @@ import { AuthSettingsWriteScope, type EnvironmentId } from "@t3tools/contracts";
 import { readEnvironmentScope, useEnvironmentsWithScope } from "../../state/session";
 import { useEnvironments } from "../../state/environments";
 import { mobilePreferencesAtom, saveMobilePreferences } from "../../state/preferences";
+import { useAtomCommand } from "../../state/use-atom-command";
 import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
 import { AppText as Text } from "../../components/ui/AppText";
 import {
@@ -199,8 +200,9 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
   const defaultThreadEnvironmentId = AsyncResult.isSuccess(preferencesResult)
     ? (preferencesResult.value.defaultThreadEnvironmentId ?? null)
     : null;
+  const savePreferences = useAtomCommand(saveMobilePreferences);
   const setDefaultThreadEnvironmentId = (environmentId: EnvironmentId | null) => {
-    void saveMobilePreferences({ defaultThreadEnvironmentId: environmentId });
+    void savePreferences({ defaultThreadEnvironmentId: environmentId });
   };
   const selectedProject = projectGroups.find((group) => group.key === selectedProjectKey);
   const writableEnvironments = useEnvironmentsWithScope(selectedTargets, AuthSettingsWriteScope);

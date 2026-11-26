@@ -1,11 +1,5 @@
-/**
- * What a complete uninstall of K3 Code may delete.
- *
- * K3 Code is a fork of T3 Code and the two can be installed side by side. Every name below is a
- * K3 Code name; T3 Code's data (~/.t3, "t3code*" profiles, com.t3tools.t3code) is never listed and
- * is additionally refused by `isSafeRemovalPath`, so a mistyped home or a configured base
- * directory that points at T3 Code cannot delete it.
- */
+// K3 Code and T3 Code can be installed side by side. Only K3 Code names are listed here, and
+// isSafeRemovalPath additionally refuses anything that equals, contains, or sits inside T3 data.
 import type * as Path from "effect/Path";
 
 export const K3_PRODUCT_NAMES = [
@@ -217,7 +211,7 @@ export function filterSafeRemovalPaths(
   return safe;
 }
 
-/** The OS-level folders and files that belong only to K3 Code (before existence and safety checks). */
+/** OS-level folders and files that belong only to K3 Code, before existence checks. */
 export function collectK3SystemPaths(
   context: UninstallPathContext,
   options: { readonly includeAppBundles: boolean },

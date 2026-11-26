@@ -198,7 +198,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NetService.layer))("t3 uninstall com
     );
 
   it.effect(
-    "removes only K3 Code's baseDir, caches, app data, and desktop shim with --all --yes, never T3 Code's",
+    "--all --yes removes K3 Code's data and desktop shim but never T3 Code's",
     () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
