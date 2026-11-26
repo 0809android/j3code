@@ -273,6 +273,17 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: [msg("storage cleanup run now results report removed kept failed")],
   },
   {
+    id: "storage-thread-history",
+    title: msg("Trim old threads"),
+    to: "/settings/maintenance",
+    scope: "environment-defaults",
+    searchTerms: [
+      msg(
+        "storage disk database space history tool output reasoning idle unused days trim now delete",
+      ),
+    ],
+  },
+  {
     id: "storage-worktrees",
     title: msg("Worktree cleanup"),
     to: "/settings/worktrees",

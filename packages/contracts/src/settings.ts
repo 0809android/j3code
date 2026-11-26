@@ -1365,6 +1365,26 @@ export const StorageCleanupReport = Schema.Struct({
 });
 export type StorageCleanupReport = typeof StorageCleanupReport.Type;
 
+export const DEFAULT_THREAD_HISTORY_AFTER_DAYS = 30;
+
+/** What a thread-history trim pass removes, or would remove when `dryRun`. */
+export const ThreadHistoryTrimReport = Schema.Struct({
+  dryRun: Schema.Boolean,
+  afterDays: Schema.Int,
+  threadCount: Schema.Int,
+  itemCount: Schema.Int,
+  /** Stored size of the removed rows; the file shrinks by about this once free pages are reclaimed. */
+  estimatedBytes: Schema.Number,
+});
+export type ThreadHistoryTrimReport = typeof ThreadHistoryTrimReport.Type;
+
+/** ISO times. A pass runs every 30 days; both are null until the first one finishes. */
+export const ThreadHistoryTrimStatus = Schema.Struct({
+  lastTrimmedAt: Schema.NullOr(Schema.String),
+  nextTrimAt: Schema.NullOr(Schema.String),
+});
+export type ThreadHistoryTrimStatus = typeof ThreadHistoryTrimStatus.Type;
+
 export const StorageCleanupSettings = Schema.Struct({
   worktreeKeepWhen: WorktreeKeepWhen.pipe(
     Schema.withDecodingDefault(Effect.succeed("uncommitted-changes")),
@@ -1380,6 +1400,10 @@ export const StorageCleanupSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
   logsAfterDays: StorageRetentionDays.pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  /** Days a thread goes unused before its finished tool output and reasoning are deleted; null turns it off. */
+  threadHistoryAfterDays: StorageRetentionDays.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_THREAD_HISTORY_AFTER_DAYS)),
+  ),
 });
 export type StorageCleanupSettings = typeof StorageCleanupSettings.Type;
 
@@ -1899,6 +1923,7 @@ export const ServerSettingsPatch = Schema.Struct({
       worktreeUnchanged: Schema.optionalKey(Schema.Boolean),
       browserArtifactsAfterDays: Schema.optionalKey(StorageRetentionDays),
       logsAfterDays: Schema.optionalKey(StorageRetentionDays),
+      threadHistoryAfterDays: Schema.optionalKey(StorageRetentionDays),
     }),
   ),
   worktreesDirectory: Schema.optionalKey(TrimmedString),

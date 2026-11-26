@@ -41,6 +41,8 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.serverRunStorageCleanup]: AuthSettingsWriteScope,
   // Restarts the server, as an update does.
   [WS_METHODS.serverReclaimDatabaseSpace]: AuthEnvironmentMaintainScope,
+  // Deletes stored history, which no settings write can undo.
+  [WS_METHODS.serverTrimThreadHistory]: AuthEnvironmentMaintainScope,
   [WS_METHODS.serverCheckOtlpEndpoint]: AuthSettingsWriteScope,
   [WS_METHODS.serverCheckSecretSource]: AuthSettingsWriteScope,
   [WS_METHODS.legacyImportRun]: AuthSettingsWriteScope,

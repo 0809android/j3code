@@ -160,6 +160,23 @@ Downloads, it may need Full Disk Access for the `t3` executable listed in
 For failures after signing in to T3 Connect, see
 [connection troubleshooting](./t3-connect-troubleshooting.md).
 
+## Trim old threads
+
+Tool output and agent reasoning take up most of the space a thread uses. After a
+thread goes 30 days without use, K3 Code deletes its finished tool output and
+reasoning and adds a short note to the thread saying older detail was trimmed.
+Messages, plans, file changes, attachments and checkpoints stay, so you can
+still read, search and continue the thread. Running, pinned and snoozed threads
+and threads with an open pull request are never trimmed.
+
+Change the days or turn trimming off with **Trim old threads** in Settings >
+Maintenance. It applies to the whole environment. A pass runs every 30 days;
+**Trim now** shows how many threads qualify and about how much space they use,
+and trims them once you confirm. Trimming can't be undone.
+
+On databases created before automatic shrinking, the database file keeps its
+size until you [reclaim database space](#reclaim-database-space).
+
 ## Reclaim database space
 
 K3 Code removes internal history older than a day on its own while it runs;
