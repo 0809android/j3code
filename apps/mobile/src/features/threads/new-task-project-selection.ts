@@ -226,6 +226,8 @@ export function newTaskDestination(options: {
   readonly useLastProject: boolean | undefined;
   readonly currentProject: ProjectRef | undefined;
   readonly filteredProject: ProjectRef | undefined;
+  /** The machine chosen in settings: with no current or filtered project, its projects come first. */
+  readonly defaultEnvironmentId?: EnvironmentId | null | undefined;
   readonly lastProject: ProjectRef | undefined;
 }) {
   const find = (ref: ProjectRef | undefined) =>
@@ -235,11 +237,20 @@ export function newTaskDestination(options: {
     );
   // A remembered project that was archived since opens the picker; the current one still wins.
   const last = find(options.lastProject);
+  const onDefaultEnvironment = options.defaultEnvironmentId
+    ? options.projects.filter(
+        (candidate) =>
+          candidate.environmentId === options.defaultEnvironmentId && candidate.archivedAt == null,
+      )
+    : [];
+  const lastOnDefaultEnvironment = onDefaultEnvironment.find((candidate) => candidate === last);
   const project =
     options.useLastProject === false
       ? undefined
       : (find(options.currentProject) ??
         find(options.filteredProject) ??
+        lastOnDefaultEnvironment ??
+        onDefaultEnvironment[0] ??
         (last?.archivedAt == null ? last : undefined));
   return project
     ? {

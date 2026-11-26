@@ -281,6 +281,7 @@ describe("newTaskDestination", () => {
     readonly current?: EnvironmentProject;
     readonly filtered?: EnvironmentProject;
     readonly last?: { readonly environmentId: string; readonly projectId: string };
+    readonly defaultEnvironmentId?: string;
   }) {
     return newTaskDestination({
       projects: options.projects,
@@ -294,9 +295,73 @@ describe("newTaskDestination", () => {
         environmentId: options.filtered.environmentId,
         projectId: options.filtered.id,
       },
+      defaultEnvironmentId: options.defaultEnvironmentId
+        ? EnvironmentId.make(options.defaultEnvironmentId)
+        : null,
       lastProject: options.last,
     });
   }
+
+  it("starts on the default machine without a thread-list filter", () => {
+    const projects = [
+      makeProject("elsewhere", "other-environment"),
+      makeProject("first", "environment"),
+      makeProject("second", "environment"),
+    ];
+    expect(
+      destination({ useLastProject: true, projects, defaultEnvironmentId: "environment" }),
+    ).toEqual({ draft: { requestId: "request", environmentId: "environment", projectId: "first" } });
+    expect(
+      destination({
+        useLastProject: true,
+        projects,
+        defaultEnvironmentId: "environment",
+        last: { environmentId: "environment", projectId: "second" },
+      }),
+    ).toEqual({
+      draft: { requestId: "request", environmentId: "environment", projectId: "second" },
+    });
+  });
+
+  it("prefers the default machine over a remembered project on another machine", () => {
+    const projects = [makeProject("remembered", "other-environment"), makeProject("here")];
+    expect(
+      destination({
+        useLastProject: true,
+        projects,
+        defaultEnvironmentId: "environment",
+        last: { environmentId: "other-environment", projectId: "remembered" },
+      }),
+    ).toEqual({ draft: { requestId: "request", environmentId: "environment", projectId: "here" } });
+  });
+
+  it("keeps the current project ahead of the default machine", () => {
+    const projects = [makeProject("default"), makeProject("current", "other-environment")];
+    expect(
+      destination({
+        useLastProject: true,
+        projects,
+        current: projects[1],
+        defaultEnvironmentId: "environment",
+      }),
+    ).toEqual({
+      draft: { requestId: "request", environmentId: "other-environment", projectId: "current" },
+    });
+  });
+
+  it("falls back to the remembered project when the default machine has no open project", () => {
+    const projects = [makeProject("remembered", "other-environment")];
+    expect(
+      destination({
+        useLastProject: true,
+        projects,
+        defaultEnvironmentId: "environment",
+        last: { environmentId: "other-environment", projectId: "remembered" },
+      }),
+    ).toEqual({
+      draft: { requestId: "request", environmentId: "other-environment", projectId: "remembered" },
+    });
+  });
 
   it("starts in the current thread's project ahead of the filtered and remembered ones", () => {
     const projects = [makeProject("remembered"), makeProject("current", "other-environment")];

@@ -651,6 +651,7 @@ function AdaptiveWorkspaceLayoutContent(
               saved?.lastThreadProject,
             )
           : undefined,
+        defaultEnvironmentId: saved?.defaultThreadEnvironmentId ?? null,
         lastProject: saved?.lastThreadProject,
       }),
     );
