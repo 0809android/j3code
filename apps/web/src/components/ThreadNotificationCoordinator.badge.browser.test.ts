@@ -61,9 +61,6 @@ vi.mock(import("../state/threads"), async (original) => {
     environmentThreadShells: {
       ...actual.environmentThreadShells,
       pendingSubagentRequestsAtom: (() => noRequestsAtom) as never,
-      get delegatedUnderParentAtom() {
-        return noDelegatedAtom as never;
-      },
     },
   };
 });
@@ -91,7 +88,6 @@ let registry: AtomRegistry.AtomRegistry;
 const shellAtom = Atom.family((_id: string) => Atom.make<unknown>(null));
 const environmentIdsAtom = Atom.make<ReadonlyArray<string>>([]);
 const noRequestsAtom = Atom.make(new Map());
-const noDelegatedAtom = Atom.make<ReadonlySet<string>>(new Set<string>());
 state.shells = { set: (id, value) => registry.set(shellAtom(id), value) };
 
 class TestNotification extends EventTarget {
@@ -416,6 +412,50 @@ it.each(["hasPendingApprovals", "hasPendingUserInput"] as const)(
     ]);
   },
 );
+
+it("notifies only for top-level threads, never for subagents, side chats or delegated tasks", async () => {
+  await using app = setup();
+  app.start();
+  const child = (id: string, title: string, overrides: Partial<typeof thread>, extra: object) => ({
+    ...toV2ThreadShell({ ...thread, ...overrides, id, title }),
+    ...extra,
+  });
+  const snapshot = (overrides: Partial<typeof thread>) => ({
+    status: "live",
+    snapshot: Option.some({
+      threads: [
+        toV2ThreadShell({ ...thread, ...overrides, id: "root", title: "Root" }),
+        child("subagent", "Subagent", overrides, {
+          lineage: { rootThreadId: "root", parentThreadId: "root", relationshipToParent: "subagent" },
+        }),
+        child("side", "Side chat", overrides, {
+          lineage: {
+            rootThreadId: "root",
+            parentThreadId: "root",
+            relationshipToParent: null,
+            sideChat: true,
+          },
+        }),
+        child("delegated", "Delegated", overrides, {
+          delegatedFrom: { environmentId: "elsewhere", threadId: "parent", title: "Parent" },
+        }),
+      ],
+    }),
+  });
+  state.shells.set("one", snapshot({}));
+  state.shells.set("one", snapshot({ hasPendingUserInput: true }));
+  state.shells.set(
+    "one",
+    snapshot({
+      latestTurn: { turnId: "turn", state: "completed", completedAt: "2026-09-13T07:00:01.000Z" },
+    }),
+  );
+  expect(TestNotification.sent.map(({ title, options }) => [title, options.body])).toEqual([
+    ["Input needed", "Root"],
+    ["Thread completed", "Root"],
+  ]);
+  expect(state.badge).toHaveBeenLastCalledWith(1);
+});
 
 it.each([false, true])(
   "does not replay a notified completion after reconnect (continued: %s)",
