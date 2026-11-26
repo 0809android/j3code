@@ -1,6 +1,14 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { hostedAppLinkPrefixes, resolveHostedAppUrl } from "./hostedApp";
+
+vi.mock("expo-constants", () => ({
+  default: {
+    expoConfig: {
+      extra: {},
+    },
+  },
+}));
 
 describe("hosted app configuration", () => {
   it("has no hosted app unless the build config names a valid one", () => {

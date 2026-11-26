@@ -12,7 +12,7 @@ export function shouldHandleAppLink(url: string, cloudConfigured: boolean): bool
   return (
     !route.includes("expo-development-client") &&
     !route.includes("://expo-sharing") &&
-    !/^t3code(-dev|-preview)?:\/*$/.test(url) &&
+    !/^k3code(-dev|-preview)?:\/*$/.test(url) &&
     // K3 Relay pairing links carry a secret in the fragment and have their own handler.
     !/^k3relay:/i.test(url) &&
     (cloudConfigured || !CLOUD_ONLY_LINK_PATH.test(route))
