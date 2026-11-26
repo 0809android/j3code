@@ -487,6 +487,8 @@ it.live.runIf(HostProcess.Platform.defaultValue() === "win32")(
       const child = spawnWindowsRemoval(
         yield* Config.String("ComSpec").pipe(Config.withDefault("cmd.exe")),
         runtimeDir,
+        // A PID no process has, so the shell does not wait.
+        2_147_483_646,
       );
       yield* Effect.callback<void, Error>((resume) => {
         child.once("error", (error) => resume(Effect.fail(error)));

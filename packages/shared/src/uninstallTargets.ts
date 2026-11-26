@@ -39,6 +39,8 @@ export const K3_LINUX_SYSTEMD_UNITS = ["k3code.service"] as const;
 export const K3_WINDOWS_LOCAL_APP_DATA_NAMES = [
   ...K3_PRODUCT_NAMES.filter((name) => name !== "K3 Code (Dev)"),
   "k3code-updater",
+  // The Windows background service keeps its task XML here.
+  "k3code",
   ...K3_PRODUCT_NAMES.filter((name) => name !== "K3 Code (Dev)").map(
     (name) => `Programs\\${name}`,
   ),
@@ -288,3 +290,21 @@ export const isK3HomeDirectory = Effect.fn("uninstallTargets.isK3HomeDirectory")
   }
   return false;
 });
+
+const WINDOWS_PID_WAIT_SECONDS = 15;
+
+/**
+ * The cmd.exe command line (for `cmd /d /v:off /s /c`) that waits up to 15 seconds for `pid` to
+ * exit and then deletes the path in each named environment variable. Only a tasklist line naming
+ * the PID keeps the wait going, so a localized "no tasks" message ends it.
+ */
+export function buildWindowsWaitAndRemoveCommand(input: {
+  readonly pid: number;
+  readonly pathEnvNames: ReadonlyArray<string>;
+}): string {
+  const waitStep = `for /l %i in (1,1,${WINDOWS_PID_WAIT_SECONDS}) do (tasklist /FI "PID eq ${input.pid}" /NH 2>nul | findstr /C:" ${input.pid} " >nul && ping -n 2 127.0.0.1 >nul)`;
+  const deleteSteps = input.pathEnvNames.map(
+    (key) => `if exist "%${key}%" (rmdir /s /q "%${key}%" 2>nul || del /f /q "%${key}%" 2>nul)`,
+  );
+  return `"${waitStep} & ping -n 2 127.0.0.1 >nul & ${deleteSteps.join(" & ")}"`;
+}
