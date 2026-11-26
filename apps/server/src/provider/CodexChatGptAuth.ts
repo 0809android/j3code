@@ -411,9 +411,14 @@ export const makeCodexChatGptAuth = Effect.fn("makeCodexChatGptAuth")(function* 
     const previous = Option.getOrUndefined(existing);
     const registrations = yield* readRegistrations;
     const changingAccount = method === "chatgpt-change-account";
+    // ChatGPT scopes a registration to the workspace chosen when it was issued. One that never
+    // verified an account would silently pin every default sign-in to that unseen workspace.
+    const lastVerifiedClientId = registrations.profiles.find(
+      (profile) => profile.clientId === registrations.lastClientId && profile.subject,
+    )?.clientId;
     const selectedClientId = method.startsWith("chatgpt-profile:")
       ? method.slice("chatgpt-profile:".length)
-      : (previous?.clientId ?? registrations.lastClientId);
+      : (previous?.clientId ?? options.reconnectProfile?.clientId ?? lastVerifiedClientId);
     const savedRegistration = changingAccount
       ? undefined
       : registrations.profiles.find((profile) => profile.clientId === selectedClientId);
@@ -909,7 +914,11 @@ export const makeCodexChatGptAuth = Effect.fn("makeCodexChatGptAuth")(function* 
     const clientId = methodId.startsWith("chatgpt-profile:")
       ? methodId.slice("chatgpt-profile:".length)
       : (active?.clientId ?? registrations.lastClientId);
-    const registration = registrations.profiles.find((profile) => profile.clientId === clientId);
+    const registration = registrations.profiles.find(
+      (profile) =>
+        profile.clientId === clientId &&
+        (active !== undefined || profile.subject || methodId.startsWith("chatgpt-profile:")),
+    );
     if (!registration) {
       if (methodId.startsWith("chatgpt-profile:"))
         return yield* failure("export", "This saved connection is no longer available.");

@@ -39,7 +39,8 @@ export function ChatGptAccountPicker({
     selection === "chatgpt-change-account"
       ? selection
       : (profiles.find((profile) => profile.id === selection)?.id ??
-        profiles[0]?.id ??
+        // Removable profiles never verified an account, so their workspace is unknown.
+        profiles.find((profile) => !profile.canRemove)?.id ??
         "chatgpt-change-account");
   return (
     <Dialog
