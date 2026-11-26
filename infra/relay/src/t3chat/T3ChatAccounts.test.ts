@@ -69,11 +69,13 @@ const provide = (
 describe("T3ChatAccounts", () => {
   it.effect("signs link tokens in the format T3 Chat verifies", () =>
     Effect.gen(function* () {
-      const accounts = yield* T3ChatAccounts.T3ChatAccounts;
-      const url = new URL(yield* accounts.createLinkUrl({ userId: "user_1" }));
-      expect(`${url.origin}${url.pathname}`).toBe("https://chat.example.test/link/t3code");
+      const token = T3ChatAccounts.signLinkToken(SECRET, {
+        sub: "user_1",
+        email: "a@b.co",
+        exp: 600,
+      });
 
-      const [payload = "", signature = ""] = (url.searchParams.get("token") ?? "").split(".");
+      const [payload = "", signature = ""] = token.split(".");
       // Verify with Web Crypto, as T3 Chat does, rather than the signing library.
       const verified = yield* Effect.promise(async () => {
         const encoder = new TextEncoder();
@@ -98,7 +100,7 @@ describe("T3ChatAccounts", () => {
         email: "a@b.co",
         exp: 600,
       });
-    }).pipe(provide(fakeT3Chat({}).client)),
+    }),
   );
 
   it.effect("asks T3 Chat for the link with the shared secret", () => {
