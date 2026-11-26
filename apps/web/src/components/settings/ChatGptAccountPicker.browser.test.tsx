@@ -35,11 +35,18 @@ const renderPicker = (methods: readonly ProviderAuthMethod[], onSelect: (id: str
     />,
   );
 
+// Base UI's inert layer sits over the portal in the test iframe and swallows pointer clicks.
+const continueWithChatGpt = async () => {
+  const button = page.getByRole("button", { name: "Continue with ChatGPT" });
+  await expect.element(button).toBeVisible();
+  button.element().click();
+};
+
 it("preselects a verified connection over a newer incomplete one", async () => {
   const onSelect = vi.fn();
   await using _screen = await renderPicker([incomplete, verified], onSelect);
 
-  await page.getByRole("button", { name: "Continue with ChatGPT" }).click();
+  await continueWithChatGpt();
 
   expect(onSelect).toHaveBeenCalledWith(verified.id);
 });
@@ -48,7 +55,7 @@ it("starts a new connection when only incomplete ones are saved", async () => {
   const onSelect = vi.fn();
   await using _screen = await renderPicker([incomplete], onSelect);
 
-  await page.getByRole("button", { name: "Continue with ChatGPT" }).click();
+  await continueWithChatGpt();
 
   expect(onSelect).toHaveBeenCalledWith("chatgpt-change-account");
 });

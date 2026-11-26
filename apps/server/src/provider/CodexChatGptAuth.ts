@@ -85,6 +85,10 @@ const decodeRegistration = Schema.decodeUnknownEffect(
 );
 const encodeRegistration = Schema.encodeEffect(Schema.fromJsonString(RegistrationProfiles));
 const profileMethodId = (clientId: string) => `chatgpt-profile:${clientId}`;
+const isVerifiedRegistration = (
+  profile: typeof Registration.Type,
+  saved: { readonly legacyClientId?: string },
+) => profile.subject !== undefined || profile.clientId === saved.legacyClientId;
 const Discovery = Schema.Struct({
   issuer: Schema.String,
   authorization_endpoint: Schema.String,
@@ -248,13 +252,21 @@ export const makeCodexChatGptAuth = Effect.fn("makeCodexChatGptAuth")(function* 
     ),
     Effect.flatMap((bytes) =>
       Option.isNone(bytes)
-        ? Effect.succeed<typeof RegistrationProfiles.Type>({ profiles: [], lastClientId: null })
+        ? Effect.succeed<typeof RegistrationProfiles.Type & { readonly legacyClientId?: string }>({
+            profiles: [],
+            lastClientId: null,
+          })
         : decodeRegistration(new TextDecoder().decode(bytes.value)).pipe(
             Effect.map((record) => {
               const saved =
                 "profiles" in record
                   ? record
-                  : { profiles: [record], lastClientId: record.clientId };
+                  : // The single-record format predates saved subjects, so it was used successfully.
+                    {
+                      profiles: [record],
+                      lastClientId: record.clientId,
+                      legacyClientId: record.clientId,
+                    };
               const last = saved.profiles.find(
                 (profile) => profile.clientId === saved.lastClientId,
               );
@@ -414,7 +426,9 @@ export const makeCodexChatGptAuth = Effect.fn("makeCodexChatGptAuth")(function* 
     // ChatGPT scopes a registration to the workspace chosen when it was issued. One that never
     // verified an account would silently pin every default sign-in to that unseen workspace.
     const lastVerifiedClientId = registrations.profiles.find(
-      (profile) => profile.clientId === registrations.lastClientId && profile.subject,
+      (profile) =>
+        profile.clientId === registrations.lastClientId &&
+        isVerifiedRegistration(profile, registrations),
     )?.clientId;
     const selectedClientId = method.startsWith("chatgpt-profile:")
       ? method.slice("chatgpt-profile:".length)
@@ -856,7 +870,7 @@ export const makeCodexChatGptAuth = Effect.fn("makeCodexChatGptAuth")(function* 
         ...profiles.slice(0, 30).map((profile) => ({
           id: profileMethodId(profile.clientId),
           canRemove:
-            profile.subject === undefined &&
+            !isVerifiedRegistration(profile, saved) &&
             !sessions.some((session) => session.clientId === profile.clientId),
           name: `${profile.email ?? "ChatGPT account"} · ${profile.connectionLabel}`,
           ...(profile.email ? { accountEmail: profile.email } : {}),
@@ -876,7 +890,7 @@ export const makeCodexChatGptAuth = Effect.fn("makeCodexChatGptAuth")(function* 
             );
             if (
               !profile ||
-              profile.subject !== undefined ||
+              isVerifiedRegistration(profile, saved) ||
               (yield* readSessions).sessions.some(
                 (session) => session.clientId === profile.clientId,
               )
@@ -917,7 +931,9 @@ export const makeCodexChatGptAuth = Effect.fn("makeCodexChatGptAuth")(function* 
     const registration = registrations.profiles.find(
       (profile) =>
         profile.clientId === clientId &&
-        (active !== undefined || profile.subject || methodId.startsWith("chatgpt-profile:")),
+        (active !== undefined ||
+          isVerifiedRegistration(profile, registrations) ||
+          methodId.startsWith("chatgpt-profile:")),
     );
     if (!registration) {
       if (methodId.startsWith("chatgpt-profile:"))
