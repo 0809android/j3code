@@ -98,8 +98,12 @@ interface CommandGate {
   readonly awaitCommandReady: Effect.Effect<void, ServerRuntimeStartupError>;
   readonly signalCommandReady: Effect.Effect<void>;
   readonly failCommandReady: (error: ServerRuntimeStartupError) => Effect.Effect<void>;
-  /** Refuses commands until reopened; only a ready gate closes, so startup failures stay final. */
-  readonly closeCommands: (error: ServerRuntimeStartupError) => Effect.Effect<void>;
+  /**
+   * Refuses commands until reopened; only a ready gate closes, so startup failures stay final.
+   * Returns whether the gate closed, so a caller can tell a server still starting up from one it
+   * has paused.
+   */
+  readonly closeCommands: (error: ServerRuntimeStartupError) => Effect.Effect<boolean>;
   readonly reopenCommands: Effect.Effect<void>;
   readonly enqueueCommand: <A, E>(
     effect: Effect.Effect<A, E>,
@@ -157,7 +161,9 @@ export const makeCommandGate = Effect.gen(function* () {
     closeCommands: (error) =>
       Ref.modify(commandReadinessState, (current) =>
         current === "ready" ? ([true, error] as const) : ([false, current] as const),
-      ).pipe(Effect.flatMap((closed) => (closed ? Ref.set(closedWhileReady, true) : Effect.void))),
+      ).pipe(
+        Effect.tap((closed) => (closed ? Ref.set(closedWhileReady, true) : Effect.void)),
+      ),
     reopenCommands: Ref.getAndSet(closedWhileReady, false).pipe(
       Effect.flatMap((closed) => (closed ? Ref.set(commandReadinessState, "ready") : Effect.void)),
     ),
@@ -385,6 +391,19 @@ interface StartupOptions {
   readonly abort?: (error: ServerRuntimeStartupError) => Effect.Effect<void>;
 }
 
+/** Starts the worker unless one is still alive, so a resume never leaves a second one running. */
+export const startEffectWorkerUnlessRunning = Effect.fn(
+  "ServerRuntimeStartup.startEffectWorkerUnlessRunning",
+)(function* <WorkerContext>(input: {
+  readonly runWorker: Effect.Effect<void, never, WorkerContext>;
+  readonly workerFiberRef: Ref.Ref<Fiber.Fiber<void, never> | null>;
+}) {
+  const existing = yield* Ref.get(input.workerFiberRef);
+  if (existing !== null && existing.pollUnsafe() === undefined) return;
+  const workerFiber = yield* forkParkedFiber(input.runWorker);
+  yield* Ref.set(input.workerFiberRef, workerFiber);
+});
+
 export const startEffectWorkerWithRelay = Effect.fn(
   "ServerRuntimeStartup.startEffectWorkerWithRelay",
 )(function* <WorkerContext, RelayContext>(input: {
@@ -474,10 +493,10 @@ const make = Effect.fn("serverRuntimeStartup.make")(function* (options?: Startup
   const workerContext = yield* Effect.context<
     EffectWorker.OrchestrationEffectWorkerV2 | Scope.Scope
   >();
-  const startEffectWorker = forkParkedFiber(EffectWorker.runDaemon).pipe(
-    Effect.flatMap((fiber) => Ref.set(effectWorkerFiber, fiber)),
-    Effect.provideContext(workerContext),
-  );
+  const startEffectWorker = startEffectWorkerUnlessRunning({
+    runWorker: EffectWorker.runDaemon,
+    workerFiberRef: effectWorkerFiber,
+  }).pipe(Effect.provideContext(workerContext));
   const updatePause = yield* makeUpdatePauseController({
     closeCommands: commandGate.closeCommands(
       shutdownError("K3 Code is pausing running turns to install an update."),

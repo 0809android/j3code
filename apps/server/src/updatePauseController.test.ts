@@ -1,6 +1,7 @@
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as TestClock from "effect/testing/TestClock";
 
 import type * as ProviderRuntimeRecovery from "./orchestration-v2/ProviderRuntimeRecoveryService.ts";
@@ -15,9 +16,11 @@ const summary = {
   requeuedEffects: 0,
 };
 
-const setup = Effect.gen(function* () {
+const setupWith = Effect.fn("test.setup")(function* (options: { readonly ready: boolean }) {
   const gate = yield* ServerRuntimeStartup.makeCommandGate;
-  yield* gate.signalCommandReady;
+  if (options.ready) {
+    yield* gate.signalCommandReady;
+  }
   const calls: Array<string> = [];
   const record = (call: string) => Effect.sync(() => void calls.push(call));
   const controller = yield* makeUpdatePauseController({
@@ -49,8 +52,10 @@ const setup = Effect.gen(function* () {
   const commandAccepted = Effect.exit(gate.enqueueCommand(Effect.void)).pipe(
     Effect.map(Exit.isSuccess),
   );
-  return { controller, calls, commandAccepted };
+  return { controller, calls, commandAccepted, gate };
 });
+
+const setup = setupWith({ ready: true });
 
 const PAUSE = ["stop worker", "interrupt 2"];
 const UNPAUSE = [
@@ -102,5 +107,24 @@ it.effect("keeps the pause when the update stops the server", () =>
     yield* TestClock.adjust("10 minutes");
     yield* controller.resumeRunsAfterUpdate;
     assert.deepEqual(calls, PAUSE);
+  }),
+);
+
+it.effect("does not pause while startup has not signalled command readiness", () =>
+  Effect.gen(function* () {
+    const { controller, calls, gate } = yield* setupWith({ ready: false });
+    const queued = yield* gate.enqueueCommand(Effect.succeed("ran")).pipe(Effect.forkScoped);
+
+    assert.deepEqual(yield* controller.pauseRunsForUpdate, { pausedRuns: 0 });
+    assert.deepEqual(calls, []);
+
+    // Startup finishing afterwards admits the command; no deadline un-pause is left behind.
+    yield* gate.signalCommandReady;
+    assert.equal(yield* Fiber.join(queued), "ran");
+    yield* TestClock.adjust("10 minutes");
+    assert.deepEqual(calls, []);
+    assert.isTrue(
+      yield* Effect.exit(gate.enqueueCommand(Effect.void)).pipe(Effect.map(Exit.isSuccess)),
+    );
   }),
 );

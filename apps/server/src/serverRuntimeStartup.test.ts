@@ -261,6 +261,28 @@ it.effect("interrupts the effect worker when awareness relay startup fails", () 
   }),
 );
 
+it.effect("starts the effect worker only when none is still running", () =>
+  Effect.gen(function* () {
+    const workerFiberRef = yield* Ref.make<Fiber.Fiber<void, never> | null>(null);
+    const start = ServerRuntimeStartup.startEffectWorkerUnlessRunning({
+      runWorker: Effect.never,
+      workerFiberRef,
+    });
+
+    yield* start;
+    const first = yield* Ref.get(workerFiberRef);
+    if (first === null) return yield* Effect.die("the worker did not start");
+    yield* start;
+    assert.strictEqual(yield* Ref.get(workerFiberRef), first);
+
+    yield* Fiber.interrupt(first);
+    yield* start;
+    const second = yield* Ref.get(workerFiberRef);
+    assert.isNotNull(second);
+    assert.notStrictEqual(second, first);
+  }),
+);
+
 it.effect("queues commands until startup signals readiness", () =>
   Effect.gen(function* () {
     const gate = yield* ServerRuntimeStartup.makeCommandGate;
