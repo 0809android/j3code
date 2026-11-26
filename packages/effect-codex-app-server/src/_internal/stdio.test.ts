@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import * as Deferred from "effect/Deferred";
 import * as Fiber from "effect/Fiber";
 import * as Queue from "effect/Queue";
+import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import * as PlatformError from "effect/PlatformError";
@@ -20,25 +21,33 @@ import {
 } from "./stdio.ts";
 
 describe("Codex App Server child process termination", () => {
-  it.effect("retains exit diagnostics when stderr stays open after stdout ends", () =>
+  it.effect.each([
+    { name: "stdout closes", stdoutEnds: true },
+    { name: "stdout remains open", stdoutEnds: false },
+  ])("drains final output when $name", ({ stdoutEnds }) =>
     Effect.gen(function* () {
       const { stdio, input, output } = yield* makeInMemoryStdio();
       const captured = yield* Deferred.make<void>();
+      const terminated = yield* Deferred.make<CodexError.CodexAppServerError>();
+      const finalReply = yield* Deferred.make<unknown>();
+      const notifications = yield* Ref.make<ReadonlyArray<string>>([]);
       const stderr = Stream.make(new TextEncoder().encode("Error: invalid config\n")).pipe(
         Stream.concat(Stream.fromEffect(Deferred.succeed(captured, undefined)).pipe(Stream.drain)),
         Stream.concat(Stream.never),
       );
       const tail = yield* makeStderrTail(stderr);
       const exited = yield* Deferred.make<ChildProcessSpawner.ExitCode>();
+      const handle = {
+        stdout: stdio.stdin,
+        stdin: stdio.stdout(),
+        pid: ChildProcessSpawner.ProcessId(55),
+        exitCode: Deferred.await(exited),
+      };
       const transport = yield* CodexProtocol.makeCodexAppServerPatchedProtocol({
-        stdio: makeChildStdio({ stdout: stdio.stdin, stdin: stdio.stdout() }, tail.awaitDrained),
-        terminationError: makeTerminationError(
-          {
-            pid: ChildProcessSpawner.ProcessId(55),
-            exitCode: Deferred.await(exited),
-          },
-          tail.read,
-        ),
+        stdio: makeChildStdio(handle, tail.awaitDrained),
+        terminationError: makeTerminationError(handle, tail.read),
+        onTermination: (error) => Deferred.succeed(terminated, error).pipe(Effect.asVoid),
+        onNotification: ({ method }) => Ref.update(notifications, (all) => [...all, method]),
       });
       const pending = yield* transport.request("thread/read", {}).pipe(
         Effect.match({
@@ -48,11 +57,27 @@ describe("Codex App Server child process termination", () => {
         Effect.forkScoped,
       );
       yield* Queue.take(output);
+      yield* transport.request("thread/list", {}).pipe(
+        Effect.flatMap((reply) => Deferred.succeed(finalReply, reply)),
+        Effect.forkScoped,
+      );
+      const lastRequest = JSON.parse(yield* Queue.take(output));
+      const finalOutput = new TextEncoder().encode(
+        `${JSON.stringify({ id: lastRequest.id, result: "final response" })}\n{"method":"turn/completed"}`,
+      );
       yield* Deferred.await(captured);
-      yield* Queue.end(input);
-      yield* TestClock.adjust("100 millis");
+      if (stdoutEnds) {
+        yield* Queue.offer(input, finalOutput);
+        yield* Queue.end(input);
+        yield* TestClock.adjust("100 millis");
+      }
       yield* Deferred.succeed(exited, ChildProcessSpawner.ExitCode(1));
-      yield* TestClock.adjust("250 millis");
+      // A descendant still holds stdout open, so only the process exit ends the stream.
+      if (!stdoutEnds) yield* Queue.offer(input, finalOutput);
+      yield* TestClock.adjust("500 millis");
+      assert.isTrue(yield* Deferred.isDone(terminated));
+      assert.equal(yield* Deferred.await(finalReply), "final response");
+      assert.deepEqual(yield* Ref.get(notifications), ["turn/completed"]);
       const error = yield* Fiber.join(pending);
       assert.instanceOf(error, CodexError.CodexAppServerProcessExitedError);
       assert.equal(
