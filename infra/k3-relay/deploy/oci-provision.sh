@@ -26,6 +26,8 @@
 #   --bucket-name NAME           backup bucket (default <name>-backup)
 #   --availability-domain NAME   default: the first one
 #   --self-ping-interval-sec N   idle-reclaim self ping (default 0, off)
+#   --user-data-out PATH         only write the cloud-init user data to PATH and stop (for
+#                                replacing the instance by hand)
 #   K3_ALERT_WEBHOOK_URL         alarm webhook (optional). It ends up in the instance's user data
 set -euo pipefail
 
@@ -48,6 +50,7 @@ relay_image=""
 bucket=""
 availability_domain=""
 self_ping_seconds=0
+user_data_out=""
 template="$here/cloud-init.yaml"
 
 die() {
@@ -74,6 +77,7 @@ while [ $# -gt 0 ]; do
     --bucket-name) bucket=${2:?}; shift ;;
     --availability-domain) availability_domain=${2:?}; shift ;;
     --self-ping-interval-sec) self_ping_seconds=${2:?}; shift ;;
+    --user-data-out) user_data_out=${2:?}; shift ;;
     -h | --help)
       sed -n '2,/^set -euo/p' "${BASH_SOURCE[0]}" | sed '$d' | sed 's/^# \{0,1\}//'
       exit 0
@@ -203,6 +207,12 @@ render() {
 }
 render
 chmod 600 "$user_data"
+if [ -n "$user_data_out" ]; then
+  [ -n "$repo_url" ] && [ -n "$repo_ref" ] || die "--user-data-out needs --repo-url and --repo-ref"
+  install -m 600 "$user_data" "$user_data_out"
+  echo "wrote $user_data_out"
+  exit 0
+fi
 
 # --- looking things up (read only) -------------------------------------------------------------
 is_placeholder() { [[ ${1:-} == \<* ]]; }

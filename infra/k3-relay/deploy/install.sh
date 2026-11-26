@@ -38,11 +38,16 @@ done
 # The directory the relay container writes snapshots to. 1000 is the `node` user in the image.
 install -d -m 0700 -o 1000 -g 1000 /var/lib/k3-relay/backup
 
-# Record which commit this is, for /.well-known/k3-relay.
+# Record which commit and image digest this is, for /.well-known/k3-relay.
 if git -C "$relay_dir" rev-parse HEAD >/dev/null 2>&1; then
   commit=$(git -C "$relay_dir" rev-parse HEAD)
   sed -i '/^GIT_COMMIT=/d' "$config_dir/compose.env"
   printf 'GIT_COMMIT=%s\n' "$commit" >>"$config_dir/compose.env"
+fi
+relay_image=$(sed -n 's/^RELAY_IMAGE=//p' "$config_dir/compose.env" | tail -n 1)
+if [[ $relay_image =~ @(sha256:[0-9a-f]{64})$ ]]; then
+  sed -i '/^IMAGE_DIGEST=/d' "$config_dir/compose.env"
+  printf 'IMAGE_DIGEST=%s\n' "${BASH_REMATCH[1]}" >>"$config_dir/compose.env"
 fi
 
 render_unit() {
