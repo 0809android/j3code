@@ -11,6 +11,7 @@ import {
 } from "@t3tools/contracts";
 import { errorTag } from "@t3tools/shared/observability";
 import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
@@ -64,6 +65,8 @@ const CHANNEL_CHANGE_RETRIES = 30;
 const AUTO_UPDATE_STARTUP_DELAY = "15 seconds";
 const AUTO_UPDATE_POLL_INTERVAL = "4 hours";
 const UPDATE_CHECK_WAIT = Duration.seconds(90);
+// Longer than the 60-second request idle timeout, and the quiet installer check after 100%.
+const DOWNLOAD_STALL_TIMEOUT = Duration.minutes(5);
 
 type UpdateAction = "check" | "download" | "install" | "install-recovery" | "channel";
 
@@ -402,6 +405,7 @@ export const make = Effect.gen(function* () {
   const finishedUpdateActions = yield* PubSub.unbounded<UpdateAction>();
   const updaterConfiguredRef = yield* Ref.make(false);
   const lastLoggedDownloadMilestoneRef = yield* Ref.make(-1);
+  const lastDownloadProgressAtRef = yield* Ref.make(0);
   const notAppliedVersionRef = yield* Ref.make(Option.none<string>());
   // The release a track switch's database check cleared. A build crosses to another track only
   // through such a switch, and never below that release: version order alone cannot tell whether
@@ -653,6 +657,24 @@ export const make = Effect.gen(function* () {
         );
   });
 
+  const failWhenDownloadStalls = Effect.fn("desktop.updates.failWhenDownloadStalls")(function* (
+    state: DesktopUpdateState,
+  ) {
+    const timeoutMs = Duration.toMillis(DOWNLOAD_STALL_TIMEOUT);
+    while (true) {
+      const idleMs = (yield* Clock.currentTimeMillis) - (yield* Ref.get(lastDownloadProgressAtRef));
+      if (idleMs >= timeoutMs) {
+        return yield* new ElectronUpdater.ElectronUpdaterDownloadUpdateError({
+          channel: state.channel,
+          cause: new Error(
+            `No download progress for ${Duration.toMinutes(DOWNLOAD_STALL_TIMEOUT)} minutes.`,
+          ),
+        });
+      }
+      yield* Effect.sleep(timeoutMs - idleMs);
+    }
+  });
+
   // Install refreshes before downloading, and a second check could pick a stale, older release.
   const downloadAvailableUpdate = Effect.fn("desktop.updates.downloadAvailableUpdate")(function* (
     refresh: boolean,
@@ -708,7 +730,10 @@ export const make = Effect.gen(function* () {
         isArm64HostRunningIntelBuild(environment.runtimeInfo),
       );
       yield* logUpdaterInfo("downloading update");
-      yield* electronUpdater.downloadUpdate;
+      yield* Ref.set(lastDownloadProgressAtRef, yield* Clock.currentTimeMillis);
+      // electron-updater has no time limit of its own. Losing the race cancels its download, so a
+      // retry starts a fresh one instead of joining the stalled one.
+      yield* electronUpdater.downloadUpdate.pipe(Effect.raceFirst(failWhenDownloadStalls(state)));
       return { accepted: true, completed: true };
     }).pipe(
       Effect.catchTags({
@@ -1196,6 +1221,7 @@ export const make = Effect.gen(function* () {
     yield* decodeDownloadProgressInfo(raw).pipe(
       Effect.flatMap(
         Effect.fn("desktop.updates.applyDownloadProgress")(function* (progress) {
+          yield* Ref.set(lastDownloadProgressAtRef, yield* Clock.currentTimeMillis);
           const state = yield* Ref.get(updateStateRef);
           const percent = Math.floor(progress.percent);
           if (shouldBroadcastDownloadProgress(state, progress.percent) || state.message !== null) {
