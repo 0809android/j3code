@@ -228,6 +228,7 @@ export interface RespondToThreadApprovalInput extends ThreadCommandInput {
 export interface RespondToThreadUserInputInput extends ThreadCommandInput {
   readonly requestId: RuntimeRequestId;
   readonly answers: ProviderUserInputAnswers;
+  readonly answerNotes?: import("@t3tools/contracts").UserInputAnswerNotes;
   readonly attachmentsByQuestionId?: import("@t3tools/contracts").UserInputAttachments;
 }
 
@@ -1028,6 +1029,7 @@ export const respondToThreadUserInput = Effect.fn("EnvironmentCommands.respondTo
       threadId: input.threadId,
       requestId: input.requestId,
       answers: input.answers,
+      ...(input.answerNotes === undefined ? {} : { answerNotes: input.answerNotes }),
       ...(input.attachmentsByQuestionId === undefined
         ? {}
         : { attachmentsByQuestionId: input.attachmentsByQuestionId }),

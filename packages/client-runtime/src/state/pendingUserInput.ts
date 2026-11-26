@@ -1,3 +1,5 @@
+import type { UserInputAnswerNotes } from "@t3tools/contracts";
+
 /** The question fields answer handling reads. Web and mobile question types both fit it. */
 export interface PendingUserInputQuestion {
   readonly id: string;
@@ -69,14 +71,17 @@ export function resolvePendingUserInputAnswer(
       : question.initialAnswer !== undefined
         ? (draft?.customAnswer ?? null)
         : normalizeDraftAnswer(draft?.customAnswer);
+  const selectedOptionValues = normalizeSelectedOptionValues(question, draft?.selectedOptionValues);
   if (customAnswer !== null && customAnswer.length > 0) {
-    return customAnswer;
+    // A note typed beside a choice travels with it; editor text stays exact.
+    return selectedOptionValues.length === 0 || question.initialAnswer !== undefined
+      ? customAnswer
+      : `${selectedOptionValues.join(", ")}\n${customAnswer}`;
   }
   if (question.required === false && question.options.length === 0) {
     return "";
   }
 
-  const selectedOptionValues = normalizeSelectedOptionValues(question, draft?.selectedOptionValues);
   if (question.multiSelect) {
     return selectedOptionValues.length > 0
       ? selectedOptionValues
@@ -90,17 +95,20 @@ export function resolvePendingUserInputAnswer(
   );
 }
 
+/** `keepSelection` lets typed text sit beside a choice as a note instead of replacing it. */
 export function setPendingUserInputCustomAnswer(
   question: PendingUserInputQuestion,
   draft: PendingUserInputDraftAnswer | undefined,
   customAnswer: string,
+  options?: { readonly keepSelection?: boolean },
 ): PendingUserInputDraftAnswer {
   if (question.allowCustomAnswer === false) {
     return draft ?? {};
   }
 
   const selectedOptionValues =
-    question.initialAnswer !== undefined || customAnswer.trim().length > 0
+    question.initialAnswer !== undefined ||
+    (!options?.keepSelection && customAnswer.trim().length > 0)
       ? undefined
       : normalizeSelectedOptionValues(question, draft?.selectedOptionValues);
   return {
@@ -114,10 +122,6 @@ export function isPendingUserInputOptionSelected(
   draft: PendingUserInputDraftAnswer | undefined,
   optionValue: string,
 ): boolean {
-  if (question.allowCustomAnswer !== false && normalizeDraftAnswer(draft?.customAnswer)) {
-    return false;
-  }
-
   const resolvedOptionValue = resolvePendingUserInputOptionValue(question, optionValue);
   return (
     resolvedOptionValue !== null &&
@@ -127,16 +131,24 @@ export function isPendingUserInputOptionSelected(
   );
 }
 
-/** Toggles an offered option. An unknown option returns the same draft. */
+/**
+ * Toggles an offered option. An unknown option returns the same draft. `keepCustomAnswer` keeps
+ * typed text as a note beside the choice; a suggested answer is always replaced.
+ */
 export function togglePendingUserInputOptionSelection(
   question: PendingUserInputQuestion,
   draft: PendingUserInputDraftAnswer | undefined,
   optionValue: string,
+  options?: { readonly keepCustomAnswer?: boolean },
 ): PendingUserInputDraftAnswer {
   const resolvedOptionValue = resolvePendingUserInputOptionValue(question, optionValue);
   if (resolvedOptionValue === null) {
     return draft ?? {};
   }
+  const customAnswer =
+    options?.keepCustomAnswer && question.initialAnswer === undefined
+      ? (draft?.customAnswer ?? "")
+      : "";
 
   if (question.multiSelect) {
     const selectedOptionValues = normalizeSelectedOptionValues(
@@ -148,7 +160,7 @@ export function togglePendingUserInputOptionSelection(
       : [...selectedOptionValues, resolvedOptionValue];
 
     return {
-      customAnswer: "",
+      customAnswer,
       ...(nextSelectedOptionValues.length > 0
         ? { selectedOptionValues: nextSelectedOptionValues }
         : {}),
@@ -156,9 +168,29 @@ export function togglePendingUserInputOptionSelection(
   }
 
   return {
-    customAnswer: "",
+    customAnswer,
     selectedOptionValues: [resolvedOptionValue],
   };
+}
+
+/**
+ * The choice and note apart for each question answered with both, for providers with a notes
+ * field. Undefined when no answer carries a note.
+ */
+export function buildPendingUserInputAnswerNotes(
+  questions: ReadonlyArray<PendingUserInputQuestion>,
+  draftAnswers: Record<string, PendingUserInputDraftAnswer>,
+): UserInputAnswerNotes | undefined {
+  const entries = questions.flatMap((question) => {
+    const draft = draftAnswers[question.id];
+    if (question.allowCustomAnswer === false || question.initialAnswer !== undefined) return [];
+    const note = normalizeDraftAnswer(draft?.customAnswer);
+    const selected = normalizeSelectedOptionValues(question, draft?.selectedOptionValues);
+    const [first] = selected;
+    if (note === null || first === undefined) return [];
+    return [[question.id, { answer: question.multiSelect ? selected : first, note }] as const];
+  });
+  return entries.length === 0 ? undefined : Object.fromEntries(entries);
 }
 
 /** Every question's answer keyed by question id, or null while any is unanswered. */

@@ -45,6 +45,7 @@ import { Atom } from "effect/reactivity";
 
 import { environmentThreadDetails, threadEnvironment } from "./threads";
 import {
+  buildPendingUserInputAnswerNotes,
   buildPendingUserInputAnswers,
   setPendingUserInputCustomAnswer,
   togglePendingUserInputOptionSelection,
@@ -84,6 +85,7 @@ function setUserInputDraftOption(
         question,
         seededDraft(current[requestKey], question),
         value,
+        { keepCustomAnswer: true },
       ),
     },
   });
@@ -103,6 +105,7 @@ function setUserInputDraftCustomAnswer(
         question,
         seededDraft(current[requestKey], question),
         customAnswer,
+        { keepSelection: true },
       ),
     },
   });
@@ -410,6 +413,10 @@ export function useSelectedThreadRequests() {
         })),
       );
     }
+    const answerNotes = buildPendingUserInputAnswerNotes(
+      activePendingUserInput.questions,
+      activePendingUserInputDrafts,
+    );
     userInputResponsesInFlight.current.add(responseKey);
     setRespondingUserInputId(activePendingUserInput.requestId);
     const result = await respondToUserInput({
@@ -418,6 +425,7 @@ export function useSelectedThreadRequests() {
         threadId: selectedThreadShell.id,
         requestId: activePendingUserInput.requestId,
         answers: activePendingUserInputAnswers,
+        ...(answerNotes === undefined ? {} : { answerNotes }),
         ...(attachmentsByQuestionId.size > 0
           ? { attachmentsByQuestionId: Object.fromEntries(attachmentsByQuestionId) }
           : {}),

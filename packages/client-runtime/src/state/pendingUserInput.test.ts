@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  buildPendingUserInputAnswerNotes,
   buildPendingUserInputAnswers,
   isPendingUserInputOptionSelected,
   resolvePendingUserInputAnswer,
@@ -51,13 +52,19 @@ describe("resolvePendingUserInputAnswer", () => {
     ).toEqual({ customAnswer: "" });
   });
 
-  it("prefers a custom answer over selected options", () => {
+  it("sends typed text beside selected options as a note", () => {
     expect(
       resolvePendingUserInputAnswer(singleSelectQuestion, {
         selectedOptionValues: ["Orchestration-first"],
         customAnswer: "Keep the existing envelope for one release",
       }),
-    ).toBe("Keep the existing envelope for one release");
+    ).toBe("Orchestration-first\nKeep the existing envelope for one release");
+    expect(
+      resolvePendingUserInputAnswer(
+        { ...singleSelectQuestion, multiSelect: true },
+        { selectedOptionValues: ["Node.js", "Orchestration-first"], customAnswer: " both " },
+      ),
+    ).toBe("Node.js, Orchestration-first\nboth");
   });
 
   it("does not replace a required choice with a custom answer", () => {
@@ -152,6 +159,72 @@ describe("togglePendingUserInputOptionSelection", () => {
     expect(togglePendingUserInputOptionSelection(nativeChoiceQuestion, first, "Result")).toBe(
       first,
     );
+  });
+});
+
+const compatQuestionForNotes = {
+  id: "compat",
+  header: "Compat",
+  question: "How strict should compatibility be?",
+  options: [{ label: "Keep current envelope", description: "Preserve current wire format" }],
+  multiSelect: false,
+} as const;
+
+describe("keeping typed text and a choice together", () => {
+  it("keeps typed text when an option is chosen and the choice when text is typed", () => {
+    const typed = setPendingUserInputCustomAnswer(singleSelectQuestion, undefined, "note", {
+      keepSelection: true,
+    });
+    const chosen = togglePendingUserInputOptionSelection(singleSelectQuestion, typed, "Node.js", {
+      keepCustomAnswer: true,
+    });
+    expect(chosen).toEqual({ customAnswer: "note", selectedOptionValues: ["Node.js"] });
+    expect(isPendingUserInputOptionSelected(singleSelectQuestion, chosen, "Node.js")).toBe(true);
+    const edited = setPendingUserInputCustomAnswer(singleSelectQuestion, chosen, "longer note", {
+      keepSelection: true,
+    });
+    expect(edited).toEqual({ customAnswer: "longer note", selectedOptionValues: ["Node.js"] });
+    expect(buildPendingUserInputAnswers([singleSelectQuestion], { scope: edited })).toEqual({
+      scope: "Node.js\nlonger note",
+    });
+  });
+
+  it("still replaces a suggested answer when an option is chosen", () => {
+    const question = { ...singleSelectQuestion, initialAnswer: "Proposed" };
+    expect(
+      togglePendingUserInputOptionSelection(question, { customAnswer: "Proposed" }, "Node.js", {
+        keepCustomAnswer: true,
+      }),
+    ).toEqual({ customAnswer: "", selectedOptionValues: ["Node.js"] });
+  });
+
+  it("sends the choice and note apart for providers with a notes field", () => {
+    const multi = { ...compatQuestionForNotes, id: "multi", multiSelect: true };
+    expect(
+      buildPendingUserInputAnswerNotes([singleSelectQuestion, multi, compatQuestionForNotes], {
+        scope: { selectedOptionValues: ["Node.js"], customAnswer: " later " },
+        multi: { selectedOptionValues: ["Keep current envelope"], customAnswer: "why" },
+        compat: { selectedOptionValues: ["Keep current envelope"] },
+      }),
+    ).toEqual({
+      scope: { answer: "Node.js", note: "later" },
+      multi: { answer: ["Keep current envelope"], note: "why" },
+    });
+    expect(
+      buildPendingUserInputAnswerNotes([singleSelectQuestion], { scope: { customAnswer: "x" } }),
+    ).toBeUndefined();
+  });
+
+  it("leaves the one-or-the-other behavior unchanged without the options", () => {
+    const chosen = togglePendingUserInputOptionSelection(
+      singleSelectQuestion,
+      { customAnswer: "note" },
+      "Node.js",
+    );
+    expect(chosen).toEqual({ customAnswer: "", selectedOptionValues: ["Node.js"] });
+    expect(setPendingUserInputCustomAnswer(singleSelectQuestion, chosen, "note")).toEqual({
+      customAnswer: "note",
+    });
   });
 });
 
