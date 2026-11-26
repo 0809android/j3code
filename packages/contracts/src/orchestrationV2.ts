@@ -81,6 +81,7 @@ import {
   ProviderInteractionMode,
   ProviderRequestKind,
   ProviderUserInputAnswers,
+  UserInputAnswerNotes,
   UserInputAttachments,
   UserInputAttachmentAnswerPayload,
   RuntimeMode,
@@ -3732,6 +3733,7 @@ export const OrchestrationV2Command = Schema.Union([
     decision: Schema.optional(ProviderApprovalDecision),
     feedback: Schema.optional(Schema.String),
     answers: Schema.optional(ProviderUserInputAnswers),
+    answerNotes: Schema.optional(UserInputAnswerNotes),
     attachmentsByQuestionId: Schema.optional(UserInputAttachments),
   }),
   Schema.Struct({

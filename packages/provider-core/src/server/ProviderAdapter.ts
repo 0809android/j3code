@@ -27,6 +27,7 @@ import {
   ProviderMcpSignInError,
   PositiveInt,
   ProviderUserInputAnswers,
+  UserInputAnswerNotes,
   ProviderSessionId,
   ProviderThreadId,
   ProviderTurnId,
@@ -646,6 +647,8 @@ export interface ProviderAdapterV2RuntimeRequestResponseInput {
   readonly decision?: ProviderApprovalDecision;
   readonly feedback?: string;
   readonly answers?: ProviderUserInputAnswers;
+  /** Only providers with a notes field read this; the rest get the combined text in `answers`. */
+  readonly answerNotes?: UserInputAnswerNotes;
 }
 
 export interface ProviderAdapterV2ThreadSnapshot {

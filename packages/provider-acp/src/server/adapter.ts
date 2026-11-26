@@ -27,6 +27,7 @@ import {
   type ProviderRequestKind,
   type ProviderThreadId,
   type ProviderUserInputAnswers,
+  type UserInputAnswerNotes,
   type RuntimeMode,
   type RuntimeRequestId,
   type ThreadTokenUsageSnapshot,
@@ -311,6 +312,7 @@ export interface AcpAdapterV2ExtensionContext {
     {
       readonly acknowledgeNativeResponse: Effect.Effect<void, EffectAcpErrors.AcpError>;
       readonly answers: ProviderUserInputAnswers | null;
+      readonly answerNotes?: UserInputAnswerNotes;
     },
     EffectAcpErrors.AcpError
   >;
@@ -475,6 +477,7 @@ export interface AcpAdapterV2Flavor {
         readonly questions: ReadonlyArray<OrchestrationV2UserInputQuestion>;
         readonly respond: (
           answers: ProviderUserInputAnswers,
+          answerNotes?: UserInputAnswerNotes,
         ) => EffectAcpSchema.CreateElicitationResponse;
       }
     | undefined;
@@ -2012,9 +2015,14 @@ type PendingRuntimeRequest = {
     }
   | {
       readonly type: "user_input";
-      readonly answers: Deferred.Deferred<ProviderUserInputAnswers | null>;
+      readonly answers: Deferred.Deferred<AcpUserInputResponse | null>;
     }
 );
+
+interface AcpUserInputResponse {
+  readonly answers: ProviderUserInputAnswers;
+  readonly answerNotes?: UserInputAnswerNotes;
+}
 
 /** Writers update `order` and `messages` in place; readers copy them out. */
 interface SnapshotMessageState {
@@ -6532,7 +6540,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             providerTurnId: context.providerTurnId,
             nativeRequestId: request.nativeRequestId,
           });
-          const answers = yield* Deferred.make<ProviderUserInputAnswers | null>();
+          const answers = yield* Deferred.make<AcpUserInputResponse | null>();
           const nativeResponseAcknowledgement = yield* Deferred.make<
             void,
             EffectAcpErrors.AcpError
@@ -6677,7 +6685,10 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                                 generation,
                                 transportRequestId,
                               ),
-                              answers: checked.value,
+                              answers: checked.value?.answers ?? null,
+                              ...(checked.value?.answerNotes === undefined
+                                ? {}
+                                : { answerNotes: checked.value.answerNotes }),
                             })
                           : Effect.never,
                       ),
@@ -7663,8 +7674,9 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                       questions: parsedForm.questions,
                       respond: (
                         answers: ProviderUserInputAnswers,
+                        answerNotes?: UserInputAnswerNotes,
                       ): EffectAcpSchema.CreateElicitationResponse => {
-                        const content = parsedForm.content(answers);
+                        const content = parsedForm.content(answers, answerNotes);
                         return content === undefined
                           ? { action: "cancel" }
                           : { action: "accept", content };
@@ -7693,7 +7705,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               const response =
                 userInput.answers === null
                   ? ({ action: "cancel" } as const)
-                  : form.respond(userInput.answers);
+                  : form.respond(userInput.answers, userInput.answerNotes);
               yield* userInput.acknowledgeNativeResponse;
               return response;
             }).pipe(holdingAgentRequest(handlerGeneration)),
@@ -10850,7 +10862,17 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                   }
                   const settled =
                     pending.type === "user_input"
-                      ? yield* Deferred.succeed(pending.answers, requestInput.answers ?? null)
+                      ? yield* Deferred.succeed(
+                          pending.answers,
+                          requestInput.answers === undefined
+                            ? null
+                            : {
+                                answers: requestInput.answers,
+                                ...(requestInput.answerNotes === undefined
+                                  ? {}
+                                  : { answerNotes: requestInput.answerNotes }),
+                              },
+                        )
                       : requestInput.decision === undefined
                         ? yield* new ProviderAdapter.ProviderAdapterProtocolError({
                             driver,

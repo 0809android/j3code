@@ -13,7 +13,7 @@ import {
   runRanAfter,
   usageLimitBlockedRun,
 } from "@t3tools/shared/orchestrationV2ThreadError";
-import { threadIssueKeysEqual } from "@t3tools/contracts";
+import { answeredUserInputNotes, threadIssueKeysEqual } from "@t3tools/contracts";
 import { canonicalizeGitCafePullRequestUrl } from "@t3tools/source-control-definitions/registry";
 import { threadPullRequestsOf } from "../sourceControl/threadPullRequests.ts";
 import {
@@ -11540,6 +11540,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           ]),
         );
       }
+      const answerNotes =
+        runtimeRequest.kind === "user_input" && answers !== undefined
+          ? answeredUserInputNotes(answers, command.answerNotes)
+          : undefined;
 
       const approvalTurnItem = context.item;
       const resolvedNodeStatus =
@@ -11833,6 +11837,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             ...(command.decision === undefined ? {} : { decision: command.decision }),
             ...(command.feedback === undefined ? {} : { feedback: command.feedback }),
             ...(answers === undefined ? {} : { answers }),
+            ...(answerNotes === undefined ? {} : { answerNotes }),
           },
         } satisfies PendingOrchestrationEffectV2,
       ]);

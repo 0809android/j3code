@@ -1,6 +1,7 @@
 import type {
   OrchestrationV2UserInputQuestion,
   ProviderUserInputAnswers,
+  UserInputAnswerNotes,
 } from "@t3tools/contracts";
 import type * as EffectAcpSchema from "effect-acp/compat";
 
@@ -25,10 +26,12 @@ export interface ElicitationForm {
   /**
    * Types answers as the schema declares them. Unknown keys and options are
    * dropped, as is an answer that does not fit its field. Returns undefined
-   * when a required field is left without a valid answer.
+   * when a required field is left without a valid answer. A note beside a choice that has a
+   * free-text companion fills both fields.
    */
   readonly content: (
     answers: ProviderUserInputAnswers,
+    answerNotes?: UserInputAnswerNotes,
   ) => Record<string, EffectAcpSchema.ElicitationContentValue> | undefined;
 }
 
@@ -240,13 +243,22 @@ export function parseElicitationForm(
   }
   return {
     questions,
-    content: (answers) => {
+    content: (answers, answerNotes) => {
       const entries: Array<[string, EffectAcpSchema.ElicitationContentValue]> = [];
       for (const [id, field] of fields) {
         if (folded.has(id)) continue;
         const answer = Object.hasOwn(answers, id) ? answers[id] : undefined;
-        const typed = answer === undefined ? undefined : typedAnswer(field, answer);
         const companionId = companions.get(id);
+        const noted =
+          companionId !== undefined && answerNotes && Object.hasOwn(answerNotes, id)
+            ? answerNotes[id]
+            : undefined;
+        const notedChoice = noted === undefined ? undefined : typedAnswer(field, noted.answer);
+        if (companionId !== undefined && noted !== undefined && notedChoice !== undefined) {
+          entries.push([id, notedChoice], [companionId, noted.note]);
+          continue;
+        }
+        const typed = answer === undefined ? undefined : typedAnswer(field, answer);
         if (typed !== undefined) entries.push([id, typed]);
         else if (
           allowOther &&
