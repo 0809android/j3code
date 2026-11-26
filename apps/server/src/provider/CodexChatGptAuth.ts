@@ -85,10 +85,11 @@ const decodeRegistration = Schema.decodeUnknownEffect(
 );
 const encodeRegistration = Schema.encodeEffect(Schema.fromJsonString(RegistrationProfiles));
 const profileMethodId = (clientId: string) => `chatgpt-profile:${clientId}`;
-const isVerifiedRegistration = (
-  profile: typeof Registration.Type,
-  saved: { readonly legacyClientId?: string },
-) => profile.subject !== undefined || profile.clientId === saved.legacyClientId;
+type SavedRegistrations = typeof RegistrationProfiles.Type & {
+  readonly legacyClientId?: string;
+};
+const isVerifiedRegistration = (profile: typeof Registration.Type, saved: SavedRegistrations) =>
+  profile.subject !== undefined || profile.clientId === saved.legacyClientId;
 const Discovery = Schema.Struct({
   issuer: Schema.String,
   authorization_endpoint: Schema.String,
@@ -252,13 +253,10 @@ export const makeCodexChatGptAuth = Effect.fn("makeCodexChatGptAuth")(function* 
     ),
     Effect.flatMap((bytes) =>
       Option.isNone(bytes)
-        ? Effect.succeed<typeof RegistrationProfiles.Type & { readonly legacyClientId?: string }>({
-            profiles: [],
-            lastClientId: null,
-          })
+        ? Effect.succeed<SavedRegistrations>({ profiles: [], lastClientId: null })
         : decodeRegistration(new TextDecoder().decode(bytes.value)).pipe(
-            Effect.map((record) => {
-              const saved =
+            Effect.map((record): SavedRegistrations => {
+              const saved: SavedRegistrations =
                 "profiles" in record
                   ? record
                   : // The single-record format predates saved subjects, so it was used successfully.
