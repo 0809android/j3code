@@ -168,6 +168,32 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("ServerEnvironmen
         });
       }),
   );
+  it.effect("advertises hosted agent approval only when a hosted app is configured", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-server-environment-hosted-test-",
+      });
+      const hostedApproval = (env: Readonly<Record<string, string>>) =>
+        Effect.gen(function* () {
+          const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
+          return (yield* serverEnvironment.getDescriptor).capabilities.mcpHostedApproval;
+        }).pipe(
+          Effect.provide(
+            layerServerEnvironment(baseDir).pipe(
+              Layer.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env }))),
+            ),
+          ),
+        );
+      expect(yield* hostedApproval({})).toBeUndefined();
+      expect(yield* hostedApproval({ K3CODE_HOSTED_APP_URL: "http://insecure.example.test" })).toBe(
+        undefined,
+      );
+      expect(yield* hostedApproval({ K3CODE_HOSTED_APP_URL: "https://hosted.example.test" })).toBe(
+        true,
+      );
+    }),
+  );
   it.effect("names the environment and its machine from the overrides", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
@@ -184,8 +210,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("ServerEnvironmen
               ConfigProvider.layer(
                 ConfigProvider.fromEnv({
                   env: {
-                    T3CODE_ENVIRONMENT_LABEL: " MacBook ",
-                    T3CODE_ENVIRONMENT_MACHINE_KIND: "laptop",
+                    K3CODE_ENVIRONMENT_LABEL: " MacBook ",
+                    K3CODE_ENVIRONMENT_MACHINE_KIND: "laptop",
                   },
                 }),
               ),

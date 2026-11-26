@@ -15,6 +15,10 @@ import * as PlatformConnectionSource from "../platform/source.ts";
 import * as RelayEnvironmentDiscovery from "../relay/discovery.ts";
 import * as RemoteEnvironmentAuthorization from "../authorization/service.ts";
 import * as RpcSession from "../rpc/session.ts";
+import * as K3RelayTunnels from "../k3relay/tunnels.ts";
+import * as K3RelayOnboarding from "../k3relay/pairing.ts";
+import * as K3RelayIntroducer from "../k3relay/introduction.ts";
+import * as K3RelayAccountOnboarding from "../k3relay/accountOnboarding.ts";
 
 export const watchDiscoveredCompatibility = Effect.fn("connection.watchDiscoveredCompatibility")(
   function* () {
@@ -73,14 +77,32 @@ export const watchDiscoveredCompatibility = Effect.fn("connection.watchDiscovere
 
 export function layerWithOptions(options: RpcSession.RpcSessionOptions) {
   const layerDriver = ConnectionDriver.layer.pipe(
-    Layer.provide(Layer.mergeAll(ConnectionResolver.layer, RpcSession.layer(options))),
+    Layer.provide(
+      Layer.mergeAll(
+        ConnectionResolver.layer.pipe(Layer.provide(K3RelayTunnels.layer)),
+        RpcSession.layer(options),
+      ),
+    ),
   );
-  const layerRegistry = EnvironmentRegistry.layer.pipe(Layer.provide(layerDriver));
+  // The same tunnels: removing a relay environment closes its tunnel at once.
+  const layerRegistry = EnvironmentRegistry.layer.pipe(
+    Layer.provide(Layer.mergeAll(layerDriver, K3RelayTunnels.layer)),
+  );
   const layerOnboarding = ConnectionOnboarding.layer.pipe(Layer.provide(layerRegistry));
+  const layerK3RelayOnboarding = K3RelayOnboarding.layer.pipe(Layer.provide(layerRegistry));
+  const layerK3RelayAccountOnboarding = K3RelayAccountOnboarding.layer.pipe(
+    Layer.provide(layerRegistry),
+  );
+  const layerK3RelayIntroducer = K3RelayIntroducer.layer.pipe(
+    Layer.provide(Layer.mergeAll(layerRegistry, K3RelayTunnels.layer)),
+  );
   const layerConnectionServices = Layer.mergeAll(
     layerRegistry,
     RelayEnvironmentDiscovery.layer,
     layerOnboarding,
+    layerK3RelayOnboarding,
+    layerK3RelayAccountOnboarding,
+    layerK3RelayIntroducer,
     ConnectionResolver.layer,
   );
   const layerConnectionStartup = Layer.effectDiscard(

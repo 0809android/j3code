@@ -936,7 +936,7 @@ export const buildCodexTurnStartParams = Effect.fn("CodexAdapterV2.buildCodexTur
             },
           )
         : undefined;
-    // Its own entry, so the folder list reaches the model without T3 Code's MCP tools too.
+    // Its own entry, so the folder list reaches the model without K3 Code's MCP tools too.
     const workspaceInstructions = buildWorkspaceInstructions(input.runtimePolicy);
     const workspaceContext =
       workspaceInstructions === ""
@@ -1775,7 +1775,7 @@ const CODEX_THREAD_ENV_CONFIG_KEY = `shell_environment_policy.set.${PortScanner.
 
 /**
  * One app-server serves every Codex thread on an instance, so each frame is routed to the
- * T3 thread it belongs to. Frames tied to no thread, such as `initialize`, go to the global log.
+ * K3 thread it belongs to. Frames tied to no thread, such as `initialize`, go to the global log.
  */
 function makeCodexProtocolThreadRouter() {
   const threadIdsByNativeId = new Map<string, ThreadId>();
@@ -1949,7 +1949,7 @@ export const layerAppServerClientFactory: Layer.Layer<
               }),
           ),
         );
-        // Its shells carry each thread's T3CODE_THREAD_ID, so port discovery reads listeners' threads.
+        // Its shells carry each thread's K3CODE_THREAD_ID, so port discovery reads listeners' threads.
         yield* Effect.acquireRelease(Effect.sync(portDiscovery.trackAgent), (release) =>
           Effect.sync(release),
         );
@@ -9116,7 +9116,7 @@ export const makeCodexAdapterV2 = Effect.fn("makeCodexAdapterV2")(function* (
                   catch: () =>
                     new ProviderMcpSignInError({
                       server,
-                      detail: `Codex returned a sign-in page for ${server} that T3 Code can't open.`,
+                      detail: `Codex returned a sign-in page for ${server} that K3 Code can't open.`,
                     }),
                 });
                 const redirectUri = params.get("redirect_uri");

@@ -1,0 +1,167 @@
+name: K3 Relay deploy
+
+# Manual only. Deploys one image digest, built by `K3 Relay build`, to the OCI VM over SSH:
+#   1. checks that the digest carries a build provenance signed by that workflow in this repository,
+#      and reads the git commit out of it;
+#   2. copies the compose files of that commit to the VM and runs `docker compose pull && up -d`;
+#   3. asks the live relay at /.well-known/k3-relay and fails unless it reports that same digest and commit.
+#
+# Everything the VM needs is read from the `k3-relay-prod` environment; no value is in this file:
+#   secrets.K3_RELAY_SSH_KEY          private key of the deploy user (ed25519, no passphrase)
+#   secrets.K3_RELAY_SSH_KNOWN_HOSTS  the VM's host key line(s), e.g. `ssh-keyscan -t ed25519 <host>` taken
+#                                     on a trusted network, so the workflow never trusts first contact
+#   secrets.K3_RELAY_SSH_HOST         the VM's address
+#   secrets.K3_RELAY_SSH_USER         the deploy user (needs to run `docker compose`)
+#   vars.K3_RELAY_DEPLOY_DIR          absolute directory on the VM that holds the compose files and `.env`
+#                                     (with RELAY_DOMAIN); created by the VM's setup, not by this workflow
+#   vars.K3_RELAY_URL                 public base URL, e.g. https://relay.k3.kinocode.jp
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_digest:
+        description: "Image digest from the K3 Relay build run, as sha256:<64 hex>"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: k3-relay-deploy
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/kinocode-jp/k3-relay
+
+jobs:
+  deploy:
+    name: Deploy to the OCI VM
+    if: github.repository == 'kinocode-jp/k3code'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment:
+      name: k3-relay-prod
+    env:
+      IMAGE_DIGEST: ${{ inputs.image_digest }}
+      SSH_HOST: ${{ secrets.K3_RELAY_SSH_HOST }}
+      SSH_USER: ${{ secrets.K3_RELAY_SSH_USER }}
+      DEPLOY_DIR: ${{ vars.K3_RELAY_DEPLOY_DIR }}
+      RELAY_URL: ${{ vars.K3_RELAY_URL }}
+    steps:
+      - name: Check the inputs and the tools
+        run: |
+          set -eu
+          printf '%s' "$IMAGE_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$' \
+            || { echo "image_digest must look like sha256:<64 lowercase hex>" >&2; exit 1; }
+          printf '%s' "$DEPLOY_DIR" | grep -Eq '^/[A-Za-z0-9_./-]+$' \
+            || { echo "vars.K3_RELAY_DEPLOY_DIR must be an absolute path of [A-Za-z0-9_./-]" >&2; exit 1; }
+          printf '%s' "$SSH_USER" | grep -Eq '^[a-z_][a-z0-9_-]*$' \
+            || { echo "secrets.K3_RELAY_SSH_USER is missing or malformed" >&2; exit 1; }
+          printf '%s' "$SSH_HOST" | grep -Eq '^[A-Za-z0-9._:-]+$' \
+            || { echo "secrets.K3_RELAY_SSH_HOST is missing or malformed" >&2; exit 1; }
+          case "$RELAY_URL" in
+            https://*) ;;
+            *) echo "vars.K3_RELAY_URL must be an https:// URL" >&2; exit 1 ;;
+          esac
+          [ -n "${{ secrets.K3_RELAY_SSH_KEY != '' && 'set' || '' }}" ] \
+            || { echo "secrets.K3_RELAY_SSH_KEY is missing" >&2; exit 1; }
+          [ -n "${{ secrets.K3_RELAY_SSH_KNOWN_HOSTS != '' && 'set' || '' }}" ] \
+            || { echo "secrets.K3_RELAY_SSH_KNOWN_HOSTS is missing" >&2; exit 1; }
+          for tool in gh jq ssh scp curl docker; do
+            command -v "$tool" >/dev/null || { echo "the runner has no $tool" >&2; exit 1; }
+          done
+
+      # The digest alone does not say where an image came from. Only deploy one whose provenance was
+      # signed by the build workflow of this repository, from main or a release tag. The git commit that
+      # the live relay must report is read from the verified certificate, not typed in.
+      - name: Verify the provenance and read the commit
+        id: provenance
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          printf '%s' "$REGISTRY_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          gh attestation verify "oci://$IMAGE@$IMAGE_DIGEST" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/k3-relay-build.yml" \
+            --format json > "$RUNNER_TEMP/attestation.json"
+          cert='.[0].verificationResult.signature.certificate'
+          commit=$(jq -r "$cert | (.sourceRepositoryDigest // .githubWorkflowSHA)" "$RUNNER_TEMP/attestation.json")
+          ref=$(jq -r "$cert | (.sourceRepositoryRef // .githubWorkflowRef)" "$RUNNER_TEMP/attestation.json")
+          printf '%s' "$commit" | grep -Eq '^[0-9a-f]{40}$' \
+            || { echo "no commit in the attestation: $commit" >&2; exit 1; }
+          case "$ref" in
+            refs/heads/main | refs/tags/k3-relay-v*) ;;
+            *) echo "the image was built from $ref, not from main or a k3-relay-v* tag" >&2; exit 1 ;;
+          esac
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Deploying"
+            echo
+            echo "- image: \`$IMAGE@$IMAGE_DIGEST\`"
+            echo "- commit: \`$commit\` (\`$ref\`)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # The compose files and the scripts come from the commit that was built, so the VM runs the
+      # configuration that was reviewed together with the image.
+      - name: Checkout the built commit
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ steps.provenance.outputs.commit }}
+          sparse-checkout: |
+            /infra/k3-relay/
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Prepare SSH
+        env:
+          SSH_KEY: ${{ secrets.K3_RELAY_SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.K3_RELAY_SSH_KNOWN_HOSTS }}
+        run: |
+          set -eu
+          umask 077
+          mkdir -p "$RUNNER_TEMP/ssh"
+          printf '%s\n' "$SSH_KEY" > "$RUNNER_TEMP/ssh/id"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$RUNNER_TEMP/ssh/known_hosts"
+          cat > "$RUNNER_TEMP/ssh/config" <<EOF
+          Host k3-relay-vm
+            HostName $SSH_HOST
+            User $SSH_USER
+            IdentityFile $RUNNER_TEMP/ssh/id
+            IdentitiesOnly yes
+            BatchMode yes
+            StrictHostKeyChecking yes
+            UserKnownHostsFile $RUNNER_TEMP/ssh/known_hosts
+            ConnectTimeout 15
+          EOF
+
+      - name: Copy the compose files
+        run: |
+          set -eu
+          scp -F "$RUNNER_TEMP/ssh/config" \
+            infra/k3-relay/docker-compose.example.yml \
+            infra/k3-relay/Caddyfile \
+            infra/k3-relay/scripts/docker-compose.deploy.yml \
+            "k3-relay-vm:$DEPLOY_DIR/"
+
+      - name: Pull and start
+        run: |
+          set -eu
+          ssh -F "$RUNNER_TEMP/ssh/config" k3-relay-vm sh -s -- "$DEPLOY_DIR" "$IMAGE_DIGEST" \
+            < infra/k3-relay/scripts/deploy-remote.sh
+
+      # The check that matters: the relay that answers on the internet must name the digest and the
+      # commit that were just deployed. A mismatch fails the run.
+      - name: Check what the live relay reports
+        env:
+          COMMIT: ${{ steps.provenance.outputs.commit }}
+        run: sh infra/k3-relay/scripts/verify-live.sh "$RELAY_URL" "$IMAGE_DIGEST" "$COMMIT"
+
+      - name: Remove the SSH material
+        if: always()
+        run: |
+          rm -rf "$RUNNER_TEMP/ssh" "$RUNNER_TEMP/attestation.json"
+          docker logout ghcr.io || true

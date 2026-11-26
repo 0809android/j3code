@@ -210,6 +210,7 @@ const handler = Effect.gen(function* () {
     (!readOnly && /\/api\/(stream-(mode|settings)|fold)$/.test(hubPath));
   const session = yield* authenticateMediaRequest(
     controlsDevice ? AuthOrchestrationOperateScope : AuthOrchestrationReadScope,
+    "device-hub",
   );
   const sessions = yield* SessionStore.SessionStore;
   const invalidated = sessions.awaitInvalidation(session.sessionId).pipe(

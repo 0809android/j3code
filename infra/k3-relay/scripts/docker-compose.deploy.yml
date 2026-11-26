@@ -1,0 +1,13 @@
+# Layered over docker-compose.example.yml by the deploy workflow (and by anyone who wants to run the
+# exact image that CI built instead of building it themselves):
+#
+#   IMAGE_DIGEST=sha256:... RELAY_DOMAIN=relay.example.com \
+#     docker compose -f docker-compose.example.yml -f scripts/docker-compose.deploy.yml up -d --no-build
+#
+# The image is named by digest, never by tag, so what runs is what was verified. The base file's
+# `build:` stays in place but is never used with --no-build. IMAGE_DIGEST also reaches the relay as an
+# environment variable (docker-compose.example.yml), which is what /.well-known/k3-relay reports.
+services:
+  relay:
+    image: ghcr.io/kinocode-jp/k3-relay@${IMAGE_DIGEST:?set IMAGE_DIGEST to sha256:<64 hex>}
+    pull_policy: always

@@ -98,6 +98,12 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.serverGetDatabaseStorage]: AuthOrchestrationReadScope,
   [WS_METHODS.serverGetSettings]: AuthOrchestrationReadScope,
   [WS_METHODS.peerLinksList]: AuthAccessReadScope,
+  // The relay's state, pairing window and device ledger, as the access list shows its clients.
+  [WS_METHODS.k3RelaySubscribe]: AuthAccessReadScope,
+  // Whether this host is on an account, and the approval policy, read like the relay state.
+  [WS_METHODS.k3RelayAccountSubscribe]: AuthAccessReadScope,
+  // A relayed device removes only itself (the host reads it from the session), as signing out does.
+  [WS_METHODS.k3RelayForgetThisDevice]: AuthOrchestrationReadScope,
   // Names only, so a client that reads threads can open a linked environment's.
   [WS_METHODS.peerLinksNames]: AuthOrchestrationReadScope,
   // A linked environment's thread is read as this one's own are.
@@ -192,6 +198,9 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.filesystemGetMetadata]: AuthFilesystemReadScope,
   [WS_METHODS.agentSessionsScan]: AuthOrchestrationReadScope,
   [WS_METHODS.agentSessionsImport]: AuthOrchestrationOperateScope,
+  [WS_METHODS.legacyImportScan]: AuthSettingsWriteScope,
+  [WS_METHODS.legacyImportRun]: AuthSettingsWriteScope,
+  [WS_METHODS.legacyImportRestart]: AuthEnvironmentMaintainScope,
   [WS_METHODS.assetsCreateUrl]: AuthOrchestrationReadScope,
   [WS_METHODS.assetsPersistChatAttachments]: AuthOrchestrationOperateScope,
   [WS_METHODS.attachmentsCreateUploadUrl]: AuthOrchestrationOperateScope,
@@ -348,22 +357,12 @@ const requiredScopesForRpcCall = (
     : scopes;
 };
 
-/**
- * `onAuthorized` runs once after an authorized request succeeds; for a stream
- * RPC, that is when the stream completes. Every RPC passes through here, so it
- * is the one place to observe requests without wrapping each handler.
- */
-export const layer = (
-  scopes: ReadonlyArray<AuthEnvironmentScope>,
-  onAuthorized?: (method: string, payload: unknown) => Effect.Effect<void>,
-) =>
+export const layer = (scopes: ReadonlyArray<AuthEnvironmentScope>) =>
   Layer.succeed(RpcScopeAuthorization)((effect, { rpc, payload }) => {
     const requiredScopes = requiredScopesForRpcCall(rpc._tag, payload);
     const requiredScope = requiredScopes.find((scope) => !scopes.includes(scope));
     if (requiredScope !== undefined) return Effect.fail(rpcAuthorizationError(requiredScope));
-    return onAuthorized === undefined
-      ? effect
-      : Effect.tap(effect, () => onAuthorized(rpc._tag, payload));
+    return effect;
   });
 
 /** Retrying can install or restart tools even though ordinary listing is readable. */

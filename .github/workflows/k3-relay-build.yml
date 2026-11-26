@@ -1,0 +1,247 @@
+name: K3 Relay build
+
+# Builds the K3 Relay image (linux/amd64 + linux/arm64), pushes it to GHCR from main and from
+# `k3-relay-v*` tags only, and attaches a signed build provenance to the pushed digest, so that anyone
+# can check with `gh attestation verify` that the image came from this repository and this workflow
+# (spec section 15; how to verify: infra/k3-relay/docs/VERIFY.md).
+#
+# Pull requests build the image to prove it builds, and never push or sign anything.
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "k3-relay-v*"
+    paths:
+      - "infra/k3-relay/**"
+      - ".github/workflows/k3-relay-build.yml"
+  pull_request:
+    paths:
+      - "infra/k3-relay/**"
+      - ".github/workflows/k3-relay-build.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: k3-relay-build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  IMAGE: ghcr.io/kinocode-jp/k3-relay
+
+jobs:
+  data-inventory:
+    name: docs/DATA.md matches the schema
+    if: github.repository == 'kinocode-jp/k3code'
+    # GitHub-hosted: this job runs code from the pull request, so it must not run on the self-hosted runner.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          sparse-checkout: |
+            /.github/actions/setup-ci-deps/
+            /pnpm-workspace.yaml
+            /package.json
+            /infra/k3-relay/
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Node.js
+        uses: ./.github/actions/setup-ci-deps
+        with:
+          install: "false"
+
+      # The script has no dependencies. It runs the real schema against an in-memory SQLite and
+      # compares the Markdown it generates with the committed infra/k3-relay/docs/DATA.md.
+      - name: Check the data inventory
+        run: node infra/k3-relay/scripts/generate-data-inventory.ts --check
+
+  build:
+    name: Build and attest the image
+    needs: data-inventory
+    # Fork pull requests get no secrets and the image is built on GitHub-hosted runners (the self-hosted runner group does not serve public repositories).
+    if: >-
+      github.repository == 'kinocode-jp/k3code' &&
+      (github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      pushed: ${{ steps.plan.outputs.push }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          sparse-checkout: |
+            /infra/k3-relay/
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      # The hosted runner is amd64; arm64 is built under emulation.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          platforms: arm64
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Plan the tags
+        id: plan
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -eu
+          push=false
+          tags="$IMAGE:pr-build"
+          if [ "$EVENT_NAME" = "push" ]; then
+            push=true
+            tags="$IMAGE:sha-$GITHUB_SHA"
+            case "$REF" in
+              refs/heads/main)
+                tags="$tags,$IMAGE:main"
+                ;;
+              refs/tags/k3-relay-v*)
+                version="${REF_NAME#k3-relay-}"
+                printf '%s' "$version" | grep -Eq '^v[0-9][0-9A-Za-z.+-]*$' || { echo "bad tag: $REF_NAME" >&2; exit 1; }
+                tags="$tags,$IMAGE:$version"
+                ;;
+            esac
+          fi
+          # Reproducible builds need a fixed clock: the commit's own time.
+          {
+            echo "push=$push"
+            echo "tags=$tags"
+            echo "source_date_epoch=$(git log -1 --format=%ct)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        if: steps.plan.outputs.push == 'true'
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # No metadata-action, no labels and no BuildKit provenance or SBOM: all of them put a timestamp
+      # or a builder identity into the manifest, and the image digest has to depend on the source alone.
+      # The signed provenance below is attached to the digest separately.
+      # rewrite-timestamp clamps every layer file to SOURCE_DATE_EPOCH.
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: infra/k3-relay
+          platforms: linux/amd64,linux/arm64
+          push: ${{ steps.plan.outputs.push == 'true' }}
+          tags: ${{ steps.plan.outputs.tags }}
+          build-args: |
+            GIT_COMMIT=${{ github.sha }}
+            SOURCE_DATE_EPOCH=${{ steps.plan.outputs.source_date_epoch }}
+          provenance: false
+          sbom: false
+          outputs: type=image,rewrite-timestamp=true
+
+      - name: Attest the build provenance
+        if: steps.plan.outputs.push == 'true'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - name: Report the digest
+        if: steps.plan.outputs.push == 'true'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          {
+            echo "## K3 Relay image"
+            echo
+            echo "- image: \`$IMAGE@$DIGEST\`"
+            echo "- commit: \`$GITHUB_SHA\`"
+            echo
+            echo "Verify the provenance:"
+            echo
+            echo '```sh'
+            echo "gh attestation verify oci://$IMAGE@$DIGEST --repo $GITHUB_REPOSITORY"
+            echo '```'
+            echo
+            echo "Deploy it with the \`K3 Relay deploy\` workflow, giving this digest."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "image digest: $DIGEST"
+
+  # Rebuilds the same commit from scratch, without pushing, and compares the digest with the pushed one.
+  # This is the check a third party makes (docs/VERIFY.md), run on every push. A mismatch does not stop
+  # the release, but it shows up in the run so that a build that stopped being reproducible is noticed.
+  reproduce:
+    name: Rebuild and compare digests
+    needs: build
+    if: needs.build.outputs.pushed == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          sparse-checkout: |
+            /infra/k3-relay/
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          platforms: arm64
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Rebuild without cache
+        env:
+          RUNNER_TEMP_DIR: ${{ runner.temp }}
+        run: |
+          set -eu
+          docker buildx build infra/k3-relay \
+            --no-cache \
+            --platform linux/amd64,linux/arm64 \
+            --build-arg "GIT_COMMIT=$GITHUB_SHA" \
+            --build-arg "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" \
+            --provenance=false --sbom=false \
+            --output "type=oci,dest=$RUNNER_TEMP_DIR/rebuild.tar,rewrite-timestamp=true"
+          tar -xOf "$RUNNER_TEMP_DIR/rebuild.tar" index.json > "$RUNNER_TEMP_DIR/index.json"
+          jq -r '.manifests[0].digest' "$RUNNER_TEMP_DIR/index.json" > "$RUNNER_TEMP_DIR/rebuilt-digest"
+
+      - name: Compare with the pushed digest
+        env:
+          PUSHED: ${{ needs.build.outputs.digest }}
+          RUNNER_TEMP_DIR: ${{ runner.temp }}
+        run: |
+          set -eu
+          rebuilt=$(cat "$RUNNER_TEMP_DIR/rebuilt-digest")
+          {
+            echo "## Reproducibility check"
+            echo
+            echo "- pushed:  \`$PUSHED\`"
+            echo "- rebuilt: \`$rebuilt\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$rebuilt" != "$PUSHED" ]; then
+            echo "The rebuild produced a different digest." | tee -a "$GITHUB_STEP_SUMMARY" >&2
+            exit 1
+          fi
+          echo "The rebuild matches." >> "$GITHUB_STEP_SUMMARY"

@@ -8,7 +8,6 @@ import type {
   DesktopPreviewTabState,
   DesktopSnapShotEvent,
 } from "@t3tools/contracts";
-import { exposeClerkBridge } from "@clerk/electron/preload";
 import { contextBridge, ipcRenderer, webFrame, webUtils } from "electron";
 
 import * as IpcChannels from "./ipc/channels.ts";
@@ -30,8 +29,6 @@ function isSnapShotEvent(value: unknown): value is DesktopSnapShotEvent {
     (id === undefined || typeof id === "string")
   );
 }
-
-exposeClerkBridge({ passkeys: true });
 
 // Runs before any app script reads localStorage. See DesktopLegacyLocalStorage.
 try {
@@ -571,3 +568,21 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     },
   },
 } satisfies DesktopBridge);
+
+// K3 Relay device keys stay out of `desktopBridge`, whose type lives in the shared contracts.
+contextBridge.exposeInMainWorld("k3relayDeviceKeys", {
+  read: async (keyId: string): Promise<string | null> => {
+    const result: unknown = await ipcRenderer.invoke(
+      IpcChannels.K3RELAY_DEVICE_KEY_READ_CHANNEL,
+      keyId,
+    );
+    return typeof result === "string" ? result : null;
+  },
+  write: async (keyId: string, secret: string): Promise<boolean> =>
+    (await ipcRenderer.invoke(IpcChannels.K3RELAY_DEVICE_KEY_WRITE_CHANNEL, {
+      keyId,
+      secret,
+    })) === true,
+  remove: async (keyId: string): Promise<boolean> =>
+    (await ipcRenderer.invoke(IpcChannels.K3RELAY_DEVICE_KEY_REMOVE_CHANNEL, keyId)) === true,
+});

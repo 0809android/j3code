@@ -9,8 +9,14 @@ import type {
   ConnectionAttemptError,
   ConnectionFailureCause,
   ConnectionHop,
+  K3RelayFailureReason,
   SupervisorConnectionState,
 } from "./model.ts";
+import {
+  k3relayDiagnosisHops,
+  k3relayFailureSteps,
+  k3relayFailureText,
+} from "../k3relay/failure.ts";
 import { mFallback, msg } from "gt-i18n";
 import type { MFunctionType } from "gt-i18n/types";
 
@@ -111,7 +117,7 @@ function headline(
     case "approval_pending":
       return resolve(msg("{host} is waiting for someone to approve this device", { host }));
     case "outdated":
-      return resolve(msg("{host} runs an older T3 Code", { host }));
+      return resolve(msg("{host} runs an older K3 Code", { host }));
     case "clock_skew":
       return resolve(msg("This device's clock is off"));
     case "not_linked":
@@ -126,9 +132,9 @@ function headline(
     case "tunnel_down":
       return resolve(msg("{host}'s tunnel is offline", { host }));
     case "origin_unreachable":
-      return resolve(msg("Tunnel works, but T3 Code on {host} did not answer", { host }));
+      return resolve(msg("Tunnel works, but K3 Code on {host} did not answer", { host }));
     case "invalid_response":
-      return resolve(msg("T3 Code on {host} sent an unexpected answer", { host }));
+      return resolve(msg("K3 Code on {host} sent an unexpected answer", { host }));
     case "dns":
       return resolve(msg("{host}'s tunnel address did not resolve", { host }));
     case "tls":
@@ -157,8 +163,8 @@ function headline(
         : resolve(msg("T3 Connect could not reach {host}'s tunnel", { host }));
     case "server":
       return failure?.reason === "authentication" || failure?.reason === "permission"
-        ? resolve(msg("T3 Code on {host} did not accept this device", { host }))
-        : resolve(msg("T3 Code on {host} did not answer", { host }));
+        ? resolve(msg("K3 Code on {host} did not accept this device", { host }))
+        : resolve(msg("K3 Code on {host} did not answer", { host }));
   }
 }
 
@@ -173,11 +179,11 @@ function steps(
   );
   switch (located.cause) {
     case "offline":
-      return [resolve(msg("Connect this device to the internet. T3 Code reconnects on its own."))];
+      return [resolve(msg("Connect this device to the internet. K3 Code reconnects on its own."))];
     case "session_pending":
       return [
-        resolve(msg("Wait a moment. T3 Code retries on its own.")),
-        resolve(msg("If it keeps waiting, reload or restart T3 Code on this device.")),
+        resolve(msg("Wait a moment. K3 Code retries on its own.")),
+        resolve(msg("If it keeps waiting, reload or restart K3 Code on this device.")),
       ];
     case "approval_pending": {
       const code =
@@ -205,7 +211,7 @@ function steps(
       ];
     }
     case "outdated":
-      return [resolve(msg("Update T3 Code on {host}.", { host }))];
+      return [resolve(msg("Update K3 Code on {host}.", { host }))];
     case "clock_skew":
       return [
         resolve(
@@ -224,10 +230,10 @@ function steps(
         ),
       ];
     case "tunnel_pending":
-      return [resolve(msg("Wait a minute. T3 Code retries on its own.")), checkHost];
+      return [resolve(msg("Wait a minute. K3 Code retries on its own.")), checkHost];
     case "relay_error":
       return [
-        resolve(msg("Wait a few minutes. T3 Code retries on its own.")),
+        resolve(msg("Wait a few minutes. K3 Code retries on its own.")),
         resolve(msg("If it keeps failing, copy the diagnostics and report it.")),
       ];
     case "tunnel_not_enabled":
@@ -239,7 +245,7 @@ function steps(
     case "released":
     case "tunnel_down":
       return [
-        resolve(msg("Make sure {host} is awake and T3 Code is running on it.", { host })),
+        resolve(msg("Make sure {host} is awake and K3 Code is running on it.", { host })),
         checkHost,
         resolve(
           msg(
@@ -250,7 +256,7 @@ function steps(
       ];
     case "origin_unreachable":
     case "invalid_response":
-      return [resolve(msg("Open or restart T3 Code on {host}.", { host })), checkHost];
+      return [resolve(msg("Open or restart K3 Code on {host}.", { host })), checkHost];
     // The relay saw these on its way to the host, so the fix is on the host.
     case "dns":
     case "tls":
@@ -264,7 +270,7 @@ function steps(
   switch (located.hop) {
     case "device":
       return [
-        resolve(msg("Restart T3 Code on this device.")),
+        resolve(msg("Restart K3 Code on this device.")),
         resolve(
           msg("If it keeps failing, remove {host} from this device and add it again.", { host }),
         ),
@@ -296,7 +302,7 @@ function steps(
             ),
           ]
         : [
-            resolve(msg("Make sure T3 Code is running on {host}.", { host })),
+            resolve(msg("Make sure K3 Code is running on {host}.", { host })),
             resolve(msg("Retry. If it keeps failing, copy the diagnostics.")),
           ];
   }
@@ -310,7 +316,7 @@ function helpSection(
     case "offline":
       return "this-device-cant-reach-t3-connect";
     case "outdated":
-      return "the-host-runs-an-older-t3-code";
+      return "the-host-runs-an-older-k3-code";
     case "clock_skew":
       return "the-clock-is-off";
     case "session_pending":
@@ -326,7 +332,7 @@ function helpSection(
       return "the-hosts-tunnel-is-offline";
     case "origin_unreachable":
     case "invalid_response":
-      return "the-tunnel-works-but-t3-code-does-not-answer";
+      return "the-tunnel-works-but-k3-code-does-not-answer";
     case "dns":
     case "tls":
     case "refused":
@@ -352,7 +358,7 @@ function helpSection(
     case "server":
       return failure?.reason === "authentication" || failure?.reason === "permission"
         ? "sign-in-account-or-link-problems"
-        : "the-tunnel-works-but-t3-code-does-not-answer";
+        : "the-tunnel-works-but-k3-code-does-not-answer";
   }
 }
 
@@ -372,7 +378,7 @@ function hopLabel(hop: ConnectionHop, host: string, resolve: MFunctionType): str
     case "tunnel":
       return resolve(msg("{host} tunnel", { host }));
     case "server":
-      return resolve(msg("T3 Code on {host}", { host }));
+      return resolve(msg("K3 Code on {host}", { host }));
   }
 }
 
@@ -384,6 +390,10 @@ export function presentConnectionDiagnosis(
   input: ConnectionDiagnosisInput,
   resolve: MFunctionType = mFallback,
 ): ConnectionDiagnosis | null {
+  const k3relayReason = input.state.lastFailure?.k3relayReason;
+  if (k3relayReason !== undefined && input.state.network !== "offline") {
+    return presentK3RelayDiagnosis(input, k3relayReason, resolve);
+  }
   const located = locate(input);
   if (located === null) return null;
   const host = input.hostLabel;
@@ -448,12 +458,42 @@ export function presentConnectionDiagnosis(
   };
 }
 
+/** K3 Relay failures carry the relay's or host's own reason, so no hop needs guessing. */
+function presentK3RelayDiagnosis(
+  input: ConnectionDiagnosisInput,
+  reason: K3RelayFailureReason,
+  resolve: MFunctionType,
+): ConnectionDiagnosis {
+  const host = input.hostLabel;
+  const failure = input.state.lastFailure;
+  const facts: Array<readonly [string, string]> = [
+    [resolve(msg("Cause", { $context: "diagnostics field label" })), reason],
+    [resolve(msg("Route", { $context: "diagnostics field label" })), "K3 Relay"],
+  ];
+  if (input.state.attempt > 0) {
+    facts.push([
+      resolve(msg("Attempts", { $context: "diagnostics field label" })),
+      String(input.state.attempt),
+    ]);
+  }
+  if (input.clientVersion) facts.push([resolve(msg("App version")), input.clientVersion]);
+  if (input.serverVersion) facts.push([resolve(msg("Host version")), input.serverVersion]);
+  if (failure?.traceId) facts.push([resolve(msg("Trace ID")), failure.traceId]);
+  return {
+    headline: k3relayFailureText(reason, host, resolve),
+    hops: k3relayDiagnosisHops(reason, host, resolve),
+    steps: k3relayFailureSteps(reason, host, resolve),
+    facts,
+    moreInfoUrl: null,
+  };
+}
+
 const HOP_MARK = { ok: "ok", failed: "FAILED", unchecked: "not checked" } as const;
 
 /** One plain-text block for bug reports. */
 export function connectionDiagnosisText(hostLabel: string, diagnosis: ConnectionDiagnosis): string {
   return [
-    `T3 Code connection to ${hostLabel}: ${diagnosis.headline}`,
+    `K3 Code connection to ${hostLabel}: ${diagnosis.headline}`,
     "",
     ...diagnosis.hops.map((hop) => `${hop.label}: ${HOP_MARK[hop.result]}`),
     "",

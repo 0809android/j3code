@@ -49,6 +49,7 @@ import { Input } from "../ui/input";
 import { OpenAI } from "../Icons";
 import { RedactedSensitiveText } from "./RedactedSensitiveText";
 import { SettingsRow } from "./settingsLayout";
+import { configuredHostedAppUrl } from "../../hostedPairing";
 import { AddCodexAccountDialog } from "./AddCodexAccountDialog";
 import { getOnboardingProviderState } from "../../onboarding/providerReadiness.logic";
 import { getProviderSummary } from "./providerStatus";
@@ -648,11 +649,11 @@ function ManagedCodexSetup({
                 ? gt("Using your installed Codex · v{version}.", {
                     version: installation.installedVersion,
                   })
-                : gt("Managed by T3 Code · v{version}.", { version: installation.installedVersion })
+                : gt("Managed by K3 Code · v{version}.", { version: installation.installedVersion })
               : installation?.source === "local"
                 ? gt("Using your installed Codex.")
-                : gt("Managed by T3 Code.")
-            : (installation?.message ?? gt("T3 Code downloads and manages Codex for you."));
+                : gt("Managed by K3 Code.")
+            : (installation?.message ?? gt("K3 Code downloads and manages Codex for you."));
   const accountDescription = finishingSignIn ? (
     gt("Finishing sign-in...")
   ) : installActive ? (
@@ -685,7 +686,10 @@ function ManagedCodexSetup({
   );
 
   const handoffUrl =
-    needsManualCallback && url && auth?.flowId && providerAuthReturnUrl(returnUrl.toString())
+    needsManualCallback &&
+    url &&
+    auth?.flowId &&
+    providerAuthReturnUrl(returnUrl.toString(), configuredHostedAppUrl())
       ? codexAuthHandoffUrl(
           {
             authorizationUrl: url,
@@ -732,7 +736,7 @@ function ManagedCodexSetup({
     !handoff && auth?.phase === "waiting" && url ? (
       <div className="flex w-full flex-col gap-3 text-xs leading-relaxed text-muted-foreground">
         <p>
-          <T>If sign-in doesn't return to T3 Code, paste the URL from the final localhost page.</T>
+          <T>If sign-in doesn't return to K3 Code, paste the URL from the final localhost page.</T>
         </p>
         <form
           className="flex flex-col gap-2 sm:flex-row sm:items-center"
@@ -791,7 +795,7 @@ function ManagedCodexSetup({
               <T>Other ways to connect</T>
             </summary>
             <Button className="mt-2" size="sm" variant="outline" render={<a href={handoffUrl} />}>
-              <T>Use T3 desktop for automatic return</T>
+              <T>Use K3 desktop for automatic return</T>
             </Button>
           </details>
         ) : null}
@@ -1142,7 +1146,7 @@ export function CodexManagedRuntimeFields({
     <>
       <SettingsRow
         title={gt("Binary path")}
-        description={gt("Selected by T3 Code.")}
+        description={gt("Selected by K3 Code.")}
         control={
           <div className="w-full sm:w-80">
             <Input

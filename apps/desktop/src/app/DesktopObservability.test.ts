@@ -63,7 +63,7 @@ const layerEnvironmentFor = (
       Layer.mergeAll(
         NodeServices.layer,
         DesktopConfig.layerTest({
-          T3CODE_HOME: baseDir,
+          K3CODE_HOME: baseDir,
           VITE_DEV_SERVER_URL: isDevelopment ? "http://127.0.0.1:5733" : undefined,
           ...env,
         }),
@@ -388,7 +388,7 @@ describe("DesktopObservability", () => {
         body,
         `"key":"process.runtime.version","value":{"stringValue":"${process.versions.node}"}`,
       );
-      assert.include(body, '"key":"t3code.desktop.mode","value":{"stringValue":"development"}');
+      assert.include(body, '"key":"k3code.desktop.mode","value":{"stringValue":"development"}');
       assert.notInclude(body, "service.mode");
     }).pipe(
       Effect.scoped,

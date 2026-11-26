@@ -1629,7 +1629,7 @@ function toSessionKey(threadId: string, terminalId: string): string {
 
 function shouldExcludeTerminalEnvKey(key: string): boolean {
   const normalizedKey = key.toUpperCase();
-  if (normalizedKey.startsWith("T3CODE_")) {
+  if (normalizedKey.startsWith("K3CODE_")) {
     return true;
   }
   if (normalizedKey.startsWith("VITE_")) {
@@ -1696,7 +1696,7 @@ function createTerminalSpawnEnv(
     spawnEnv[key] = value;
   }
   // The server inherits its launcher's identity (e.g. Apple_Terminal); shells
-  // and tools inside the integrated terminal should see T3 Code instead.
+  // and tools inside the integrated terminal should see K3 Code instead.
   spawnEnv.TERM_PROGRAM = "t3code";
   spawnEnv.TERM_PROGRAM_VERSION = packageJson.version;
   if (runtimeEnv) {
@@ -2936,7 +2936,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
               shellResolver,
               platform,
               baseEnv,
-              session.runtimeEnv?.T3CODE_TERMINAL_SHELL ?? baseEnv.T3CODE_TERMINAL_SHELL,
+              session.runtimeEnv?.K3CODE_TERMINAL_SHELL ?? baseEnv.K3CODE_TERMINAL_SHELL,
             ).pipe(Effect.provideService(FileSystem.FileSystem, fileSystem));
             const terminalEnv = createTerminalSpawnEnv(
               baseEnv,

@@ -91,6 +91,26 @@ describe("resolveMcpGate", () => {
     ).toBe("open");
   });
 
+  it("opens directly with a local, LAN, or WireGuard MCP URL without T3 Connect sign-in", () => {
+    expect(
+      resolveMcpGate({
+        ...open,
+        signedIn: false,
+        canReadRelay: false,
+        linkState: null,
+        directMcpUrl: "http://127.0.0.1:13773/mcp",
+      }),
+    ).toEqual({ kind: "open", mcpUrl: "http://127.0.0.1:13773/mcp" });
+    expect(
+      resolveMcpGate({
+        ...open,
+        signedIn: false,
+        connected: false,
+        directMcpUrl: "http://127.0.0.1:13773/mcp",
+      }),
+    ).toEqual({ kind: "disconnected", relay: null });
+  });
+
   it.each([
     ["no T3 Connect sign-in", { ...open, signedIn: false }, "sign-in"],
     ["no permission to read T3 Connect", { ...open, canReadRelay: false }, "no-relay-read"],
@@ -143,7 +163,7 @@ describe("resolveMcpGate", () => {
           cause: "no_connector",
           reason: "Cloudflare has no live connection from this machine for the tunnel.",
           hint: null,
-          fix: "Restart T3 Code.",
+          fix: "Restart K3 Code.",
         },
       },
       "offline",

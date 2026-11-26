@@ -42,6 +42,7 @@ import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import { FetchHttpClient } from "effect/http";
+import * as K3RelayDeviceKeys from "./k3relayDeviceKeys";
 
 import { APP_VERSION } from "../branding";
 import { readDesktopPrimaryBearerToken } from "../environments/primary/desktopAuth";
@@ -53,7 +54,6 @@ import {
 import { clearComposerDraftsEnvironment } from "../composerDraftStore";
 import { isHostedStaticApp } from "../hostedPairing";
 import { isLocalEnvironmentDisabled } from "../localEnvironment";
-import { randomUUID } from "../lib/utils";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { acknowledgeRpcRequest, trackRpcRequestSent } from "../rpc/requestLatencyState";
 import {
@@ -275,7 +275,7 @@ export const provisionDesktopSshEnvironment = Effect.fn(
         reason: "configuration",
         detail: m(
           msg(
-            "{label} runs T3 Code {serverVersion}, but this desktop is {appVersion}, and that server could not accept its pairing. Restart the T3 server on {label} so it runs {appVersion}, then retry.",
+            "{label} runs K3 Code {serverVersion}, but this desktop is {appVersion}, and that server could not accept its pairing. Restart the K3 server on {label} so it runs {appVersion}, then retry.",
             {
               label: descriptor.label,
               serverVersion: descriptor.serverVersion,
@@ -347,21 +347,6 @@ export const prepareDesktopSshEnvironment = Effect.fn("web.connectionPlatform.ss
     return { bootstrap: provisioned.bootstrap, bearerToken: provisioned.bearerToken };
   },
 );
-
-const ANALYTICS_DEVICE_ID_KEY = "t3code:analytics-device-id";
-
-// Lives as long as this browser profile's site data. Storage can be blocked, which only drops the id.
-const analyticsDevice = {
-  id: Effect.sync(
-    Option.liftThrowable(() => {
-      const existing = window.localStorage.getItem(ANALYTICS_DEVICE_ID_KEY);
-      if (existing) return existing;
-      const created = randomUUID();
-      window.localStorage.setItem(ANALYTICS_DEVICE_ID_KEY, created);
-      return created;
-    }),
-  ),
-};
 
 const layerCapabilities = Layer.effectContext(
   Effect.sync(() => {
@@ -458,7 +443,6 @@ const layerCapabilities = Layer.effectContext(
     });
 
     return Context.make(ClientCapabilities.CloudSession, cloudSession).pipe(
-      Context.add(ClientCapabilities.AnalyticsDevice, analyticsDevice),
       Context.add(ClientCapabilities.PrimaryEnvironmentAuth, primaryAuth),
       Context.add(ClientCapabilities.RelayDeviceIdentity, identity),
       Context.add(ClientCapabilities.ClientPresentation, presentation),
@@ -865,6 +849,7 @@ const layerRpcRequestObserver = Layer.succeed(
 
 type ConnectionPlatformLayerSource =
   | typeof ConnectionStorage.layer
+  | typeof K3RelayDeviceKeys.layer
   | typeof layerConnectivity
   | typeof layerWakeups
   | typeof layerCapabilities
@@ -878,6 +863,7 @@ export const layer: Layer.Layer<
   Layer.Services<ConnectionPlatformLayerSource>
 > = Layer.mergeAll(
   ConnectionStorage.layer,
+  K3RelayDeviceKeys.layer,
   layerConnectivity,
   layerWakeups,
   layerCapabilities,

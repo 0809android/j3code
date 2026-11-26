@@ -1,6 +1,6 @@
 import { msg } from "gt-i18n";
 import { translatableDetail } from "../errors/translatable.ts";
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId, WS_METHODS } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Equal from "effect/Equal";
@@ -21,10 +21,13 @@ import {
   type ConnectionProfile,
   type ConnectionRegistration,
   type ConnectionRoute,
+  type K3RelayConnectionProfile,
   type PlatformConnectionRegistration,
   SshConnectionProfile,
   connectionRegistrationCatalogEntry,
 } from "./catalog.ts";
+import { DeviceKeyStore } from "../k3relay/deviceKeyStore.ts";
+import { K3RelayTunnels } from "../k3relay/tunnels.ts";
 import * as ConnectionCredentialStore from "./credentialStore.ts";
 import * as ConnectionProfileStore from "./profileStore.ts";
 import * as Connectivity from "./connectivity.ts";
@@ -59,6 +62,8 @@ import {
 } from "./routes.ts";
 
 const isSshConnectionProfile = Schema.is(SshConnectionProfile);
+/** Removing a relay pairing waits this long at most for the host to hear about it. */
+const K3RELAY_FORGET_TIMEOUT = "3 seconds";
 
 function unsupportedState(
   entry: ConnectionCatalogEntry,
@@ -222,13 +227,17 @@ export const make = Effect.gen(function* () {
   const driver = yield* ConnectionDriver.ConnectionDriver;
   const wakeups = yield* ConnectionWakeups.ConnectionWakeups;
   const ssh = yield* ClientCapabilities.SshEnvironmentGateway;
+  const deviceKeys = yield* Effect.serviceOption(DeviceKeyStore);
+  const k3relayTunnels = yield* Effect.serviceOption(K3RelayTunnels);
   const persistedTargets = yield* storage.list;
   const disabledEnvironmentIds = new Set(yield* storage.listDisabled);
   const loadRoute = Effect.fn("EnvironmentRegistry.loadRoute")(function* (
     target: ConnectionTarget,
   ) {
     const profile: Option.Option<ConnectionProfile> =
-      target._tag === "BearerConnectionTarget" || target._tag === "SshConnectionTarget"
+      target._tag === "BearerConnectionTarget" ||
+      target._tag === "SshConnectionTarget" ||
+      target._tag === "K3RelayConnectionTarget"
         ? yield* profiles.get(target.connectionId)
         : Option.none();
     return { target, profile } satisfies ConnectionRoute;
@@ -370,6 +379,7 @@ export const make = Effect.gen(function* () {
             // before an enabled, compatible environment starts connecting.
             initiallyDesired: entry.enabled && entry.unsupportedReason === undefined,
             learnRoutes: (input) => learnRoutes({ environmentId, ...input }),
+            adoptK3RelayProfile: (profile) => adoptK3RelayProfile(environmentId, profile),
           }).pipe(
             Effect.provideService(Connectivity.Connectivity, connectivity),
             Effect.provideService(ConnectionDriver.ConnectionDriver, driver),
@@ -860,6 +870,26 @@ export const make = Effect.gen(function* () {
     }
   }, reconcileLock.withPermits(1));
 
+  /**
+   * A device paired through a K3 relay tells the host to take it off its ledger, so the host's
+   * device list does not keep a phone that is gone. Only over a live session, briefly: the device
+   * forgets the pairing either way, and the host can still revoke it.
+   */
+  const forgetOnK3RelayHost = Effect.fn("EnvironmentRegistry.forgetOnK3RelayHost")(function* (
+    environmentId: EnvironmentId,
+  ) {
+    const lease = (yield* SubscriptionRef.get(serviceScopes)).get(environmentId);
+    if (lease === undefined) return;
+    const session = yield* SubscriptionRef.get(lease.supervisor.session);
+    if (Option.isNone(session)) return;
+    yield* session.value.client[WS_METHODS.k3RelayForgetThisDevice]({}).pipe(
+      Effect.timeout(K3RELAY_FORGET_TIMEOUT),
+      Effect.catchCause((cause) =>
+        Effect.logInfo("The relay host was not told this device left.", { environmentId, cause }),
+      ),
+    );
+  });
+
   /** Callers hold its lease lock. */
   const removeLocked = Effect.fn("EnvironmentRegistry.removeLocked")(function* (
     environmentId: EnvironmentId,
@@ -870,6 +900,13 @@ export const make = Effect.gen(function* () {
       });
     }
     const entry = yield* getEntry(environmentId);
+    if (
+      connectionRoutes(entry).some(
+        (route) => Option.getOrNull(route.profile)?._tag === "K3RelayConnectionProfile",
+      )
+    ) {
+      yield* forgetOnK3RelayHost(environmentId);
+    }
 
     yield* pullRequestRoutingPermissions.forget(environmentId);
     yield* registrations.remove(environmentId);
@@ -903,6 +940,19 @@ export const make = Effect.gen(function* () {
       const profile = Option.getOrNull(route.profile);
       if (profile !== null && isSshConnectionProfile(profile)) {
         yield* disconnectSsh(environmentId, profile);
+      }
+      if (profile?._tag === "K3RelayConnectionProfile" && Option.isSome(k3relayTunnels)) {
+        yield* k3relayTunnels.value.close(profile.connectionId);
+      }
+      // The pairing's device key is useless without the pairing; the user pairs anew to return.
+      if (profile?._tag === "K3RelayConnectionProfile" && Option.isSome(deviceKeys)) {
+        yield* deviceKeys.value
+          .remove(profile.deviceKeyId)
+          .pipe(
+            Effect.catch((error) =>
+              Effect.logWarning("Could not delete the relay device key.", { environmentId, error }),
+            ),
+          );
       }
     }
   });
@@ -986,6 +1036,43 @@ export const make = Effect.gen(function* () {
           error,
         }).pipe(Effect.as(Option.none<ConnectionCatalogEntry>())),
       ),
+    );
+  });
+
+  /** The broker saved a renewed grant; the routes in memory take the same profile. */
+  const adoptK3RelayProfile = Effect.fn("EnvironmentRegistry.adoptK3RelayProfile")(function* (
+    environmentId: EnvironmentId,
+    profile: K3RelayConnectionProfile,
+  ) {
+    return yield* withLeaseLock(
+      environmentId,
+      Effect.gen(function* () {
+        const entry = (yield* SubscriptionRef.get(entries)).get(environmentId);
+        if (entry === undefined) return Option.none<ConnectionCatalogEntry>();
+        let adopted = false;
+        const routes = connectionRoutes(entry).map((route) => {
+          if (
+            route.target._tag !== "K3RelayConnectionTarget" ||
+            route.target.connectionId !== profile.connectionId
+          ) {
+            return route;
+          }
+          adopted = true;
+          return { ...route, profile: Option.some<ConnectionProfile>(profile) };
+        });
+        if (!adopted) return Option.none<ConnectionCatalogEntry>();
+        const next = entryWithRoutes(entry, routes);
+        const lease = (yield* SubscriptionRef.get(serviceScopes)).get(environmentId);
+        if (lease !== undefined) {
+          yield* SubscriptionRef.update(serviceScopes, (current) =>
+            new Map(current).set(environmentId, { ...lease, entry: next }),
+          );
+        }
+        yield* SubscriptionRef.update(entries, (current) =>
+          new Map(current).set(environmentId, next),
+        );
+        return Option.some(next);
+      }),
     );
   });
 

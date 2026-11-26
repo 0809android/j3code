@@ -6,6 +6,7 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import { encodeComposerContextFragment } from "@t3tools/shared/composerContextClipboard";
+import { setHostedThreadLinkOrigin } from "@t3tools/shared/threadLinks";
 import {
   collectComposerContextReferences,
   formatComposerContextReference,
@@ -351,9 +352,13 @@ describe("mobile context clipboard imports", () => {
     ).toEqual(result!.context.records.map((record) => record.contextId));
   });
 
-  it("pastes a thread link as a chip only where the destination's agent reads its machine", async () => {
+  it("pastes a thread link as a chip only where the destination's agent reads its machine", async ({
+    onTestFinished,
+  }) => {
+    setHostedThreadLinkOrigin("https://hosted.example.test");
+    onTestFinished(() => setHostedThreadLinkOrigin(undefined));
     const text = [
-      "https://app.t3.codes/threads/destination/local-thread",
+      "https://hosted.example.test/threads/destination/local-thread",
       "<t3-thread://v2/source/foreign-thread>",
     ].join(" ");
     const result = await importComposerContextClipboard(

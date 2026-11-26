@@ -5,6 +5,7 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
 import type { ServerInstallation } from "@t3tools/contracts";
+import { CLI_NPM_PACKAGE_NAME } from "@t3tools/shared/cliRelease";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { resolveCommandPath } from "@t3tools/shared/shell";
 
@@ -46,11 +47,11 @@ const InstallManifest = Schema.Struct({
 const decodeInstallManifest = Schema.decodeUnknownEffect(Schema.fromJsonString(InstallManifest));
 
 /**
- * `T3CODE_NPM_LAUNCHER_PATH` is inherited by child shells, so accept it only for this package
+ * `K3CODE_NPM_LAUNCHER_PATH` is inherited by child shells, so accept it only for this package
  * version to avoid claiming another `t3` invocation is the npm install.
  */
 export const resolveEntryPath = Effect.gen(function* () {
-  const npmLauncher = (yield* HostProcess.Environment).T3CODE_NPM_LAUNCHER_PATH?.trim();
+  const npmLauncher = (yield* HostProcess.Environment).K3CODE_NPM_LAUNCHER_PATH?.trim();
   if (npmLauncher) {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -100,7 +101,11 @@ export const resolveServerInstallation = Effect.gen(function* () {
       baseDir: linked[1] || "/",
     } satisfies ServerInstallation;
   }
-  const match = /^(.*)\/lib\/node_modules\/t3\/(?:dist\/bin\.mjs|bin\/t3\.mjs)$/.exec(entry);
+  // Releases before the K3 launcher package were published as `t3`.
+  const match =
+    /^(.*)\/lib\/node_modules\/(@kinocode\/k3code|t3)\/(?:dist\/bin\.mjs|bin\/t3\.mjs)$/.exec(
+      entry,
+    );
   if (!match) {
     const runner = detectCliRunner(entry);
     return runner === null
@@ -116,11 +121,12 @@ export const resolveServerInstallation = Effect.gen(function* () {
   )
     return null;
 
-  const packageRoot = path.join(prefix, "lib/node_modules/t3");
+  const packageName = match[2]!;
+  const packageRoot = path.join(prefix, "lib/node_modules", packageName);
   const manifest = yield* fs
     .readFileString(path.join(packageRoot, "package.json"))
     .pipe(Effect.flatMap(decodeInstallManifest));
-  if (manifest.name !== "t3" || !manifest.bin) return null;
+  if (manifest.name !== packageName || !manifest.bin) return null;
   const bin = yield* fs.realPath(path.join(packageRoot, manifest.bin.t3));
   const globalBin = yield* fs.realPath(path.join(prefix, "bin/t3"));
   if (globalBin !== bin || bin !== entry) return null;
@@ -130,7 +136,7 @@ export const resolveServerInstallation = Effect.gen(function* () {
 /** The original package spec is unavailable at startup; infer its channel from the version. */
 function suggestedPackageSpec(version: string): string {
   const channel = /^[^-+]+-(nightly|preview)\./.exec(version)?.[1];
-  return channel === undefined ? "t3" : `t3@${channel}`;
+  return channel === undefined ? CLI_NPM_PACKAGE_NAME : `${CLI_NPM_PACKAGE_NAME}@${channel}`;
 }
 
 function formatCliCommand(input: {
@@ -166,7 +172,7 @@ export const hostShellWord = (platform: NodeJS.Platform, value: string) =>
 /** Script installs have no single launcher; desktop shims and standalone binaries do. */
 const resolveInstallLauncher = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
-  const shim = (yield* HostProcess.Environment).T3CODE_CLI_PATH?.trim();
+  const shim = (yield* HostProcess.Environment).K3CODE_CLI_PATH?.trim();
   if (shim && (yield* fs.exists(shim).pipe(Effect.orElseSucceed(() => false)))) {
     return Option.some(shim);
   }
@@ -191,7 +197,7 @@ export const resolveHostCliCommand = Effect.fn("invocation.resolveHostCliCommand
   if (command !== `t3 ${subcommand}`) return { command: withArgs(command), launcher: false };
   const onPath = yield* resolveCommandPath("t3");
   if (onPath !== null) {
-    const shim = (yield* HostProcess.Environment).T3CODE_CLI_PATH?.trim();
+    const shim = (yield* HostProcess.Environment).K3CODE_CLI_PATH?.trim();
     const fs = yield* FileSystem.FileSystem;
     const real = (file: string) => fs.realPath(file).pipe(Effect.orElseSucceed(() => null));
     // Windows `t3.cmd` shims are text files that never realpath to the executable they run.

@@ -16,10 +16,8 @@ import { HttpServerRequest, HttpServerResponse } from "effect/http";
 import * as HttpEffect from "effect/http/HttpEffect";
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 
-import { DEFAULT_HOSTED_APP_URL } from "@t3tools/shared/connectAuth";
-
 import * as CloudLink from "../cloud/CloudLink.ts";
-import { agentApprovalAppUrlConfig } from "../cloud/publicConfig.ts";
+import { optionalHostedAppUrlConfig } from "../cloud/publicConfig.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as EnvironmentAuth from "./EnvironmentAuth.ts";
 import * as McpOAuth from "./McpOAuth.ts";
@@ -80,26 +78,33 @@ export const layer = HttpApiBuilder.group(
     const environmentAuth = yield* EnvironmentAuth.EnvironmentAuth;
     const cloudLink = yield* CloudLink.CloudLink;
     const serverEnvironment = yield* ServerEnvironment.ServerEnvironmentIdentity;
-    const hostedAppUrl = yield* agentApprovalAppUrlConfig.pipe(
-      Effect.orElseSucceed(() => DEFAULT_HOSTED_APP_URL),
+    // Without a configured hosted app (or with an invalid one) approval always stays on this
+    // environment's own page.
+    const hostedAppUrl = yield* optionalHostedAppUrlConfig.pipe(
+      Effect.map(Option.getOrUndefined),
+      Effect.orElseSucceed(() => undefined),
     );
     // T3 Connect serves this host, so the owner can approve on the hosted app by signing in there.
     const hostedApprovalUrl = (issuer: string, search: string) =>
-      cloudLink.linkState().pipe(
-        Effect.flatMap((state) =>
-          state.linked && !state.linkRevoked && state.tunnelHostname === new URL(issuer).hostname
-            ? serverEnvironment.getEnvironmentId.pipe(
-                Effect.map((environmentId) => {
-                  const url = new URL(HOSTED_APPROVAL_PATH, hostedAppUrl);
-                  url.search = search;
-                  url.searchParams.set("environment", environmentId);
-                  return Option.some(url.toString());
-                }),
-              )
-            : Effect.succeedNone,
-        ),
-        Effect.orElseSucceed(Option.none),
-      );
+      hostedAppUrl === undefined
+        ? Effect.succeedNone
+        : cloudLink.linkState().pipe(
+            Effect.flatMap((state) =>
+              state.linked &&
+              !state.linkRevoked &&
+              state.tunnelHostname === new URL(issuer).hostname
+                ? serverEnvironment.getEnvironmentId.pipe(
+                    Effect.map((environmentId) => {
+                      const url = new URL(HOSTED_APPROVAL_PATH, hostedAppUrl);
+                      url.search = search;
+                      url.searchParams.set("environment", environmentId);
+                      return Option.some(url.toString());
+                    }),
+                  )
+                : Effect.succeedNone,
+            ),
+            Effect.orElseSucceed(Option.none),
+          );
     const protectedResource = () =>
       requestUrls.pipe(Effect.map(McpOAuth.protectedResourceMetadata));
 

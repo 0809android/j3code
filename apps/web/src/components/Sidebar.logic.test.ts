@@ -1652,7 +1652,7 @@ describe("groupSidebarThreadsByProject", () => {
   it("puts each thread in its project's folder and drops empty projects unless kept", () => {
     const remoteEnvironmentId = EnvironmentId.make("environment-remote");
     const t3code = ProjectId.make("t3code");
-    const t3codeRemote = ProjectId.make("t3code-remote");
+    const t3codeRemote = ProjectId.make("k3code-remote");
     const fleet = ProjectId.make("fleet");
     const thread = (id: string, environmentId: EnvironmentId, projectId: ProjectId) => ({
       id,

@@ -4,7 +4,8 @@ import {
   encodeComposerContextFragment,
 } from "@t3tools/shared/composerContextClipboard";
 import { threadLinkContextReferences } from "@t3tools/shared/composerContextReferences";
-import { describe, expect, it } from "vite-plus/test";
+import { setHostedThreadLinkOrigin } from "@t3tools/shared/threadLinks";
+import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { resolveThreadReferenceCopyTarget } from "./threadReference.ts";
 
@@ -23,6 +24,8 @@ const crossRepositoryPullRequest: ThreadPullRequestLink = {
   snapshot: null,
   stack: null,
 };
+
+afterEach(() => setHostedThreadLinkOrigin(undefined));
 
 describe("resolveThreadReferenceCopyTarget", () => {
   it("does not copy another reference while the open panel URL is unavailable", () => {
@@ -98,8 +101,25 @@ describe("resolveThreadReferenceCopyTarget", () => {
         }),
       ],
     });
-    // The plain text opens the thread anywhere and pastes back as the copied record's chip.
-    expect(target!.value).toBe("https://app.t3.codes/threads/env-1/thread-1");
+    // With no hosted app the plain text is a t3-thread autolink, which pastes back as the chip.
+    expect(target!.value).toBe("<t3-thread://v2/env-1/thread-1>");
+    expect(target!.value).not.toContain("t3.codes");
+    expect(threadLinkContextReferences(target!.value, pasted!.records, () => undefined)).toEqual({
+      text: `[Fix the login flow](t3-context://v1/thread/${pasted!.records[0]!.contextId})`,
+      records: pasted!.records,
+    });
+  });
+
+  it("copies a link through the hosted app and pastes it back as the copied record's chip", () => {
+    const hostedAppUrl = "https://hosted.example.test";
+    setHostedThreadLinkOrigin(hostedAppUrl);
+    const target = resolveThreadReferenceCopyTarget({
+      ...thread,
+      linkedPullRequestUrl: null,
+      hostedAppUrl,
+    });
+    const pasted = decodeComposerContextFragment(encodeComposerContextFragment(target!.fragment!));
+    expect(target!.value).toBe("https://hosted.example.test/threads/env-1/thread-1");
     expect(threadLinkContextReferences(target!.value, pasted!.records, () => undefined)).toEqual({
       text: `[Fix the login flow](t3-context://v1/thread/${pasted!.records[0]!.contextId})`,
       records: pasted!.records,
@@ -108,8 +128,8 @@ describe("resolveThreadReferenceCopyTarget", () => {
 
   it("links through the build's hosted app", () => {
     expect(
-      resolveThreadReferenceCopyTarget({ ...thread, hostedAppUrl: "https://preview.t3.codes" })
+      resolveThreadReferenceCopyTarget({ ...thread, hostedAppUrl: "https://preview.example.test" })
         ?.value,
-    ).toBe("https://preview.t3.codes/threads/env-1/thread-1");
+    ).toBe("https://preview.example.test/threads/env-1/thread-1");
   });
 });

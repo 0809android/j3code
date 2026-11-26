@@ -25,9 +25,13 @@ import { useComposerDraftStore } from "../../composerDraftStore";
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
 import { useScratchProject } from "../../hooks/useScratchProject";
 import { useClientSettings } from "../../hooks/useSettings";
+import { configuredHostedAppUrl } from "../../hostedPairing";
 import { useOpenChangeRequestLink } from "../../lib/openPullRequestLink";
 import { selectActiveRightPanelSurface, useRightPanelStore } from "../../rightPanelStore";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
+import { isK3RelayLink, pendingK3RelayLinkAtom } from "../../k3relay/pendingLink";
+import { pendingK3RelayAccountCallbackAtom } from "../../k3relay/accountSignIn";
+import { isK3RelayAccountCallback } from "@t3tools/client-runtime/k3relay";
 import { resolveThreadRouteTarget } from "../../threadRoutes";
 import { assetEnvironment } from "../../state/assets";
 import { readProject, readThreadShell } from "../../state/entities";
@@ -206,12 +210,23 @@ export function DesktopWebLinkCoordinator() {
   });
 
   const openLink = useEffectEvent(async (url: string) => {
+    // A relay account sign-in returning from the system browser, not a pairing link.
+    if (isK3RelayAccountCallback(url)) {
+      appAtomRegistry.set(pendingK3RelayAccountCallbackAtom, url.trim());
+      await router.navigate({ to: "/settings/connections" });
+      return;
+    }
+    if (isK3RelayLink(url)) {
+      appAtomRegistry.set(pendingK3RelayLinkAtom, url.trim());
+      await router.navigate({ to: "/settings/connections" });
+      return;
+    }
     const pairingUrl = readPairingAppLink(url);
     if (pairingUrl !== null) {
       await pairFromLink(pairingUrl);
       return;
     }
-    const appPath = promptLinkAppPath(url);
+    const appPath = promptLinkAppPath(url, configuredHostedAppUrl());
     if (appPath !== null) {
       await router.navigate({ href: appPath });
       return;

@@ -935,7 +935,7 @@ export interface SearchMatchHint {
 // "t3 connect" would match nearly every thread.
 // Only before more text, so typing "t3/" does not empty the list for a keystroke.
 const WORKTREE_BRANCH_PREFIX_PATTERN = new RegExp(
-  `^(?:(?:${WORKTREE_BRANCH_PREFIX}|t3code)/(?=\\S)|${WORKTREE_BRANCH_PREFIX}-(?=[0-9a-f]{8}$))`,
+  `^(?:(?:${WORKTREE_BRANCH_PREFIX}|k3code|t3|t3code)/(?=\\S)|${WORKTREE_BRANCH_PREFIX}-(?=[0-9a-f]{8}$))`,
 );
 
 // The flat prefix anywhere in a query, while its hex is still being typed, so

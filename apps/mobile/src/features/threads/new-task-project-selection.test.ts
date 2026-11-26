@@ -47,7 +47,7 @@ function makeProject(
 function makeScope(projects: ReadonlyArray<EnvironmentProject>): HomeProjectScope {
   return {
     key: "github.com/t3tools/t3code",
-    title: "T3 Code",
+    title: "K3 Code",
     representative: projects[0]!,
     projects,
     projectRefs: projects.map((project) => ({
@@ -161,7 +161,7 @@ describe("resolveEnvironmentProjectMatch", () => {
     const selected = makeProject("t3code", "mac", { repositoryKey: "github.com/t3tools/t3code" });
     const target = [
       makeProject("other", "server", { repositoryKey: "github.com/t3tools/other" }),
-      makeProject("t3code-clone", "server", { repositoryKey: "github.com/t3tools/t3code" }),
+      makeProject("k3code-clone", "server", { repositoryKey: "github.com/t3tools/t3code" }),
     ];
     expect(resolveEnvironmentProjectMatch(target, selected)).toBe(target[1]);
     expect(isSameRepository(target[1]!, selected)).toBe(true);
@@ -201,7 +201,7 @@ describe("resolveEnvironmentProjectMatch", () => {
 });
 
 describe("resolveDraftProjectSelection", () => {
-  const projects = [makeProject("t3code"), makeProject("t3code-2")];
+  const projects = [makeProject("t3code"), makeProject("k3code-2")];
   const draft = { incomingShareId: undefined, pickerClosed: false };
 
   it("opens the picker instead of auto-selecting the only project", () => {
@@ -230,7 +230,7 @@ describe("resolveDraftProjectSelection", () => {
 
   it("keeps the draft when the picker closes after a choice", () => {
     expect(
-      resolveDraftProjectSelection("environment:t3code-2", projects, [makeScope(projects)], {
+      resolveDraftProjectSelection("environment:k3code-2", projects, [makeScope(projects)], {
         ...draft,
         pickerClosed: true,
       }),
@@ -253,7 +253,7 @@ describe("resolveDraftProjectSelection", () => {
       incomingShareId: "share",
       pickerClosed: false,
       useLastProject: undefined,
-      lastProject: { environmentId: "environment", projectId: "t3code-2" },
+      lastProject: { environmentId: "environment", projectId: "k3code-2" },
     };
     expect(resolveDraftProjectSelection(null, projects, scopes, shareDraft)).toEqual({
       kind: "select",

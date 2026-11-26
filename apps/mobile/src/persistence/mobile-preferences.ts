@@ -28,8 +28,8 @@ import * as MobileDatabase from "./mobile-database";
 import * as MobileSecureStorage from "./mobile-secure-storage";
 import { MobileStorageDecodeError, MobileStorageEncodeError } from "./mobile-storage";
 
-const PREFERENCES_KEY = "t3code.preferences";
-const PREFERENCES_FALLBACK_KEY = "t3code.preferences.fallback";
+const PREFERENCES_KEY = "k3code.preferences";
+const PREFERENCES_FALLBACK_KEY = "k3code.preferences.fallback";
 const encodeJson = Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown));
 
 export const PullRequestListControls = Schema.Struct({
@@ -123,6 +123,17 @@ const PullRequestActivityVisibility = Schema.Struct({
 });
 export type PullRequestActivityVisibility = typeof PullRequestActivityVisibility.Type;
 
+/** Notifications through the K3 relay on this device (spec §13). Off until the user turns them on. */
+export const K3RelayNotificationPreferences = Schema.Struct({
+  enabled: Schema.Boolean,
+  approval: Schema.Boolean,
+  input: Schema.Boolean,
+  completed: Schema.Boolean,
+  failed: Schema.Boolean,
+});
+export type K3RelayNotificationPreferences = typeof K3RelayNotificationPreferences.Type;
+const isK3RelayNotificationPreferences = Schema.is(K3RelayNotificationPreferences);
+
 const isThreadListFilters = Schema.is(ThreadListFilters);
 const isPullRequestActivityVisibility = Schema.is(PullRequestActivityVisibility);
 const isWorkspaceSelections = Schema.is(WorkspaceSelections);
@@ -143,6 +154,7 @@ export interface Preferences {
   readonly pullRequestActivityVisibility?: PullRequestActivityVisibility;
   readonly pullRequestMergeMethod?: PullRequestMergeMethod;
   readonly liveActivitiesEnabled?: boolean;
+  readonly k3relayNotifications?: K3RelayNotificationPreferences;
   readonly themeId?: MobileThemeId;
   readonly lightThemeId?: MobileThemeId;
   readonly darkThemeId?: MobileThemeId;
@@ -154,8 +166,6 @@ export interface Preferences {
   readonly codeFontSize?: number | null;
   readonly codeWordBreak?: boolean;
   readonly mathRenderingEnabled?: boolean;
-  /** Unset means on: crash reports are sent unless the user turns them off. */
-  readonly crashReportsEnabled?: boolean;
   readonly connectOnboardingOptOutAccounts?: ReadonlyArray<string>;
   readonly collapsedProjectGroups?: readonly string[];
   readonly dismissedDatabaseStorageNotices?: readonly string[];
@@ -236,6 +246,7 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     pullRequestActivityVisibility?: PullRequestActivityVisibility;
     pullRequestMergeMethod?: PullRequestMergeMethod;
     liveActivitiesEnabled?: boolean;
+    k3relayNotifications?: K3RelayNotificationPreferences;
     themeId?: MobileThemeId;
     lightThemeId?: MobileThemeId;
     darkThemeId?: MobileThemeId;
@@ -247,7 +258,6 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     codeFontSize?: number | null;
     codeWordBreak?: boolean;
     mathRenderingEnabled?: boolean;
-    crashReportsEnabled?: boolean;
     connectOnboardingOptOutAccounts?: ReadonlyArray<string>;
     collapsedProjectGroups?: readonly string[];
     dismissedDatabaseStorageNotices?: readonly string[];
@@ -303,6 +313,9 @@ function sanitizePreferences(parsed: Preferences): Preferences {
   if (typeof parsed.liveActivitiesEnabled === "boolean") {
     preferences.liveActivitiesEnabled = parsed.liveActivitiesEnabled;
   }
+  if (isK3RelayNotificationPreferences(parsed.k3relayNotifications)) {
+    preferences.k3relayNotifications = parsed.k3relayNotifications;
+  }
   if (
     typeof parsed.themeId === "string" &&
     (MOBILE_THEME_IDS as readonly string[]).includes(parsed.themeId)
@@ -344,9 +357,6 @@ function sanitizePreferences(parsed: Preferences): Preferences {
   if (typeof parsed.codeWordBreak === "boolean") preferences.codeWordBreak = parsed.codeWordBreak;
   if (typeof parsed.mathRenderingEnabled === "boolean")
     preferences.mathRenderingEnabled = parsed.mathRenderingEnabled;
-  if (typeof parsed.crashReportsEnabled === "boolean") {
-    preferences.crashReportsEnabled = parsed.crashReportsEnabled;
-  }
   if (Array.isArray(parsed.connectOnboardingOptOutAccounts)) {
     preferences.connectOnboardingOptOutAccounts = parsed.connectOnboardingOptOutAccounts.filter(
       (account): account is string => typeof account === "string",

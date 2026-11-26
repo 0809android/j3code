@@ -11,7 +11,7 @@ import { readEnvironmentScope } from "../../state/session";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { serverEnvironment } from "../../state/server";
 import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
-import { useAuth } from "@clerk/expo";
+import { useCloudAuth as useAuth } from "../cloud/CloudAuthProvider";
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import * as Notifications from "expo-notifications";
 import { useNavigation } from "@react-navigation/native";
@@ -66,6 +66,7 @@ import { SettingsRow } from "./components/SettingsRow";
 import { SettingsSection } from "./components/SettingsSection";
 import { SettingsSwitchRow } from "./components/SettingsSwitchRow";
 import { SettingsScreen } from "./components/SettingsScreen";
+import { SettingsK3RelayNotificationsSection } from "./SettingsK3RelayNotificationsSection";
 import { resolveAgentAwarenessPlatformPresentation } from "./SettingsRouteScreen.logic";
 
 const updateLiveActivityPreference = createEnvironmentCommand(connectionAtomRuntime, {
@@ -196,7 +197,8 @@ export function SettingsNotificationsRouteScreen() {
           contentInsetAdjustmentBehavior="automatic"
           contentContainerClassName="px-5 pt-4"
         >
-          <Text className="text-base text-foreground-muted">
+          <SettingsK3RelayNotificationsSection />
+          <Text className="pt-6 text-base text-foreground-muted">
             {gt("Notifications require {product} in this app build.", { product: "T3 Connect" })}
           </Text>
         </ScrollView>
@@ -458,7 +460,7 @@ function ConfiguredSettingsNotificationsRouteScreen() {
 
     Dialog.alert(
       gt("Disable notifications"),
-      gt("Open system Settings to disable notifications for {product}.", { product: "T3 Code" }),
+      gt("Open system Settings to disable notifications for {product}.", { product: "K3 Code" }),
       [
         { text: gt("Cancel"), style: "cancel" },
         { text: gt("Open Settings"), onPress: () => void Linking.openSettings() },
@@ -619,7 +621,7 @@ function ConfiguredSettingsNotificationsRouteScreen() {
                     gt("Couldn't open Settings"),
                     gt(
                       "Open Android Settings, select {product}, then enable Live Updates in Notifications.",
-                      { product: "T3 Code" },
+                      { product: "K3 Code" },
                     ),
                   );
                 });
@@ -627,6 +629,7 @@ function ConfiguredSettingsNotificationsRouteScreen() {
             />
           ) : null}
         </SettingsSection>
+        <SettingsK3RelayNotificationsSection />
       </ScrollView>
     </SettingsScreen>
   );

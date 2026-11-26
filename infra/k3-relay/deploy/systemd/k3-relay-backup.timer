@@ -1,0 +1,11 @@
+[Unit]
+Description=Nightly K3 relay backup
+
+[Timer]
+# 18:30 UTC is 03:30 in Japan, the quietest hour. A missed run (the machine was off) is made up.
+OnCalendar=*-*-* 18:30:00 UTC
+RandomizedDelaySec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -219,6 +219,20 @@ export class CloudLinkTunnelSupersededError extends Schema.TaggedError<CloudLink
   }
 }
 
+/**
+ * Raised when the tunnel would expose the server over a transport the
+ * `remoteTransportPolicy` refuses. Changing the policy back to `any` on the
+ * host (Settings, or settings.json) re-enables the tunnel.
+ */
+export class CloudLinkTransportPolicyError extends Schema.TaggedError<CloudLinkTransportPolicyError>()(
+  "CloudLinkTransportPolicyError",
+  { cause: Schema.optional(Schema.Defect()) },
+) {
+  override get message(): string {
+    return "This host only allows private end-to-end-encrypted transports (Tailscale or SSH), so the T3 Connect tunnel stays off. Allow all transports in the host's Connections settings to use it.";
+  }
+}
+
 export class CloudLinkEndpointUnavailableError extends Schema.TaggedError<CloudLinkEndpointUnavailableError>()(
   "CloudLinkEndpointUnavailableError",
   {
@@ -235,7 +249,7 @@ export class CloudLinkEndpointUnavailableError extends Schema.TaggedError<CloudL
 
 const INTERNAL_OPERATION_MESSAGES = {
   "relay-url-unconfigured":
-    "T3CODE_RELAY_URL must be configured as a secure absolute HTTPS origin.",
+    "K3CODE_RELAY_URL must be configured as a secure absolute HTTPS origin.",
   "generate-link-proof": "Could not generate environment link proof.",
   "persist-relay-config": "Could not persist environment relay configuration.",
   "register-endpoint-origin": "Could not register the managed endpoint origin.",
@@ -389,12 +403,14 @@ export type CloudLinkError =
   | CloudLinkProofRejectedError
   | CloudLinkProofReplayedError
   | CloudLinkRelayConfigInvalidError
+  | CloudLinkTransportPolicyError
   | CloudLinkTunnelSupersededError;
 
 type CloudLinkBackgroundError =
   | CloudLinkEndpointUnavailableError
   | CloudLinkInternalError
   | CloudLinkOriginInvalidError
+  | CloudLinkTransportPolicyError
   | RelayRequestError
   | ServerSecretStore.SecretStoreError
   | Schema.SchemaError
@@ -430,6 +446,7 @@ export class CloudLink extends Context.Service<
       | CloudLinkInternalError
       | CloudLinkOriginInvalidError
       | CloudLinkRelayConfigInvalidError
+      | CloudLinkTransportPolicyError
       | CloudLinkTunnelSupersededError
       | EnvironmentAuth.ServerAuthInternalError
       | ManagedLimits.ManagedPolicyRefusedError
@@ -499,6 +516,7 @@ export class CloudLink extends Context.Service<
       boolean,
       | CloudLinkEndpointUnavailableError
       | CloudLinkOriginInvalidError
+      | CloudLinkTransportPolicyError
       | ServerSecretStore.SecretStoreError
     >;
     readonly releaseManagedTunnelOnShutdown: () => Effect.Effect<
@@ -517,6 +535,7 @@ const make = Effect.gen(function* () {
   const reachability = yield* ConnectReachability.ConnectReachability;
   const environmentAuth = yield* EnvironmentAuth.EnvironmentAuth;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
+
   const cliTokenManager = yield* CliTokenManager.CloudCliTokenManager;
   const httpClient = yield* HttpClient.HttpClient;
   const httpServer = yield* HttpServer.HttpServer;
@@ -723,6 +742,7 @@ const make = Effect.gen(function* () {
     });
     return yield* endpointRuntime.withLinkStateLock(
       Effect.gen(function* () {
+        // PROBE-DISABLED
         const [runtimeBytes, markerBytes] = yield* Effect.all([
           secrets.get(CLOUD_ENDPOINT_RUNTIME_CONFIG),
           secrets.get(CLOUD_ENDPOINT_CONFIRMED_ORIGIN),
@@ -764,6 +784,7 @@ const make = Effect.gen(function* () {
     },
   ) {
     const apply = Effect.gen(function* () {
+      // PROBE-DISABLED
       yield* validateRelayConfigPayload(payload);
       yield* validateCloudMintPublicKey(payload.cloudMintPublicKey);
       // Reject unsupported runtimes before they can stop a healthy tunnel.
@@ -938,6 +959,7 @@ const make = Effect.gen(function* () {
   )(function* (localOrigin: string) {
     return yield* endpointRuntime.withLinkStateLock(
       Effect.gen(function* () {
+        // PROBE-DISABLED
         if (!(yield* readCliDesiredCloudLink.pipe(withSecrets))) {
           return null;
         }

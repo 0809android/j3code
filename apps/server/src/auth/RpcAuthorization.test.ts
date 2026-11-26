@@ -5,6 +5,8 @@ import {
   AuthProvidersManageScope,
   AuthSettingsWriteScope,
   AuthAccessWriteScope,
+  AuthRelayConfigureScope,
+  AuthStandardClientScopes,
   DEFAULT_SERVER_SETTINGS,
   EnvironmentId,
   ProviderDriverKind,
@@ -42,6 +44,14 @@ import * as RpcAuthorization from "./RpcAuthorization.ts";
 describe("RPC authorization scopes", () => {
   it("declares exactly one scope for every RPC in the server group", () => {
     expect(new Set(Object.keys(RPC_REQUIRED_SCOPES))).toEqual(new Set(WsRpcGroup.requests.keys()));
+  });
+
+  it("lets only the host's owner choose which K3 relay devices may introduce others", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.k3RelaySetDevicePermissions)).toBe(
+      AuthRelayConfigureScope,
+    );
+    // Relay devices, introduced or not, hold the standard scopes, which never include it.
+    expect(AuthStandardClientScopes).not.toContain(AuthRelayConfigureScope);
   });
 
   it("keeps webhook delivery logs, which hold request bodies, behind operate scope", () => {
@@ -778,11 +788,13 @@ it.effect("requires provider management to send /logout through chat", () =>
       ),
     );
     const handled: string[] = [];
-    const handler = group.toLayerHandler(ORCHESTRATION_V2_WS_METHODS.dispatchCommand, (command) =>
-      Effect.sync(() => {
-        handled.push(command.commandId);
-        return { sequence: 1 };
-      }),
+    const handler = Layer.mergeAll(
+      group.toLayerHandler(ORCHESTRATION_V2_WS_METHODS.dispatchCommand, (command) =>
+        Effect.sync(() => {
+          handled.push(command.commandId);
+          return { sequence: 1 };
+        }),
+      ),
     );
     const message = (commandId: string, text: string) => ({
       type: "message.dispatch" as const,

@@ -3,7 +3,7 @@ import { T, useGT } from "gt-react-native";
 import { ListRow } from "../../components/ui/ListRow";
 import * as Dialog from "../../components/ui/Dialog";
 import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
-import { useAuth } from "@clerk/expo";
+import { useCloudAuth as useAuth } from "../cloud/CloudAuthProvider";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Haptics from "expo-haptics";
 import {
@@ -13,7 +13,8 @@ import {
   type StaticScreenProps,
 } from "@react-navigation/native";
 import type { EnvironmentId } from "@t3tools/contracts";
-import { useAtomValue } from "@effect/atom-react";
+import { useAtom, useAtomValue } from "@effect/atom-react";
+import * as Device from "expo-device";
 import { useState } from "react";
 import { Linking, Pressable, StyleSheet, View } from "react-native";
 import Svg, { Defs, RadialGradient, Rect, Stop } from "react-native-svg";
@@ -35,6 +36,9 @@ import { splitEnvironmentSections } from "./environmentSections";
 import { leaveSettingsPage } from "../settings/settings-navigation";
 import { workspaceHasColumns } from "../layout/workspace/workspace-selection-store";
 import { m } from "../../i18n/messages";
+import { isK3RelayLink, K3RelayPairingCard } from "./K3RelayPairingCard";
+import { K3RelayAccountCard } from "./K3RelayAccountCard";
+import { pendingK3RelayLinkAtom } from "./k3relayPendingLink";
 
 type ConnectionsNewRouteParams = {
   readonly mode?: string;
@@ -97,6 +101,10 @@ function PairingForm({
   const [scannerLocked, setScannerLocked] = useState(false);
   // A good scan parks the camera so it can't re-read the code over later edits.
   const [scanComplete, setScanComplete] = useState(false);
+  // A K3 Relay offer (scanned, pasted, or opened as a `k3relay://` link) replaces the form.
+  const [pendingRelayLink, setPendingRelayLink] = useAtom(pendingK3RelayLinkAtom);
+  const [relayLink, setRelayLink] = useState<string | null>(() => pendingRelayLink);
+  const [relayDeviceName] = useState(() => Device.deviceName ?? gt("My phone"));
 
   const headerIconColor = useUniwindTheme()["--color-icon"];
 
@@ -108,6 +116,11 @@ function PairingForm({
   };
 
   const handleHostChange = (value: string) => {
+    if (isK3RelayLink(value)) {
+      setRelayLink(value.trim());
+      clearError();
+      return;
+    }
     const pairing = parsePairingUrl(value);
     if (pairing.code) {
       setHostInput(pairing.host);
@@ -146,6 +159,13 @@ function PairingForm({
     }
 
     setScannerLocked(true);
+
+    if (isK3RelayLink(data)) {
+      setRelayLink(data.trim());
+      setScanComplete(true);
+      setScannerLocked(false);
+      return;
+    }
 
     try {
       const pairingUrl = extractPairingUrlFromQrPayload(data);
@@ -229,8 +249,34 @@ function PairingForm({
         }}
       >
         <View collapsable={false} className="gap-6.5">
+          {relayLink !== null ? (
+            <K3RelayPairingCard
+              key={relayLink}
+              link={relayLink}
+              defaultDeviceName={relayDeviceName}
+              onCancel={() => {
+                setRelayLink(null);
+                setPendingRelayLink(null);
+                setScanComplete(false);
+              }}
+              onPaired={() => {
+                setPendingRelayLink(null);
+                void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                if (!navigation.canGoBack()) {
+                  navigation.dispatch(StackActions.replace("Home"));
+                } else {
+                  leaveSettingsPage(navigation, workspaceHasColumns(), "SettingsEnvironments");
+                }
+              }}
+            />
+          ) : null}
           <PairingScanCard
-            cameraActive={cameraPermission?.granted === true && screenFocused && !scanComplete}
+            cameraActive={
+              cameraPermission?.granted === true &&
+              screenFocused &&
+              !scanComplete &&
+              relayLink === null
+            }
             onScan={handleQrScan}
             onScanPress={() => {
               void handleScanPress();
@@ -285,6 +331,20 @@ function PairingForm({
                     ))}
             </Text>
           </View>
+
+          {relayLink === null && !linked && routeFor === undefined ? (
+            <K3RelayAccountCard
+              defaultDeviceName={relayDeviceName}
+              onConnected={() => {
+                void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                if (!navigation.canGoBack()) {
+                  navigation.dispatch(StackActions.replace("Home"));
+                } else {
+                  leaveSettingsPage(navigation, workspaceHasColumns(), "SettingsEnvironments");
+                }
+              }}
+            />
+          ) : null}
 
           {hasCloudPublicConfig() ? <T3ConnectSection /> : null}
         </View>

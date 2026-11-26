@@ -10,6 +10,8 @@ import * as Orchestrator from "./orchestration-v2/Orchestrator.ts";
 import * as PeerClientPairing from "./peer/PeerClientPairing.ts";
 import * as PeerLinkRequests from "./peer/PeerLinkRequests.ts";
 import * as PeerLinks from "./peer/PeerLinks.ts";
+import * as RelayAccount from "./relay/k3relay/RelayAccount.ts";
+import * as RelayConnector from "./relay/k3relay/RelayConnector.ts";
 import * as PeerThreadRelay from "./peer/PeerThreadRelay.ts";
 
 import * as DateTime from "effect/DateTime";
@@ -23,6 +25,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
+import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { rpcInitialItems } from "./rpcInitialItems.ts";
@@ -39,15 +42,9 @@ import {
   type ScheduledTaskListResult,
   WorkflowRequestError,
   AuthSessionId,
-  ClientConnectionMethod,
-  ClientDeviceType,
-  ClientOs,
-  ClientSurface,
-  ClientWebDeployment,
   type DiscoveredLocalServerList,
   type EditorId,
   type FileManagerRevealKind,
-  type OrchestrationV2Command,
   type GitActionProgressEvent,
   type GitManagerServiceError,
   type MessageId,
@@ -249,6 +246,13 @@ import * as DefectReporter from "./observability/DefectReporter.ts";
 import * as EventLoopMonitor from "./observability/EventLoopMonitor.ts";
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
+import * as ServerE2eeIdentity from "./auth/ServerE2eeIdentity.ts";
+import {
+  classifyRequestTransport,
+  relayDeviceIdOf,
+  transportAllowedByPolicy,
+  transportSatisfiesE2eeRequirement,
+} from "./auth/transportSecurity.ts";
 import { requiredScopeForDeviceList, rpcAuthorizationError } from "./auth/RpcAuthorization.ts";
 import * as RpcAuthorization from "./auth/RpcAuthorization.ts";
 import { RpcInstrumentation, rpcInstrumentationLayer } from "./observability/RpcInstrumentation.ts";
@@ -256,9 +260,6 @@ import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as HostResources from "./resourceTelemetry/HostResources.ts";
-import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
-import { commandFeatureUsage, featureUsage } from "./telemetry/FeatureUsage.ts";
-import type { TelemetryOwner } from "./telemetry/Identify.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as TriageService from "./triage/TriageService.ts";
@@ -288,15 +289,21 @@ import * as SourceControlRateLimit from "@t3tools/source-control-core/server/Sou
 import { isNetworkPath } from "@t3tools/shared/path";
 import * as RelayClient from "@t3tools/shared/relayClient";
 import {
+  E2EE_REQUIRED_CODE,
+  SOCKET_E2EE_QUERY_PARAM,
+  layerE2eeCrypto,
+  wrapServerSocketWithE2ee,
+} from "@t3tools/shared/socketE2ee";
+import {
   SOCKET_FRAME_PARTS_QUERY_PARAM,
   splitLargeSocketFrames,
 } from "@t3tools/shared/socketFrameParts";
-import { isTelemetryIdHash } from "@t3tools/shared/telemetryId";
 import {
   sameUsageLimitCommandCoverage,
   withUsageLimitsCommands,
 } from "@t3tools/shared/usageLimits";
 import * as AgentSessionScanner from "./project/AgentSessionScanner.ts";
+import * as LegacyImport from "./legacyImport/LegacyImport.ts";
 import * as AgentSessionImporter from "./project/AgentSessionImporter.ts";
 import * as UsageLimitSources from "./usage/UsageLimitSources.ts";
 import { requestUrl } from "./requestUrl.ts";
@@ -796,15 +803,6 @@ function toAuthAccessStreamEvent(
   }
 }
 
-const isClientSurface = Schema.is(ClientSurface);
-const isClientConnectionMethod = Schema.is(ClientConnectionMethod);
-const isClientDeviceType = Schema.is(ClientDeviceType);
-const isClientOs = Schema.is(ClientOs);
-const isClientWebDeployment = Schema.is(ClientWebDeployment);
-const MAX_CLIENT_APP_VERSION_LENGTH = 64;
-const MAX_CLIENT_BROWSER_LENGTH = 64;
-const MAX_CLIENT_DEVICE_MODEL_LENGTH = 80;
-
 function hasCompatibleOrchestrationProtocol(url: URL): boolean {
   return (
     url.searchParams.get(ORCHESTRATION_PROTOCOL_QUERY_PARAM) ===
@@ -822,73 +820,6 @@ function shouldUseBoundedThreadSnapshot(input: {
   readonly acceptDeferredWork?: boolean;
 }): boolean {
   return input.acceptBoundedSnapshot === true;
-}
-
-// Keep telemetry per socket; several client types can connect simultaneously.
-function readClientAnalyticsProps(request: HttpServerRequest.HttpServerRequest) {
-  const url = requestUrl(request);
-  if (Option.isNone(url)) {
-    return {};
-  }
-
-  const surface = url.value.searchParams.get("clientSurface");
-  const appVersion = url.value.searchParams.get("clientAppVersion")?.trim() ?? "";
-  const deviceType = url.value.searchParams.get("clientDeviceType");
-  const os = url.value.searchParams.get("clientOs");
-  const webDeployment = url.value.searchParams.get("clientWebDeployment");
-  const browser = url.value.searchParams.get("clientBrowser")?.trim() ?? "";
-  const connectionMethod = url.value.searchParams.get("connectionMethod");
-  const rawOsMajorVersion = url.value.searchParams.get("clientOsMajorVersion") ?? "";
-  const osMajorVersion = Number(rawOsMajorVersion);
-  const deviceModel = url.value.searchParams.get("clientDeviceModel")?.trim() ?? "";
-  const isMobile = surface === "mobile";
-  const hasOsMajorVersion =
-    isMobile && rawOsMajorVersion !== "" && Number.isInteger(osMajorVersion) && osMajorVersion > 0;
-  const hasDeviceModel =
-    isMobile && deviceModel !== "" && deviceModel.length <= MAX_CLIENT_DEVICE_MODEL_LENGTH;
-
-  return {
-    ...(isClientSurface(surface) ? { surface } : {}),
-    ...(appVersion !== "" && appVersion.length <= MAX_CLIENT_APP_VERSION_LENGTH
-      ? { appVersion, clientAppVersion: appVersion }
-      : {}),
-    ...(isClientOs(os)
-      ? {
-          clientOs: os,
-          ...(isMobile && (os === "iOS" || os === "Android") ? { os } : {}),
-        }
-      : {}),
-    ...(isClientDeviceType(deviceType) ? { clientDeviceType: deviceType } : {}),
-    ...(surface === "web" && isClientWebDeployment(webDeployment) ? { webDeployment } : {}),
-    ...(surface === "web" && browser !== "" && browser.length <= MAX_CLIENT_BROWSER_LENGTH
-      ? { clientBrowser: browser }
-      : {}),
-    ...(hasOsMajorVersion ? { osMajorVersion, clientOsMajorVersion: osMajorVersion } : {}),
-    ...(hasDeviceModel ? { deviceModel, clientDeviceModel: deviceModel } : {}),
-    ...(isClientConnectionMethod(connectionMethod) ? { connectionMethod } : {}),
-  };
-}
-
-/**
- * Owners a connecting client reports: its hashed T3 Connect account and its
- * hashed device id. Only hashes are accepted, so a raw id never reaches analytics.
- */
-function readClientOwners(
-  request: HttpServerRequest.HttpServerRequest,
-): ReadonlyArray<TelemetryOwner> {
-  const url = requestUrl(request);
-  if (Option.isNone(url)) {
-    return [];
-  }
-  const params = url.value.searchParams;
-  return (
-    [
-      ["connect", params.get("clientOwner")],
-      ["device", params.get("clientDevice")],
-    ] as const
-  ).flatMap(([source, ownerId]) =>
-    ownerId !== null && isTelemetryIdHash(ownerId) ? [{ source, ownerId }] : [],
-  );
 }
 
 const enrichProjectShells = Effect.fn("ws.orchestrationV2.enrichProjectShells")(
@@ -1444,10 +1375,11 @@ export const subscribeOrchestrationV2Shell = Effect.fn("ws.orchestrationV2.subsc
 
 export const layerWsRpc = (
   currentSession: EnvironmentAuth.AuthenticatedSession,
-  clientAnalyticsProps: Readonly<Record<string, unknown>>,
   serverBrowser: ServerBrowser.ServerBrowser["Service"],
   reportProfiles: ServerBrowser.ProfileReporter,
   settingsClient: { readonly secretReferences: boolean },
+  /** The E2E-authenticated device when this socket came through the K3 relay. */
+  relayDeviceId?: string,
 ) =>
   Layer.effectContext(
     Effect.gen(function* () {
@@ -1473,25 +1405,6 @@ export const layerWsRpc = (
       const providerSessionsV2 = yield* ProviderSessionManager.ProviderSessionManagerV2;
       const mcpAppRequests = yield* McpAppRequests.McpAppRequests;
       const mcpSignIn = yield* McpSignIn.McpSignIn;
-      const analytics = yield* AnalyticsService.AnalyticsService;
-      const originProps = clientAnalyticsProps;
-      const recordClientCommandAnalytics = (command: OrchestrationV2Command) => {
-        const usage = commandFeatureUsage(command);
-        return Effect.all(
-          [
-            command.type === "message.dispatch"
-              ? analytics.record("client.turn.requested", originProps)
-              : Effect.void,
-            usage === undefined
-              ? Effect.void
-              : analytics.record("feature.used", {
-                  ...usage,
-                  ...(originProps.surface === undefined ? {} : { surface: originProps.surface }),
-                }),
-          ],
-          { discard: true },
-        ).pipe(Effect.ignore);
-      };
       const threadLaunch = yield* ThreadLaunchService.ThreadLaunchService;
       const commandOutputHub = yield* CommandOutputHub.CommandOutputHub;
       const threadViewers = yield* ThreadViewers.ThreadViewers;
@@ -1542,6 +1455,7 @@ export const layerWsRpc = (
         yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
       const projectEnrichment = yield* ProjectEnrichmentService.ProjectEnrichmentService;
       const agentSessionScanner = yield* AgentSessionScanner.AgentSessionScanner;
+      const legacyImport = yield* LegacyImport.LegacyImport;
       const agentSessionImporter = yield* AgentSessionImporter.AgentSessionImporter;
       const checkpointDiffQuery = yield* CheckpointDiffQuery.CheckpointDiffQuery;
       const nativeChildWork = yield* NativeChildWorkQuery.NativeChildWorkQuery;
@@ -1577,8 +1491,36 @@ export const layerWsRpc = (
       const storageCleanup = yield* StorageCleanup.StorageCleanup;
       const databaseStorage = yield* DatabaseStorage.DatabaseStorage;
       const serverSettings = yield* ServerSettings.ServerSettingsService;
+      // Resolved once: the identity key only changes through an explicit rotate.
+      const e2eeIdentity = yield* Effect.serviceOption(ServerE2eeIdentity.ServerE2eeIdentity);
+      const e2eeIdentityDescriptor: Effect.Effect<
+        | Pick<
+            import("@t3tools/contracts").TransportSecurity,
+            "identityPublicKey" | "identityPublicKeyFingerprint"
+          >
+        | undefined,
+        never,
+        never
+      > = Option.isSome(e2eeIdentity)
+        ? Effect.map(Effect.result(e2eeIdentity.value.getDescriptor), (outcome) =>
+            Result.isSuccess(outcome)
+              ? {
+                  identityPublicKey: outcome.success.publicKeyBase64Url,
+                  identityPublicKeyFingerprint: outcome.success.fingerprint,
+                }
+              : undefined,
+          )
+        : Effect.succeed<
+            | Pick<
+                import("@t3tools/contracts").TransportSecurity,
+                "identityPublicKey" | "identityPublicKeyFingerprint"
+              >
+            | undefined
+          >(undefined);
       const secretResolver = yield* SecretResolver.SecretResolver;
       const peerLinks = yield* PeerLinks.PeerLinks;
+      const relayConnector = yield* RelayConnector.RelayConnector;
+      const relayAccount = yield* RelayAccount.RelayAccount;
       const peerLinkRequests = yield* PeerLinkRequests.PeerLinkRequests;
       const peerThreadRelay = yield* PeerThreadRelay.PeerThreadRelay;
       const peerClientPairing = yield* PeerClientPairing.PeerClientPairing;
@@ -1725,7 +1667,7 @@ export const layerWsRpc = (
             if (importedThread !== null) {
               return yield* new AcpRegistryOperationError({
                 reason: "session_delete_failed",
-                message: "Delete the imported T3 thread before deleting its native ACP session.",
+                message: "Delete the imported K3 thread before deleting its native ACP session.",
               });
             }
             yield* manager.deleteSession({
@@ -1866,6 +1808,15 @@ export const layerWsRpc = (
           yield* serverSettings.getSettings,
           settingsClient,
         );
+        const e2eeIdentityKey = yield* e2eeIdentityDescriptor;
+        const transportSecurity: import("@t3tools/contracts").TransportSecurity | undefined =
+          e2eeIdentityKey === undefined
+            ? undefined
+            : {
+                ...e2eeIdentityKey,
+                remoteTransportPolicy: settings.remoteTransportPolicy,
+                e2eeMode: settings.e2eeMode,
+              };
         const environment = yield* serverEnvironment.getDescriptor;
         const auth = yield* serverAuth.getDescriptor();
         const scratchWorkspaceRoot = yield* managedFolders.scratchRoot;
@@ -1923,6 +1874,7 @@ export const layerWsRpc = (
           ...(serverSettings.managedPolicy === undefined
             ? {}
             : { managedPolicy: serverSettings.managedPolicy }),
+          ...(transportSecurity === undefined ? {} : { transportSecurity }),
           shellResumeCompletionMarker: true,
           shellThreadFamilies: true,
           threadLinkMetadata: true,
@@ -2057,9 +2009,6 @@ export const layerWsRpc = (
                   ).pipe(Effect.provide(intakeContext)),
                 )
                 .pipe(
-                  Effect.tap((result) =>
-                    result.replayed ? Effect.void : recordClientCommandAnalytics(command),
-                  ),
                   Effect.map((result) => ({ sequence: result.sequence })),
                   Effect.mapError((cause) => {
                     if (cause._tag === "EnvironmentAuthorizationError") return cause;
@@ -2264,24 +2213,6 @@ export const layerWsRpc = (
                     ),
                 )
                 .pipe(
-                  // A resumed launch is a retry of one already counted.
-                  Effect.tap((result) =>
-                    result.resumed
-                      ? Effect.void
-                      : analytics
-                          .record("client.thread.started", {
-                            ...originProps,
-                            workspaceStrategy: input.workspaceStrategy.type,
-                          })
-                          .pipe(
-                            Effect.andThen(
-                              input.initialMessage === undefined
-                                ? Effect.void
-                                : analytics.record("client.turn.requested", originProps),
-                            ),
-                            Effect.ignore,
-                          ),
-                  ),
                   Effect.map((result) => ({
                     ...result,
                     projection: projectThreadProjectionForWire(result.projection),
@@ -3139,9 +3070,14 @@ export const layerWsRpc = (
         [WS_METHODS.workspaceTaskFolder]: (input) =>
           taskFolders.find(input.worktreePath).pipe(Effect.map((taskFolder) => ({ taskFolder }))),
         [WS_METHODS.workspaceAddTaskFolderRepository]: (input) => taskFolders.addRepository(input),
-        [WS_METHODS.attachmentsCreateUploadUrl]: (input) => issueAttachmentUploadUrl(input),
+        [WS_METHODS.attachmentsCreateUploadUrl]: (input) =>
+          issueAttachmentUploadUrl(input, relayDeviceId),
         [WS_METHODS.attachmentsDelete]: (input) => deletePendingAttachment(input.attachmentId),
         [WS_METHODS.agentSessionsScan]: () => agentSessionScanner.scan,
+        [WS_METHODS.legacyImportScan]: () => legacyImport.scan,
+        [WS_METHODS.legacyImportRun]: (input) => legacyImport.run(input),
+        [WS_METHODS.legacyImportRestart]: () =>
+          legacyImport.restart.pipe(Effect.map((restarting) => ({ restarting }))),
         [WS_METHODS.agentSessionsImport]: (input) =>
           agentSessionImporter.importRecentAgentThreads(input),
         [WS_METHODS.assetsCreateUrl]:
@@ -3159,10 +3095,11 @@ export const layerWsRpc = (
                 path.isAbsolute(input.resource.path) &&
                 !isNetworkPath(input.resource.path))
             ) {
-              return yield* issueAssetUrl({ resource: input.resource });
+              return yield* issueAssetUrl({ resource: input.resource, relayDeviceId });
             }
             if (input.resource._tag === "draft-workspace-file") {
               return yield* issueAssetUrl({
+                relayDeviceId,
                 resource: input.resource,
                 workspaceRoot: input.resource.cwd,
               });
@@ -3187,6 +3124,7 @@ export const layerWsRpc = (
               // Clone projects precede their files; clients retry asset URLs after clone completion.
               const clone = yield* projectCloneTracker.get(project.value.projectId);
               return yield* issueAssetUrl({
+                relayDeviceId,
                 resource: input.resource,
                 ...(project.value.faviconPath
                   ? { projectFaviconPath: project.value.faviconPath }
@@ -3222,6 +3160,7 @@ export const layerWsRpc = (
               });
             }
             return yield* issueAssetUrl({
+              relayDeviceId,
               resource: input.resource,
               workspaceRoot: thread.thread.worktreePath ?? project.value.workspaceRoot,
             });
@@ -3708,6 +3647,24 @@ export const layerWsRpc = (
               Stream.concat(Stream.make(latest), changes),
             ),
           ),
+        [WS_METHODS.k3RelaySubscribe]: (_input) => relayConnector.changes,
+        [WS_METHODS.k3RelayCreatePairingOffer]: (_input) => relayConnector.createPairingOffer,
+        [WS_METHODS.k3RelayCancelPairing]: (_input) => relayConnector.cancelPairing,
+        [WS_METHODS.k3RelayApprovePairing]: (input) =>
+          relayConnector.approvePairing(input.deviceId, input.confirmationCode),
+        [WS_METHODS.k3RelayRejectPairing]: (_input) => relayConnector.rejectPairing,
+        [WS_METHODS.k3RelayRevokeDevice]: (input) => relayConnector.revokeDevice(input.deviceId),
+        [WS_METHODS.k3RelayRenameDevice]: (input) =>
+          relayConnector.renameDevice(input.deviceId, input.name),
+        [WS_METHODS.k3RelaySetDevicePermissions]: (input) =>
+          relayConnector.setDevicePermissions(input.deviceId, input.invite),
+        [WS_METHODS.k3RelayAccountSubscribe]: (_input) => relayAccount.changes,
+        [WS_METHODS.k3RelayAccountSignIn]: (input) => relayAccount.signIn(input.provider),
+        [WS_METHODS.k3RelayAccountSignOut]: (_input) => relayAccount.signOut,
+        [WS_METHODS.k3RelayAccountSetApproval]: (input) => relayAccount.setApproval(input),
+        // The device is the session's, never the payload's: a device removes itself and no other.
+        [WS_METHODS.k3RelayForgetThisDevice]: (_input) =>
+          relayConnector.forgetSessionDevice({ subject: currentSession.subject, relayDeviceId }),
       });
       const splitHandlers: Pick<typeof handlers, SplitWsRpc["_tag"]> = handlers;
       const otherHandlers: Pick<typeof handlers, Exclude<ServerWsRpc, SplitWsRpc>["_tag"]> =
@@ -3737,10 +3694,16 @@ export const layer = Layer.unwrap(
     const issueTrackers = yield* IssueTrackerConnections.IssueTrackerConnections;
     const reviewGuides = yield* PullRequestReviewGuideService.PullRequestReviewGuideService;
     const peerLinks = yield* PeerLinks.PeerLinks;
+    const relayConnector = yield* RelayConnector.RelayConnector;
+    const relayAccount = yield* RelayAccount.RelayAccount;
     const peerLinkRequests = yield* PeerLinkRequests.PeerLinkRequests;
     const peerThreadRelay = yield* PeerThreadRelay.PeerThreadRelay;
     const peerClientPairing = yield* PeerClientPairing.PeerClientPairing;
     const sql = yield* SqlClient.SqlClient;
+    const e2eeEnvironmentId = yield* Effect.flatMap(
+      ServerEnvironment.ServerEnvironment,
+      (serverEnvironment) => serverEnvironment.getEnvironmentId,
+    );
     return HttpRouter.add(
       "GET",
       "/ws",
@@ -3759,7 +3722,50 @@ export const layer = Layer.unwrap(
         }
         const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
         const sessions = yield* SessionStore.SessionStore;
-        const analytics = yield* AnalyticsService.AnalyticsService;
+        // Transport policy runs before authentication: it describes how the
+        // peer reached the server, not who it claims to be.
+        const settingsService = yield* ServerSettings.ServerSettingsService;
+        const currentSettings = yield* settingsService.getSettings.pipe(Effect.orDie);
+        const transport = classifyRequestTransport(request);
+        if (!transportAllowedByPolicy(transport, currentSettings.remoteTransportPolicy)) {
+          return HttpServerResponse.jsonUnsafe(
+            {
+              code: "REMOTE_TRANSPORT_NOT_ALLOWED",
+              message:
+                "This host only accepts remote connections over private end-to-end-encrypted transports (Tailscale or SSH). Connect over one of those, or change the policy on the host.",
+              transport,
+            },
+            { status: 403 },
+          );
+        }
+        const e2eeRequested = url.value.searchParams.get(SOCKET_E2EE_QUERY_PARAM) === "1";
+        const e2eeIdentity = yield* Effect.serviceOption(ServerE2eeIdentity.ServerE2eeIdentity);
+        // A client asking for E2EE the server cannot offer must fail loudly:
+        // silently continuing in plaintext would defeat its pinned key.
+        if (e2eeRequested && (currentSettings.e2eeMode === "off" || Option.isNone(e2eeIdentity))) {
+          return HttpServerResponse.jsonUnsafe(
+            {
+              code: "E2EE_NOT_SUPPORTED",
+              message:
+                "This host does not offer end-to-end encryption. Re-pair the environment from its host if you trust this change.",
+            },
+            { status: 403 },
+          );
+        }
+        if (
+          !e2eeRequested &&
+          currentSettings.e2eeMode === "require" &&
+          !transportSatisfiesE2eeRequirement(transport)
+        ) {
+          return HttpServerResponse.jsonUnsafe(
+            {
+              code: E2EE_REQUIRED_CODE,
+              message:
+                "This host requires end-to-end encryption for remote connections. Update K3 Code on this device to a release with E2EE support.",
+            },
+            { status: 403 },
+          );
+        }
         const session = yield* serverAuth.authenticateWebSocketUpgrade(request, "rpc").pipe(
           Effect.catchIf(EnvironmentAuth.isServerAuthCredentialError, (error) =>
             failEnvironmentAuthInvalid(
@@ -3777,32 +3783,13 @@ export const layer = Layer.unwrap(
             "sec-websocket-extensions"
           ];
         }
-        const clientAnalyticsProps = readClientAnalyticsProps(request);
-        yield* analytics.recordOwners(readClientOwners(request), "client");
         const reportProfiles = yield* serverBrowser.profileReporter;
         const rpcWebSocketHttpEffect = yield* Effect.gen(function* () {
           const { protocol, httpEffect } = yield* RpcServer.makeProtocolWithHttpEffectWebsocket;
           yield* RpcServer.make(ServerWsRpcGroup, WS_RPC_SERVER_OPTIONS).pipe(
             Effect.provideService(RpcServer.Protocol, withOutputWindow(protocol)),
             Effect.provide(
-              Layer.merge(
-                RpcAuthorization.layer(session.scopes, (method, payload) => {
-                  // Anonymous product signal: the feature and its enum variant,
-                  // credited to the connecting client's surface only.
-                  const usage = featureUsage(method, payload);
-                  return usage === undefined
-                    ? Effect.void
-                    : analytics
-                        .record("feature.used", {
-                          ...usage,
-                          ...(clientAnalyticsProps.surface === undefined
-                            ? {}
-                            : { surface: clientAnalyticsProps.surface }),
-                        })
-                        .pipe(Effect.ignore);
-                }),
-                rpcInstrumentationLayer,
-              ),
+              Layer.merge(RpcAuthorization.layer(session.scopes), rpcInstrumentationLayer),
             ),
             Effect.forkScoped,
           );
@@ -3811,10 +3798,10 @@ export const layer = Layer.unwrap(
           Effect.provide(
             layerWsRpc(
               session,
-              clientAnalyticsProps,
               serverBrowser,
               reportProfiles,
               readSettingsClient(url.value),
+              relayDeviceIdOf(request),
             ).pipe(
               Layer.provideMerge(RpcSerialization.layerJson),
               // Handler-context reporters see only request defects, not server-wide defects.
@@ -3845,6 +3832,8 @@ export const layer = Layer.unwrap(
                 ),
               ),
               Layer.provide(Layer.succeed(PeerLinks.PeerLinks, peerLinks)),
+              Layer.provide(Layer.succeed(RelayConnector.RelayConnector, relayConnector)),
+              Layer.provide(Layer.succeed(RelayAccount.RelayAccount, relayAccount)),
               Layer.provide(Layer.succeed(PeerLinkRequests.PeerLinkRequests, peerLinkRequests)),
               Layer.provide(Layer.succeed(PeerThreadRelay.PeerThreadRelay, peerThreadRelay)),
               Layer.provide(Layer.succeed(PeerClientPairing.PeerClientPairing, peerClientPairing)),
@@ -3864,18 +3853,32 @@ export const layer = Layer.unwrap(
             ),
           ),
         );
-        const splitFrames = url.value.searchParams.has(SOCKET_FRAME_PARTS_QUERY_PARAM);
-        const framedRpcWebSocketHttpEffect = rpcWebSocketHttpEffect.pipe(
+        // The RPC server upgrades the request itself, so socket wrapping goes
+        // through the request it reads. The frame splitter sits outside E2EE:
+        // it only splits string frames, which E2EE would turn into binary records.
+        const framedRequested = url.value.searchParams.has(SOCKET_FRAME_PARTS_QUERY_PARAM);
+        const e2eeActive =
+          e2eeRequested && currentSettings.e2eeMode !== "off" && Option.isSome(e2eeIdentity);
+        const encryptedUpgrade = e2eeActive
+          ? Effect.flatMap(request.upgrade, (socket) =>
+              Effect.flatMap(Option.getOrThrow(e2eeIdentity).getKeypair, (keypair) =>
+                wrapServerSocketWithE2ee(socket, {
+                  environmentId: e2eeEnvironmentId,
+                  identitySeed: keypair.seed,
+                }),
+              ),
+            )
+          : request.upgrade;
+        const upgradeEffect = framedRequested
+          ? Effect.map(encryptedUpgrade, splitLargeSocketFrames)
+          : encryptedUpgrade;
+        // The heartbeat is an RPC frame, so it is written above the E2EE layer.
+        const heartbeatUpgradeEffect = Effect.map(upgradeEffect, withSocketHeartbeat);
+        const e2eeRpcWebSocketHttpEffect = rpcWebSocketHttpEffect.pipe(
           Effect.provideService(
             HttpServerRequest.HttpServerRequest,
-            // The RPC server upgrades the request itself, so its socket is
-            // wrapped through the request it reads.
             Object.create(request, {
-              upgrade: {
-                value: Effect.map(request.upgrade, (socket) =>
-                  withSocketHeartbeat(splitFrames ? splitLargeSocketFrames(socket) : socket),
-                ),
-              },
+              upgrade: { value: heartbeatUpgradeEffect },
             }),
           ),
         );
@@ -3883,7 +3886,7 @@ export const layer = Layer.unwrap(
           sessions.markConnected(session.sessionId),
           () =>
             Effect.raceFirst(
-              framedRpcWebSocketHttpEffect,
+              e2eeRpcWebSocketHttpEffect,
               sessions.awaitInvalidation(session.sessionId, session.proofKeyThumbprint).pipe(
                 Effect.as(HttpServerResponse.empty()),
                 Effect.catchTags({
@@ -3902,4 +3905,9 @@ export const layer = Layer.unwrap(
       ),
     );
   }),
-).pipe(Layer.provide(NpmRelease.layer));
+).pipe(
+  Layer.provide(NpmRelease.layer),
+  // The E2EE socket wrap runs per upgrade and needs these services; providing
+  // them here keeps them out of every consumer of this layer.
+  Layer.provide(layerE2eeCrypto),
+);

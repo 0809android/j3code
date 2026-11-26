@@ -1,24 +1,21 @@
-import {
-  connectLoopbackRedirectUri,
-  CONNECT_OAUTH_SCOPES,
-  DEFAULT_HOSTED_APP_URL,
-} from "@t3tools/shared/connectAuth";
+import { connectLoopbackRedirectUri, CONNECT_OAUTH_SCOPES } from "@t3tools/shared/connectAuth";
 import { clerkFrontendApiUrlFromPublishableKey } from "@t3tools/shared/relayAuth";
 import { isRelayTracingEnabled } from "@t3tools/shared/otelEnvironment";
 import { normalizeSecureRelayUrl } from "@t3tools/shared/relayUrl";
 import * as Config from "effect/Config";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
 
-declare const __T3CODE_BUILD_RELAY_URL__: string | undefined;
-declare const __T3CODE_BUILD_CHANNEL__: "nightly" | "latest" | undefined;
-declare const __T3CODE_BUILD_CLERK_PUBLISHABLE_KEY__: string | undefined;
-declare const __T3CODE_BUILD_CLERK_CLI_OAUTH_CLIENT_ID__: string | undefined;
-declare const __T3CODE_BUILD_RELAY_CLIENT_OTLP_TRACES_URL__: string | undefined;
-declare const __T3CODE_BUILD_RELAY_CLIENT_OTLP_TRACES_DATASET__: string | undefined;
-declare const __T3CODE_BUILD_RELAY_CLIENT_OTLP_TRACES_TOKEN__: string | undefined;
+declare const __K3CODE_BUILD_RELAY_URL__: string | undefined;
+declare const __K3CODE_BUILD_CHANNEL__: "nightly" | "latest" | undefined;
+declare const __K3CODE_BUILD_CLERK_PUBLISHABLE_KEY__: string | undefined;
+declare const __K3CODE_BUILD_CLERK_CLI_OAUTH_CLIENT_ID__: string | undefined;
+declare const __K3CODE_BUILD_RELAY_CLIENT_OTLP_TRACES_URL__: string | undefined;
+declare const __K3CODE_BUILD_RELAY_CLIENT_OTLP_TRACES_DATASET__: string | undefined;
+declare const __K3CODE_BUILD_RELAY_CLIENT_OTLP_TRACES_TOKEN__: string | undefined;
 
 const CLOUD_CLI_OAUTH_LOOPBACK_PORT = 34338;
 const CLOUD_CLI_OAUTH_SCOPES = CONNECT_OAUTH_SCOPES;
@@ -52,34 +49,34 @@ function normalizeSecureUrl(value: string): string | null {
 }
 
 const buildTimeRelayUrl =
-  typeof __T3CODE_BUILD_RELAY_URL__ === "undefined"
+  typeof __K3CODE_BUILD_RELAY_URL__ === "undefined"
     ? ""
-    : (normalizeSecureRelayUrl(__T3CODE_BUILD_RELAY_URL__) ?? "");
+    : (normalizeSecureRelayUrl(__K3CODE_BUILD_RELAY_URL__) ?? "");
 const buildTimeClerkPublishableKey = readBuildTimeValue(
-  typeof __T3CODE_BUILD_CLERK_PUBLISHABLE_KEY__ === "undefined"
+  typeof __K3CODE_BUILD_CLERK_PUBLISHABLE_KEY__ === "undefined"
     ? undefined
-    : __T3CODE_BUILD_CLERK_PUBLISHABLE_KEY__,
+    : __K3CODE_BUILD_CLERK_PUBLISHABLE_KEY__,
 );
 const buildTimeClerkCliOAuthClientId = readBuildTimeValue(
-  typeof __T3CODE_BUILD_CLERK_CLI_OAUTH_CLIENT_ID__ === "undefined"
+  typeof __K3CODE_BUILD_CLERK_CLI_OAUTH_CLIENT_ID__ === "undefined"
     ? undefined
-    : __T3CODE_BUILD_CLERK_CLI_OAUTH_CLIENT_ID__,
+    : __K3CODE_BUILD_CLERK_CLI_OAUTH_CLIENT_ID__,
 );
 const buildTimeRelayClientTracing = {
   tracesUrl: readBuildTimeValue(
-    typeof __T3CODE_BUILD_RELAY_CLIENT_OTLP_TRACES_URL__ === "undefined"
+    typeof __K3CODE_BUILD_RELAY_CLIENT_OTLP_TRACES_URL__ === "undefined"
       ? undefined
-      : __T3CODE_BUILD_RELAY_CLIENT_OTLP_TRACES_URL__,
+      : __K3CODE_BUILD_RELAY_CLIENT_OTLP_TRACES_URL__,
   ),
   tracesDataset: readBuildTimeValue(
-    typeof __T3CODE_BUILD_RELAY_CLIENT_OTLP_TRACES_DATASET__ === "undefined"
+    typeof __K3CODE_BUILD_RELAY_CLIENT_OTLP_TRACES_DATASET__ === "undefined"
       ? undefined
-      : __T3CODE_BUILD_RELAY_CLIENT_OTLP_TRACES_DATASET__,
+      : __K3CODE_BUILD_RELAY_CLIENT_OTLP_TRACES_DATASET__,
   ),
   tracesToken: readBuildTimeValue(
-    typeof __T3CODE_BUILD_RELAY_CLIENT_OTLP_TRACES_TOKEN__ === "undefined"
+    typeof __K3CODE_BUILD_RELAY_CLIENT_OTLP_TRACES_TOKEN__ === "undefined"
       ? undefined
-      : __T3CODE_BUILD_RELAY_CLIENT_OTLP_TRACES_TOKEN__,
+      : __K3CODE_BUILD_RELAY_CLIENT_OTLP_TRACES_TOKEN__,
   ),
 } as const;
 
@@ -91,10 +88,10 @@ export function resolveRelayClientTracingConfig(
     return null;
   }
 
-  const tracesUrl = env.T3CODE_RELAY_CLIENT_OTLP_TRACES_URL?.trim() || fallback.tracesUrl;
+  const tracesUrl = env.K3CODE_RELAY_CLIENT_OTLP_TRACES_URL?.trim() || fallback.tracesUrl;
   const tracesDataset =
-    env.T3CODE_RELAY_CLIENT_OTLP_TRACES_DATASET?.trim() || fallback.tracesDataset;
-  const tracesToken = env.T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN?.trim() || fallback.tracesToken;
+    env.K3CODE_RELAY_CLIENT_OTLP_TRACES_DATASET?.trim() || fallback.tracesDataset;
+  const tracesToken = env.K3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN?.trim() || fallback.tracesToken;
   const normalizedTracesUrl = normalizeSecureUrl(tracesUrl);
   return normalizedTracesUrl && tracesDataset && tracesToken
     ? { tracesUrl: normalizedTracesUrl, tracesDataset, tracesToken }
@@ -102,7 +99,7 @@ export function resolveRelayClientTracingConfig(
 }
 
 export function makeRelayUrlConfig(fallback = buildTimeRelayUrl) {
-  const runtimeConfig = Config.NonEmptyString("T3CODE_RELAY_URL");
+  const runtimeConfig = Config.NonEmptyString("K3CODE_RELAY_URL");
   return (fallback ? runtimeConfig.pipe(Config.withDefault(fallback)) : runtimeConfig).pipe(
     Config.mapEffect(validateRelayUrl),
   );
@@ -110,23 +107,41 @@ export function makeRelayUrlConfig(fallback = buildTimeRelayUrl) {
 
 export const relayUrlConfig = makeRelayUrlConfig();
 
-export const hostedAppUrlConfig = makePublicValueConfig(
-  "T3CODE_HOSTED_APP_URL",
-  DEFAULT_HOSTED_APP_URL,
-).pipe(Config.mapEffect(validateHostedAppUrl));
-
-const NIGHTLY_HOSTED_APP_URL = "https://nightly.app.t3.codes";
+const HOSTED_APP_URL_ENV = "K3CODE_HOSTED_APP_URL";
 
 /**
- * Where agent sign-ins on the T3 Connect address are approved. A nightly build defaults to the
- * nightly hosted app, which ships the same approval page; app.t3.codes serves stable.
+ * The hosted web app an operator or user chose, if any. K3 Code has no hosted app of its own, so
+ * unset (or empty) is `None`, and everything that would link to one stays on this machine. A set
+ * value that is not an HTTPS (or HTTP loopback) origin is a configuration error, not `None`.
  */
-export const agentApprovalAppUrlConfig = makePublicValueConfig(
-  "T3CODE_HOSTED_APP_URL",
-  typeof __T3CODE_BUILD_CHANNEL__ !== "undefined" && __T3CODE_BUILD_CHANNEL__ === "nightly"
-    ? NIGHTLY_HOSTED_APP_URL
-    : DEFAULT_HOSTED_APP_URL,
-).pipe(Config.mapEffect(validateHostedAppUrl));
+export const optionalHostedAppUrlConfig = Config.String(HOSTED_APP_URL_ENV).pipe(
+  Config.option,
+  Config.map(Option.map((value) => value.trim())),
+  Config.map(Option.filter((value) => value !== "")),
+  Config.mapEffect((value) =>
+    Option.isSome(value)
+      ? validateHostedAppUrl(value.value).pipe(Effect.asSome)
+      : Effect.succeed(Option.none<string>()),
+  ),
+);
+
+/** For the flows that cannot work without a hosted app, such as T3 Connect sign-in. */
+export const hostedAppUrlConfig = optionalHostedAppUrlConfig.pipe(
+  Config.mapEffect((hosted) =>
+    Effect.fromOption(hosted).pipe(
+      Effect.mapError(
+        () =>
+          new Config.ConfigError(
+            new Schema.SchemaError(
+              new SchemaIssue.InvalidValue({
+                message: `${HOSTED_APP_URL_ENV} is not set. There is no hosted app unless you configure one.`,
+              }),
+            ),
+          ),
+      ),
+    ),
+  ),
+);
 
 function validateHostedAppUrl(value: string) {
   try {
@@ -181,11 +196,11 @@ export function makeCloudCliOAuthConfig({
 } = {}) {
   return Config.all({
     clerkPublishableKey: makePublicValueConfig(
-      "T3CODE_CLERK_PUBLISHABLE_KEY",
+      "K3CODE_CLERK_PUBLISHABLE_KEY",
       clerkPublishableKeyFallback,
     ),
     clientId: makePublicValueConfig(
-      "T3CODE_CLERK_CLI_OAUTH_CLIENT_ID",
+      "K3CODE_CLERK_CLI_OAUTH_CLIENT_ID",
       clerkCliOAuthClientIdFallback,
     ),
   }).pipe(
@@ -219,7 +234,7 @@ export function makeCloudCliOAuthConfig({
 export const cloudCliOAuthConfig = makeCloudCliOAuthConfig();
 
 export const hasCloudPublicConfig = Boolean(
-  (normalizeSecureRelayUrl(process.env.T3CODE_RELAY_URL ?? "") ?? buildTimeRelayUrl) &&
-  (process.env.T3CODE_CLERK_PUBLISHABLE_KEY?.trim() || buildTimeClerkPublishableKey) &&
-  (process.env.T3CODE_CLERK_CLI_OAUTH_CLIENT_ID?.trim() || buildTimeClerkCliOAuthClientId),
+  (normalizeSecureRelayUrl(process.env.K3CODE_RELAY_URL ?? "") ?? buildTimeRelayUrl) &&
+  (process.env.K3CODE_CLERK_PUBLISHABLE_KEY?.trim() || buildTimeClerkPublishableKey) &&
+  (process.env.K3CODE_CLERK_CLI_OAUTH_CLIENT_ID?.trim() || buildTimeClerkCliOAuthClientId),
 );

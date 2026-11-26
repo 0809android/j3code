@@ -20,7 +20,7 @@ import {
   type NavigationState,
 } from "@react-navigation/native";
 import { pipe } from "effect/Function";
-import { DEFAULT_HOSTED_APP_URL } from "@t3tools/shared/connectAuth";
+import { setHostedThreadLinkOrigin } from "@t3tools/shared/threadLinks";
 
 import { RegistryContext, useAtomValue } from "@effect/atom-react";
 import { ProjectChipIconRasterizer } from "./native/ProjectChipIconImages";
@@ -52,6 +52,7 @@ import { RootStack, rootPathnameFromState, workspaceLocationFromState } from "./
 import { I18nProvider } from "./i18n/I18nProvider";
 import { DEFAULT_LOCALE } from "./i18n/locales";
 import { appAtomRegistry } from "./state/atom-registry";
+import { installK3RelayLinks } from "./features/connection/k3relayLinks";
 import { subscribeComposerDraftModelReconciliation } from "./state/use-composer-drafts";
 import { environmentThreadShells, threadEnvironment } from "./state/threads";
 import { environmentShell, shellCachesReadAtom } from "./state/shell";
@@ -109,12 +110,16 @@ import {
 import { pruneNewTaskFlowStates } from "./features/threads/new-task-flow-state";
 import { pruneNewTaskBranchCheckouts } from "./features/threads/NewTaskDraftRouteScreen";
 import { installAppUpdateChecks } from "./features/updates/app-updates";
+import { configuredHostedAppUrl, hostedAppLinkPrefixes } from "./lib/hostedApp";
 
 import "../global.css";
 
 if (process.env.EXPO_PUBLIC_SHOWCASE === "1") {
   prepareNativeShowcaseCapture();
 }
+
+// Links to this build's hosted app, if it has one, read as thread links; none are read otherwise.
+setHostedThreadLinkOrigin(configuredHostedAppUrl());
 
 void SplashScreen.preventAutoHideAsync().catch(() => {});
 void hydrateWorkspaceSelections();
@@ -140,10 +145,10 @@ function getAppStateFromPath(path: string, options: Parameters<typeof getStateFr
 const appLinking = {
   prefixes: [
     Linking.createURL("/"),
-    "t3code://",
-    "t3code-dev://",
-    "t3code-preview://",
-    DEFAULT_HOSTED_APP_URL,
+    "k3code://",
+    "k3code-dev://",
+    "k3code-preview://",
+    ...hostedAppLinkPrefixes(configuredHostedAppUrl()),
   ],
   config: { initialRouteName: "Home" },
   filter: (url: string) => shouldHandleAppLink(url, hasCloudPublicConfig()),
@@ -215,6 +220,7 @@ const appServiceDisposers = [
   startIncomingShareInbox(),
   installAgentNotificationNavigation(linkToAppPath),
   installAppShortcuts(linkToAppPath),
+  installK3RelayLinks(appAtomRegistry, linkToAppPath),
   installAppUpdateChecks(),
   installShowcaseCapture(rootPathnameFromState),
 ];

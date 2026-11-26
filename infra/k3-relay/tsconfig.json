@@ -1,0 +1,22 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "plugins": [
+      {
+        "name": "@effect/language-service",
+        "diagnosticSeverity": {
+          "nodeBuiltinImport": "off",
+          "globalDate": "off",
+          "globalTimers": "off",
+          "globalConsole": "off",
+          "globalRandom": "off",
+          "globalFetch": "off",
+          "cryptoRandomUUID": "off",
+          "extendsNativeError": "off"
+        }
+      }
+    ]
+  },
+  "include": ["src"]
+}

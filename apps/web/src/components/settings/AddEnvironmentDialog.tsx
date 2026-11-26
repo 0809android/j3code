@@ -1,7 +1,13 @@
 import { thrownErrorMessage } from "@t3tools/client-runtime/errors";
 import { m } from "~/i18n/messages";
 import { pipe } from "effect/Function";
-import { ChevronsLeftRightEllipsisIcon, PlusIcon, TerminalIcon } from "lucide-react";
+import {
+  ChevronsLeftRightEllipsisIcon,
+  PlusIcon,
+  RadioTowerIcon,
+  TerminalIcon,
+  UserRoundIcon,
+} from "lucide-react";
 import { useAtomValue } from "@effect/atom-react";
 import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { T, useGT, useMessages, Var } from "gt-react";
@@ -21,6 +27,9 @@ import * as Option from "effect/Option";
 
 import { cn } from "../../lib/utils";
 import { formatDesktopSshTarget } from "./EnvironmentRow";
+import { isK3RelayPairingLink, K3RelayPairingPanel } from "./K3RelayPairingPanel";
+import { K3RelayAccountPanel } from "./K3RelayAccountPanel";
+import { currentClientMetadata } from "~/connection/platform";
 import { Input } from "../ui/input";
 import { CommandShortcut } from "../ui/command";
 import {
@@ -83,6 +92,8 @@ export function AddEnvironmentDialog({
   error,
   savedEnvironments,
   initialHost = "",
+  initialRelayLink = "",
+  initialAccount = false,
   onOpenChange,
   onErrorChange,
 }: {
@@ -92,6 +103,10 @@ export function AddEnvironmentDialog({
   readonly routeTarget: EnvironmentPresentation | null;
   /** An address already known for the machine being added, such as one a link uses. */
   readonly initialHost?: string;
+  /** A `k3relay://` pairing link the app was opened with; starts on the relay tab. */
+  readonly initialRelayLink?: string;
+  /** A relay account sign-in came back from the browser; starts on the account tab. */
+  readonly initialAccount?: boolean;
   readonly error: string | null;
   readonly savedEnvironments: ReadonlyArray<EnvironmentPresentation>;
   readonly onOpenChange: (open: boolean) => void;
@@ -125,7 +140,19 @@ export function AddEnvironmentDialog({
     }
     return keys;
   })();
-  const [savedBackendMode, setSavedBackendMode] = useState<"remote" | "ssh">("remote");
+  const [savedBackendMode, setSavedBackendMode] = useState<"remote" | "ssh" | "relay" | "account">(
+    initialAccount ? "account" : initialRelayLink === "" ? "remote" : "relay",
+  );
+  // Hosts this device already reaches through a relay, so the account list marks them added.
+  const savedK3RelayHostIds = new Set<string>();
+  for (const environment of savedEnvironments) {
+    const profile = environment.entry.profile;
+    if (Option.isSome(profile) && profile.value._tag === "K3RelayConnectionProfile") {
+      savedK3RelayHostIds.add(profile.value.hostId);
+    }
+  }
+  const [relayLink, setRelayLink] = useState(initialRelayLink);
+  const [relayDeviceName] = useState(() => currentClientMetadata().label ?? "");
   const [savedBackendHost, setSavedBackendHost] = useState(prefill?.host ?? initialHost);
   const [savedBackendPairingCode, setSavedBackendPairingCode] = useState("");
   const [savedBackendSshHost, setSavedBackendSshHost] = useState("");
@@ -168,6 +195,7 @@ export function AddEnvironmentDialog({
     if (!nextOpen) {
       savedBackendSessionRef.current += 1;
       setSavedBackendMode("remote");
+      setRelayLink("");
       setSavedBackendHost(initialHost);
       setSavedBackendPairingCode("");
       setSavedBackendSshHost("");
@@ -369,6 +397,12 @@ export function AddEnvironmentDialog({
   };
 
   const handleSavedBackendHostChange = (value: string) => {
+    if (isK3RelayPairingLink(value)) {
+      setRelayLink(value.trim());
+      setSavedBackendMode("relay");
+      onErrorChange(null);
+      return;
+    }
     const parsedPairingUrl = parsePairingUrlFields(value);
     if (parsedPairingUrl) {
       setSavedBackendHost(parsedPairingUrl.host);
@@ -378,7 +412,7 @@ export function AddEnvironmentDialog({
     setSavedBackendHost(value);
   };
   const renderConnectionModeCard = (input: {
-    readonly mode: "remote" | "ssh";
+    readonly mode: "remote" | "ssh" | "relay" | "account";
     readonly title: string;
     readonly description: string;
     readonly icon?: ReactNode;
@@ -710,7 +744,13 @@ export function AddEnvironmentDialog({
         </DialogHeader>
         <DialogPanel>
           <div className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div
+              className={cn(
+                "grid gap-3",
+                // Four cards on desktop sit two by two; the browser's three share a row.
+                routeTarget === null && !desktopBridge ? "sm:grid-cols-3" : "sm:grid-cols-2",
+              )}
+            >
               {renderConnectionModeCard({
                 mode: "remote",
                 title: gt("Remote link"),
@@ -725,9 +765,64 @@ export function AddEnvironmentDialog({
                     icon: <TerminalIcon aria-hidden className="size-4" />,
                   })
                 : null}
+              {routeTarget === null
+                ? renderConnectionModeCard({
+                    mode: "relay",
+                    title: gt("Through a relay"),
+                    description: gt(
+                      "Pair with a link or QR code from the host. Works across networks.",
+                    ),
+                    icon: <RadioTowerIcon aria-hidden className="size-4" />,
+                  })
+                : null}
+              {routeTarget === null
+                ? renderConnectionModeCard({
+                    mode: "account",
+                    title: gt("Sign in with an account"),
+                    description: gt(
+                      "Find your hosts with GitHub, Google or Apple. Each host still approves this device.",
+                    ),
+                    icon: <UserRoundIcon aria-hidden className="size-4" />,
+                  })
+                : null}
             </div>
             <AnimatedHeight>
-              {savedBackendMode === "ssh" ? renderSshFields() : renderRemoteModeBody()}
+              {savedBackendMode === "ssh" ? (
+                renderSshFields()
+              ) : savedBackendMode === "account" ? (
+                <K3RelayAccountPanel
+                  defaultDeviceName={relayDeviceName || gt("My device")}
+                  savedHostIds={savedK3RelayHostIds}
+                  onConnected={() => {
+                    handleOpenChange(false);
+                    toastManager.add({
+                      type: "success",
+                      title: gt("Environment connected"),
+                      description: gt(
+                        "Connected through your relay account. It reconnects on its own when this app starts.",
+                      ),
+                    });
+                  }}
+                />
+              ) : savedBackendMode === "relay" ? (
+                <K3RelayPairingPanel
+                  key={relayLink}
+                  initialLink={relayLink}
+                  defaultDeviceName={relayDeviceName || gt("My device")}
+                  onPaired={() => {
+                    handleOpenChange(false);
+                    toastManager.add({
+                      type: "success",
+                      title: gt("Environment connected"),
+                      description: gt(
+                        "Paired through the relay. It reconnects on its own when this app starts.",
+                      ),
+                    });
+                  }}
+                />
+              ) : (
+                renderRemoteModeBody()
+              )}
             </AnimatedHeight>
           </div>
         </DialogPanel>

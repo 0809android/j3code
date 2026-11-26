@@ -52,7 +52,9 @@ import {
   syncDocumentElectronPlatformClasses,
   syncDocumentWindowControlsOverlayClass,
 } from "./lib/windowControlsOverlay";
+import { configuredHostedAppUrl } from "./hostedPairing";
 import { startProviderAuthDelivery } from "./providerAuthDelivery";
+import { setHostedThreadLinkOrigin } from "@t3tools/shared/threadLinks";
 import { getRouter, type AppRouter } from "./router";
 import { appAtomRegistry } from "./rpc/atomRegistry";
 import { environmentProjects } from "./state/projects";
@@ -95,9 +97,11 @@ function startClientAppearance(): void {
     }
     if (previous?.glassOpacity !== settings.glassOpacity) {
       root.style.setProperty("--glass-opacity", `${settings.glassOpacity}%`);
-      if (settings.glassOpacity === 100) {
+      if (settings.glassOpacity >= 100) {
+        root.dataset.glassOpaque = "true";
         root.style.setProperty("--glass-blur", "0px");
       } else {
+        delete root.dataset.glassOpaque;
         root.style.removeProperty("--glass-blur");
       }
     }
@@ -256,6 +260,8 @@ function startThreadOverlayRetention(router: AppRouter): void {
  * They run for the life of the page, so their disposers are dropped here.
  */
 export function startAppServices(): AppRouter {
+  // Links to this build's hosted app, if it has one, read as thread links; none are read otherwise.
+  setHostedThreadLinkOrigin(configuredHostedAppUrl());
   // Ahead of the history: the provider auth code must leave the address before anything reads it.
   startProviderAuthDelivery();
 

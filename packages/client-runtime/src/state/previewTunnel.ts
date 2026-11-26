@@ -33,7 +33,7 @@ export function createPreviewTunnelUrlReader<R, E>(input: {
         if (prepared === null) return Effect.never;
         // The proxy cannot send cookies, so only ticketed connections tunnel.
         if (prepared.httpAuthorization === null) return Effect.succeed(null);
-        return mintMediaTicket(prepared).pipe(
+        return mintMediaTicket(prepared, "preview-tunnel").pipe(
           Effect.map((ticket) => {
             const url = new URL(
               environmentEndpointUrl(prepared.httpBaseUrl, "/api/preview/tunnel").replace(

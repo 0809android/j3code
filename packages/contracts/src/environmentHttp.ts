@@ -9,6 +9,7 @@ import * as HttpApiSchema from "effect/http-api/HttpApiSchema";
 import * as HttpServerRespondable from "effect/http/HttpServerRespondable";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
 
+import { K3RelayUnsupportedError } from "./k3Relay.ts";
 import {
   AuthAccessTokenResult,
   AuthBrowserSessionRequest,
@@ -516,19 +517,19 @@ export function formatConnectReachable(
 export const T3_CONNECT_TROUBLESHOOTING_SECTIONS = [
   "the-hosts-tunnel-is-offline",
   "port-7844-is-blocked-on-the-host",
-  "the-tunnel-works-but-t3-code-does-not-answer",
+  "the-tunnel-works-but-k3-code-does-not-answer",
   "the-t3-connect-address-does-not-resolve-or-answer",
   "this-device-cant-reach-t3-connect",
   "sign-in-account-or-link-problems",
   "the-clock-is-off",
-  "the-host-runs-an-older-t3-code",
+  "the-host-runs-an-older-k3-code",
   "t3-connect-returned-an-error",
 ] as const;
 export type T3ConnectTroubleshootingSection = (typeof T3_CONNECT_TROUBLESHOOTING_SECTIONS)[number];
 
 /** Clients, the CLI, and server logs link here as "More info". */
 export function t3ConnectTroubleshootingUrl(section: T3ConnectTroubleshootingSection): string {
-  return `https://github.com/pingdotgg/t3code/blob/main/docs/user/t3-connect-troubleshooting.md#${section}`;
+  return `https://github.com/kinocode-jp/k3code/blob/main/docs/user/t3-connect-troubleshooting.md#${section}`;
 }
 
 const REACHABILITY_SECTION = {
@@ -537,8 +538,8 @@ const REACHABILITY_SECTION = {
   connector_not_ready: "the-hosts-tunnel-is-offline",
   no_connector: "the-hosts-tunnel-is-offline",
   edge_unreachable: "port-7844-is-blocked-on-the-host",
-  origin_unreachable: "the-tunnel-works-but-t3-code-does-not-answer",
-  unexpected_response: "the-tunnel-works-but-t3-code-does-not-answer",
+  origin_unreachable: "the-tunnel-works-but-k3-code-does-not-answer",
+  unexpected_response: "the-tunnel-works-but-k3-code-does-not-answer",
   dns_failed: "the-t3-connect-address-does-not-resolve-or-answer",
   timeout: "the-t3-connect-address-does-not-resolve-or-answer",
 } satisfies Record<EnvironmentConnectReachabilityCause, T3ConnectTroubleshootingSection>;
@@ -627,7 +628,8 @@ class EnvironmentAuthHttpApi extends HttpApiGroup.make("auth")
       headers: OptionalBearerHeaders,
       params: AuthWebSocketTicketParams,
       success: AuthWebSocketTicketResult,
-      error: [EnvironmentInternalError],
+      // A media ticket is a credential in a URL: never issued through the K3 relay.
+      error: [EnvironmentInternalError, K3RelayUnsupportedError],
     }).middleware(EnvironmentAuthenticatedAuth),
   )
   .add(

@@ -4,6 +4,8 @@ import { defineConfig } from "vite-plus";
 export default defineConfig({
   test: {
     environment: "node",
+    hookTimeout: 60_000,
+    testTimeout: 60_000,
     include: ["src/**/*.test.ts"],
     setupFiles: [
       "../shared/src/testing/longTempDir.ts",

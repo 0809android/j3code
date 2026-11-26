@@ -49,9 +49,14 @@ import { useSearchableSetting } from "./settingsSearch";
 import { ConnectDeviceApprovalSettings } from "./ConnectDeviceApprovalSettings";
 import { EnvironmentIconMenu } from "./EnvironmentIconPicker";
 import { FoldedSettingsSection } from "./FoldedSettingsSection";
+import { K3RelayAccountSettings } from "./K3RelayAccountSettings";
+import { K3RelayIntroducePanel } from "./K3RelayIntroducePanel";
+import { K3RelaySettings } from "./K3RelaySettings";
 import { EnvironmentsMap } from "./EnvironmentsMap";
 import { LinkedEnvironmentsSettings } from "./LinkedEnvironmentsSettings";
 import { addEnvironmentPrefillAtom } from "~/state/linkedThreadView";
+import { pendingK3RelayLinkAtom } from "~/k3relay/pendingLink";
+import { pendingK3RelayAccountCallbackAtom } from "~/k3relay/accountSignIn";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { useMediaQuery } from "~/hooks/useMediaQuery";
 import { usePeerLinkHosts } from "~/state/peerLinks";
@@ -147,6 +152,7 @@ import {
 import { ITEM_ROW_CLASSNAME } from "./itemRows";
 import {
   CloudLinkRow,
+  TransportSecurityRows,
   CloudRemoteEnvironmentRows,
   SavedBackendListRow,
 } from "./SavedEnvironmentRows";
@@ -364,6 +370,13 @@ function ConnectionsSettingsContent({
   const [savedBackendError, setSavedBackendError] = useState<string | null>(null);
   // Set by a read-only linked thread whose machine this client is about to pair with.
   const [addPrefill, setAddPrefill] = useAtom(addEnvironmentPrefillAtom);
+  // A `k3relay://` link the OS handed the desktop app opens the dialog on the relay tab.
+  const [pendingRelayLink, setPendingRelayLink] = useAtom(pendingK3RelayLinkAtom);
+  // A relay account sign-in the browser returned from opens the dialog on the account tab, which
+  // takes the callback; only the account panel clears it.
+  const pendingAccountCallback = useAtomValue(pendingK3RelayAccountCallbackAtom);
+  const [accountReturned, setAccountReturned] = useState(false);
+  if (pendingAccountCallback !== null && !accountReturned) setAccountReturned(true);
   const handleAddBackendDialogOpenChange = (open: boolean) => {
     setAddBackendDialogOpen(open);
     if (open) {
@@ -372,6 +385,8 @@ function ConnectionsSettingsContent({
     } else {
       setSavedBackendError(null);
       setAddPrefill(null);
+      setPendingRelayLink(null);
+      setAccountReturned(false);
     }
   };
   const openAddRoute = (target: EnvironmentPresentation) => {
@@ -1125,7 +1140,7 @@ function ConnectionsSettingsContent({
         {desktopWslState.enabled ? (
           <SettingsRow
             title={gt("WSL only")}
-            description={gt("Run only the WSL backend. T3 Code restarts when this changes.")}
+            description={gt("Run only the WSL backend. K3 Code restarts when this changes.")}
             className="bg-muted/20 pl-7 sm:pl-8"
             control={
               <Switch
@@ -1179,6 +1194,12 @@ function ConnectionsSettingsContent({
   ) => (
     <PairingClientsList
       servedByEnvironment={isPrimaryAccess}
+      serverIdentityKey={
+        // A pin makes the client demand E2EE, which a host with it off refuses.
+        accessServerConfig?.transportSecurity?.e2eeMode === "off"
+          ? null
+          : (accessServerConfig?.transportSecurity?.identityPublicKey ?? null)
+      }
       endpointUrl={desktopServerExposureState?.endpointUrl}
       endpoints={visibleDesktopAdvertisedEndpoints}
       defaultEndpointKey={defaultDesktopAdvertisedEndpointKey}
@@ -1396,6 +1417,20 @@ function ConnectionsSettingsContent({
             ) : canManageLocalBackend ? (
               renderDisabledNetworkAccessRow()
             ) : null}
+            <TransportSecurityRows
+              environmentId={accessEnvironmentId}
+              transportSecurity={
+                accessServerConfig?.settings.remoteTransportPolicy === undefined
+                  ? null
+                  : {
+                      policy: accessServerConfig.settings.remoteTransportPolicy,
+                      e2eeMode: accessServerConfig.settings.e2eeMode,
+                      fingerprint:
+                        accessServerConfig.transportSecurity?.identityPublicKeyFingerprint ?? null,
+                      canManage: canWriteAccess,
+                    }
+              }
+            />
             {canReadRelay || canManageRelay ? (
               <CloudLinkRow
                 environmentId={accessEnvironmentId}
@@ -1509,6 +1544,19 @@ function ConnectionsSettingsContent({
               requestRevoke={requestConnectRevoke}
             />
           ) : null}
+          <K3RelaySettings
+            environmentId={accessEnvironmentId}
+            canWrite={canWriteAccess}
+            networkAccessEnabled={isLocalBackendNetworkAccessible}
+          />
+          <K3RelayAccountSettings environmentId={accessEnvironmentId} canWrite={canWriteAccess} />
+          {savedEnvironments.some(
+            (environment) =>
+              environment.entry.profile._tag === "Some" &&
+              environment.entry.profile.value._tag === "K3RelayConnectionProfile",
+          ) ? (
+            <K3RelayIntroducePanel />
+          ) : null}
           <RevokeConnectDeviceDialog
             request={pendingConnectRevoke}
             onClose={() => setPendingConnectRevoke(null)}
@@ -1531,10 +1579,10 @@ function ConnectionsSettingsContent({
                 <AlertDialogDescription>
                   {pendingDesktopServerExposureMode === "network-accessible"
                     ? gt(
-                        "Let your other devices connect to T3 Code over the network. Pair devices to give them access. T3 Code will restart.",
+                        "Let your other devices connect to K3 Code over the network. Pair devices to give them access. K3 Code will restart.",
                       )
                     : gt(
-                        "Devices connected over your local network will disconnect. Existing tunnels, such as T3 Connect or Tailscale HTTPS, keep working. T3 Code will restart.",
+                        "Devices connected over your local network will disconnect. Existing tunnels, such as T3 Connect or Tailscale HTTPS, keep working. K3 Code will restart.",
                       )}
                 </AlertDialogDescription>
               </AlertDialogHeader>
@@ -1594,14 +1642,14 @@ function ConnectionsSettingsContent({
                   {pendingWslChange?.kind === "disable"
                     ? pendingWslChange.wasWslOnly
                       ? gt(
-                          "T3 Code will restart on the Windows backend. Threads and projects opened against WSL stay safe inside the distro and become available again when you re-enable WSL.",
+                          "K3 Code will restart on the Windows backend. Threads and projects opened against WSL stay safe inside the distro and become available again when you re-enable WSL.",
                         )
                       : gt(
-                          "The WSL backend will stop. Threads and projects opened against WSL stay safe inside the distro, but they'll be unavailable in T3 Code until you re-enable WSL.",
+                          "The WSL backend will stop. Threads and projects opened against WSL stay safe inside the distro, but they'll be unavailable in K3 Code until you re-enable WSL.",
                         )
                     : pendingWslChange?.kind === "distro"
                       ? gt(
-                          "T3 Code will restart the WSL backend on the new distro. Sessions still running on the current distro will be interrupted.",
+                          "K3 Code will restart the WSL backend on the new distro. Sessions still running on the current distro will be interrupted.",
                         )
                       : pendingWslChange?.kind === "enable"
                         ? gt(
@@ -1609,10 +1657,10 @@ function ConnectionsSettingsContent({
                           )
                         : pendingWslChange?.nextValue
                           ? gt(
-                              "T3 Code will restart and start only the WSL backend. Your Windows-side projects won't be accessible until you turn this off again.",
+                              "K3 Code will restart and start only the WSL backend. Your Windows-side projects won't be accessible until you turn this off again.",
                             )
                           : gt(
-                              "T3 Code will restart and bring the Windows backend back up alongside WSL.",
+                              "K3 Code will restart and bring the Windows backend back up alongside WSL.",
                             )}
                 </AlertDialogDescription>
               </AlertDialogHeader>
@@ -1701,7 +1749,7 @@ function ConnectionsSettingsContent({
                   <T>Disable Tailscale HTTPS?</T>
                 </AlertDialogTitle>
                 <AlertDialogDescription>
-                  <T>T3 Code will restart the local backend without Tailscale Serve.</T>
+                  <T>K3 Code will restart the local backend without Tailscale Serve.</T>
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
@@ -1742,7 +1790,7 @@ function ConnectionsSettingsContent({
                 </DialogTitle>
                 <DialogDescription>
                   <T>
-                    T3 Code will restart the local backend with Tailscale Serve enabled and ask
+                    K3 Code will restart the local backend with Tailscale Serve enabled and ask
                     Tailscale to proxy HTTPS traffic to this backend.
                   </T>
                 </DialogDescription>
@@ -1860,11 +1908,18 @@ function ConnectionsSettingsContent({
             ) : null}
             {/* Actions on several machines at once, such as linking several, go here. */}
             <AddEnvironmentDialog
-              key={`${addPrefill?.environmentId ?? "any"}:${addBackendHost}`}
-              open={addBackendDialogOpen || addPrefill !== null}
+              key={`${addPrefill?.environmentId ?? "any"}:${addBackendHost}:${pendingRelayLink ?? ""}:${accountReturned ? "account" : ""}`}
+              open={
+                addBackendDialogOpen ||
+                addPrefill !== null ||
+                pendingRelayLink !== null ||
+                accountReturned
+              }
               prefill={addPrefill}
               routeTarget={routeTarget}
               initialHost={addBackendHost}
+              initialRelayLink={pendingRelayLink ?? ""}
+              initialAccount={accountReturned}
               error={savedBackendError}
               savedEnvironments={savedEnvironments}
               onOpenChange={handleAddBackendDialogOpenChange}

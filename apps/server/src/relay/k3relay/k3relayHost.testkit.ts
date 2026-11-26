@@ -1,0 +1,627 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import {
+  AttachmentCreateUploadUrlInput,
+  EnvironmentHttpApi,
+  type K3RelayAccountProvider,
+  type K3RelayAccountState,
+  type K3RelayDevice,
+  type K3RelayDeviceAlgorithm,
+  K3RelayError,
+  type K3RelayHostState,
+  K3RelayHostState as K3RelayHostStateSchema,
+  type K3RelayPairingOffer,
+  type ManagedPolicyDocument,
+  type ServerSettings as ServerSettingsValue,
+  WS_METHODS,
+} from "@t3tools/contracts";
+import * as Clock from "effect/Clock";
+import * as Digest from "effect/crypto/Digest";
+import * as SecureRandom from "effect/crypto/SecureRandom";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
+import * as ManagedRuntime from "effect/ManagedRuntime";
+import * as Option from "effect/Option";
+import * as Path from "effect/Path";
+import * as PubSub from "effect/PubSub";
+import * as Schema from "effect/Schema";
+import * as Scope from "effect/Scope";
+import * as Stream from "effect/Stream";
+import { FetchHttpClient } from "effect/http";
+import * as Etag from "effect/http/Etag";
+import * as HttpPlatform from "effect/http/HttpPlatform";
+import * as HttpRouter from "effect/http/HttpRouter";
+import * as HttpServerRequest from "effect/http/HttpServerRequest";
+import * as HttpServerResponse from "effect/http/HttpServerResponse";
+import * as HttpApi from "effect/http-api/HttpApi";
+import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
+import * as Rpc from "effect/rpc/Rpc";
+import * as RpcGroup from "effect/rpc/RpcGroup";
+import * as RpcSerialization from "effect/rpc/RpcSerialization";
+import * as RpcServer from "effect/rpc/RpcServer";
+
+import { type RelayGrant, signGrant } from "@t3tools/shared/relay";
+import { layerE2eeCrypto } from "@t3tools/shared/socketE2ee";
+
+import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
+import * as AuthHttp from "../../auth/http.ts";
+import * as ServerE2eeIdentity from "../../auth/ServerE2eeIdentity.ts";
+import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
+import * as SessionStore from "../../auth/SessionStore.ts";
+import {
+  classifyRequestTransport,
+  relayDeviceIdOf,
+  transportAllowedByPolicy,
+} from "../../auth/transportSecurity.ts";
+import { deriveAuthClientMetadata } from "../../auth/utils.ts";
+import * as ServerConfig from "../../config.ts";
+import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
+import { issueAssetUrl } from "../../assets/AssetAccess.ts";
+import * as AssetSigner from "../../assets/AssetSigner.ts";
+import { issueAttachmentUploadUrl } from "../../assets/AttachmentUpload.ts";
+import * as NativeAppIconResolver from "../../assets/NativeAppIconResolver.ts";
+import * as WorkspacePreviewRevisions from "../../assets/WorkspacePreviewRevisions.ts";
+import {
+  layerAssetRoute,
+  layerAttachmentUploadRoute,
+  layerServerEnvironmentHttpApi,
+} from "../../http.ts";
+import * as Orchestrator from "../../orchestration-v2/Orchestrator.ts";
+import * as ProjectFaviconResolver from "../../project/ProjectFaviconResolver.ts";
+import * as RepositoryIdentityResolver from "../../project/RepositoryIdentityResolver.ts";
+import * as DocumentText from "../../provider/DocumentText.ts";
+import * as SourceControlDrivers from "../../sourceControl/builtInDrivers.ts";
+import * as WorkspacePaths from "../../workspace/WorkspacePaths.ts";
+import * as SqlitePersistence from "../../persistence/Sqlite.ts";
+import * as ManagedPolicy from "../../policy/ManagedPolicy.ts";
+import * as ServerSettings from "../../serverSettings.ts";
+import * as RelayAccount from "./RelayAccount.ts";
+import * as RelayConnector from "./RelayConnector.ts";
+import * as RelayDeviceLedger from "./RelayDeviceLedger.ts";
+import * as RelayNotifier from "./RelayNotifier.ts";
+
+/**
+ * A K3 relay host as the server runs it, minus the parts the relay does not touch: the real
+ * `RelayConnector`, device ledger, `EnvironmentAuth` with its HTTP routes, the environment
+ * descriptor, and an RPC socket authenticated like `ws.ts`. Its probe RPCs answer with what the
+ * server concluded about the caller, and `k3relay.subscribe` streams the connector's real state.
+ */
+
+class HostTestApi extends HttpApi.make("environment")
+  .add(EnvironmentHttpApi.groups.auth)
+  .add(EnvironmentHttpApi.groups.metadata) {}
+
+export const RelayProbeWhoAmI = Schema.Struct({ subject: Schema.String, transport: Schema.String });
+
+/** What the server's real asset and upload issuers return to the caller. */
+export const RelayProbeIssued = Schema.Struct({
+  relativeUrl: Schema.String,
+  attachmentId: Schema.optionalKey(Schema.String),
+});
+
+export const RelayProbeRpcs = RpcGroup.make(
+  Rpc.make("relayProbe.whoami", { success: RelayProbeWhoAmI }),
+  /** `assets.createUrl` for an attachment, as `ws.ts` issues it to this socket's caller. */
+  Rpc.make("relayProbe.assetUrl", {
+    payload: Schema.Struct({ attachmentId: Schema.String }),
+    success: RelayProbeIssued,
+    error: Schema.String,
+  }),
+  /** `attachments.createUploadUrl`, as `ws.ts` issues it to this socket's caller. */
+  Rpc.make("relayProbe.uploadUrl", {
+    payload: AttachmentCreateUploadUrlInput,
+    success: RelayProbeIssued,
+    error: Schema.String,
+  }),
+  Rpc.make(WS_METHODS.k3RelaySubscribe, {
+    payload: Schema.Struct({}),
+    success: K3RelayHostStateSchema,
+    stream: true,
+  }),
+  /** As `ws.ts` serves it: the session's own device, whatever the payload says. */
+  Rpc.make(WS_METHODS.k3RelayForgetThisDevice, {
+    payload: Schema.Struct({}),
+    error: K3RelayError,
+  }),
+);
+
+export const TEST_ENVIRONMENT_LABEL = "Relay test host";
+
+/** What the real asset and upload routes and issuers read, besides the platform. */
+type AssetServices =
+  | AssetSigner.AssetSigner
+  | DocumentText.DocumentText
+  | WorkspacePaths.WorkspacePaths
+  | NativeAppIconResolver.NativeAppIconResolver
+  | WorkspacePreviewRevisions.WorkspacePreviewRevisions
+  | ProjectFaviconResolver.ProjectFaviconResolver
+  | RepositoryIdentityResolver.RepositoryIdentityResolver
+  | SourceControlDrivers.SourceControlDrivers
+  | Orchestrator.OrchestratorV2;
+
+/**
+ * Services the asset routes reach only for kinds these tests never serve (tool output, project
+ * icons, source-control media): present for the types, failing loudly if a test ever calls them.
+ */
+const unavailable = <S>(name: string) =>
+  new Proxy(
+    {},
+    {
+      get: () => {
+        throw new Error(`The relay test host has no ${name}.`);
+      },
+    },
+  ) as S;
+
+const layerAssets = Layer.mergeAll(
+  AssetSigner.layer,
+  DocumentText.layer,
+  WorkspacePaths.layer,
+  NativeAppIconResolver.layer,
+  WorkspacePreviewRevisions.layer,
+  Layer.succeed(
+    Orchestrator.OrchestratorV2,
+    unavailable<Orchestrator.OrchestratorV2["Service"]>("orchestrator"),
+  ),
+  Layer.succeed(
+    ProjectFaviconResolver.ProjectFaviconResolver,
+    unavailable<ProjectFaviconResolver.ProjectFaviconResolver["Service"]>("project icons"),
+  ),
+  Layer.succeed(
+    RepositoryIdentityResolver.RepositoryIdentityResolver,
+    unavailable<RepositoryIdentityResolver.RepositoryIdentityResolver["Service"]>(
+      "repository identities",
+    ),
+  ),
+  Layer.succeed(
+    SourceControlDrivers.SourceControlDrivers,
+    unavailable<SourceControlDrivers.SourceControlDrivers["Service"]>("source control"),
+  ),
+);
+
+const layerRpcRoute = HttpRouter.add(
+  "GET",
+  "/ws",
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const transport = classifyRequestTransport(request);
+    const settings = yield* (yield* ServerSettings.ServerSettingsService).getSettings.pipe(
+      Effect.orDie,
+    );
+    if (!transportAllowedByPolicy(transport, settings.remoteTransportPolicy)) {
+      return HttpServerResponse.jsonUnsafe(
+        { code: "REMOTE_TRANSPORT_NOT_ALLOWED" },
+        { status: 403 },
+      );
+    }
+    const auth = yield* EnvironmentAuth.EnvironmentAuth;
+    const sessions = yield* SessionStore.SessionStore;
+    const connector = yield* RelayConnector.RelayConnector;
+    const session = yield* Effect.result(auth.authenticateWebSocketUpgrade(request, "rpc"));
+    if (session._tag === "Failure") {
+      return HttpServerResponse.jsonUnsafe({ code: "auth_invalid" }, { status: 401 });
+    }
+    const relayDeviceId = relayDeviceIdOf(request);
+    const assetContext = yield* Effect.context<AssetServices>();
+    const issueFailed = (error: { readonly _tag: string }) => Effect.fail(error._tag);
+    const { protocol, httpEffect } = yield* RpcServer.makeProtocolWithHttpEffectWebsocket;
+    yield* RpcServer.make(RelayProbeRpcs).pipe(
+      Effect.provideService(RpcServer.Protocol, protocol),
+      Effect.provide(
+        RelayProbeRpcs.toLayer({
+          "relayProbe.whoami": () =>
+            Effect.succeed({ subject: session.success.subject, transport }),
+          "relayProbe.assetUrl": ({ attachmentId }) =>
+            issueAssetUrl({
+              resource: { _tag: "attachment", attachmentId },
+              relayDeviceId,
+            }).pipe(
+              Effect.map(({ relativeUrl }) => ({ relativeUrl })),
+              Effect.catch(issueFailed),
+              Effect.provideContext(assetContext),
+            ),
+          "relayProbe.uploadUrl": (input) =>
+            issueAttachmentUploadUrl(input, relayDeviceId).pipe(
+              Effect.map(({ relativeUrl, attachmentId }) => ({ relativeUrl, attachmentId })),
+              Effect.catch(issueFailed),
+              Effect.provideContext(assetContext),
+            ),
+          [WS_METHODS.k3RelaySubscribe]: () => connector.changes,
+          [WS_METHODS.k3RelayForgetThisDevice]: () =>
+            connector.forgetSessionDevice({ subject: session.success.subject, relayDeviceId }),
+        }),
+      ),
+      Effect.forkScoped,
+    );
+    return yield* Effect.raceFirst(
+      httpEffect,
+      sessions
+        .awaitInvalidation(session.success.sessionId, session.success.proofKeyThumbprint)
+        .pipe(Effect.ignore, Effect.as(HttpServerResponse.empty())),
+    );
+  }).pipe(Effect.provide(RpcSerialization.layerJson)),
+);
+
+/** Answers with what the server concluded about the request's route and address. */
+const layerProbeRoute = HttpRouter.add(
+  "GET",
+  "/relay-probe",
+  Effect.map(HttpServerRequest.HttpServerRequest, (request) =>
+    HttpServerResponse.jsonUnsafe({
+      transport: classifyRequestTransport(request),
+      ipAddress: deriveAuthClientMetadata({ request }).ipAddress ?? null,
+    }),
+  ),
+);
+
+/**
+ * Server-sent events that resume after `Last-Event-ID`: three events per response, then the
+ * response ends, so an EventSource reconnects and must pick up where it left off.
+ */
+const layerEventsProbeRoute = HttpRouter.add(
+  "GET",
+  "/relay-probe/events",
+  Effect.map(HttpServerRequest.HttpServerRequest, (request) => {
+    const last = Number(request.headers["last-event-id"] ?? "0");
+    const from = Number.isInteger(last) && last >= 0 ? last + 1 : 1;
+    const body = [from, from + 1, from + 2]
+      .map((id) => `id: ${id}\ndata: {"n":${id}}\n\n`)
+      .join("");
+    return HttpServerResponse.text(`retry: 20\n\n${body}`, {
+      contentType: "text/event-stream",
+      headers: { "cache-control": "no-store" },
+    });
+  }),
+);
+
+/** The test settings service, plus the change stream the connector follows. */
+const layerSettingsWithChanges = (overrides: Parameters<typeof ServerSettings.layerTest>[0]) =>
+  Layer.effect(
+    ServerSettings.ServerSettingsService,
+    Effect.gen(function* () {
+      const base = yield* ServerSettings.ServerSettingsService;
+      const changes = yield* PubSub.unbounded<ServerSettingsValue>();
+      return ServerSettings.ServerSettingsService.of({
+        ...base,
+        updateSettings: (patch) =>
+          base.updateSettings(patch).pipe(Effect.tap((next) => PubSub.publish(changes, next))),
+        streamChanges: Stream.fromPubSub(changes),
+        subscribeChanges: Effect.map(PubSub.subscribe(changes), Stream.fromSubscription),
+      });
+    }),
+  ).pipe(Layer.provide(ServerSettings.layerTest(overrides)));
+
+const layerEnvironment = Layer.effect(
+  ServerEnvironment.ServerEnvironment,
+  Effect.gen(function* () {
+    const identity = yield* ServerEnvironment.ServerEnvironmentIdentity;
+    const environmentId = yield* identity.getEnvironmentId;
+    return ServerEnvironment.ServerEnvironment.of({
+      getEnvironmentId: Effect.succeed(environmentId),
+      getDescriptor: Effect.succeed({
+        environmentId,
+        label: TEST_ENVIRONMENT_LABEL,
+        platform: { os: "linux", arch: "x64" },
+        serverVersion: "0.0.0-test",
+        capabilities: { repositoryIdentity: true },
+      }),
+    });
+  }),
+);
+
+export interface K3RelayTestHostOptions {
+  readonly relayUrl: string;
+  readonly enabled?: boolean;
+  readonly maxSessions?: number;
+  readonly policy?: ManagedPolicyDocument;
+}
+
+/** Each call is a separate host: its own state directory, database, and so its own `Hk`. */
+export const layerK3RelayTestHost = (options: K3RelayTestHostOptions) => {
+  const config = ServerConfig.layerTest(process.cwd(), { prefix: "t3-k3relay-test-" });
+  const storage = Layer.mergeAll(ServerSecretStore.layer, SqlitePersistence.layerMemory).pipe(
+    Layer.provideMerge(config),
+  );
+  const core = EnvironmentAuth.layer.pipe(
+    Layer.provideMerge(layerAssets),
+    Layer.provideMerge(layerEnvironment),
+    Layer.provideMerge(Layer.mergeAll(ServerE2eeIdentity.layer, ServerEnvironment.layerIdentity)),
+    Layer.provideMerge(ManagedPolicy.layerTest(options.policy)),
+    Layer.provideMerge(
+      layerSettingsWithChanges({
+        relay: {
+          enabled: options.enabled ?? true,
+          url: options.relayUrl,
+          maxSessions: options.maxSessions ?? 8,
+        },
+      }),
+    ),
+    Layer.provideMerge(storage),
+    Layer.provideMerge(
+      HttpPlatform.layer.pipe(
+        Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+        Layer.provideMerge(Etag.layerWeak),
+      ),
+    ),
+    Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, FetchHttpClient.layer)),
+  );
+  const routes = Layer.mergeAll(
+    HttpApiBuilder.layer(HostTestApi).pipe(
+      Layer.provide(AuthHttp.layer),
+      Layer.provide(AuthHttp.layerAuthenticatedAuth),
+      Layer.provide(layerServerEnvironmentHttpApi),
+    ),
+    layerRpcRoute,
+    layerProbeRoute,
+    layerEventsProbeRoute,
+    layerAssetRoute,
+    layerAttachmentUploadRoute,
+  ).pipe(
+    // Routes read these per request, as `HttpRouter.serve` provides them in the server.
+    HttpRouter.provideRequest(
+      Layer.effectContext(
+        Effect.context<
+          | EnvironmentAuth.EnvironmentAuth
+          | SessionStore.SessionStore
+          | ServerSecretStore.ServerSecretStore
+          | ServerSettings.ServerSettingsService
+          | ServerEnvironment.ServerEnvironment
+          | RelayConnector.RelayConnector
+          | Digest.Digest
+          | AssetServices
+          | ServerConfig.ServerConfig
+          | HttpPlatform.HttpPlatform
+          | FileSystem.FileSystem
+          | Path.Path
+          | SecureRandom.SecureRandom
+          | ChildProcessSpawner.ChildProcessSpawner
+        >(),
+      ),
+    ),
+  );
+  return routes.pipe(
+    // The connector reads the router lazily, per relayed request, so routes may come after it.
+    Layer.provideMerge(Layer.mergeAll(RelayConnector.layer, RelayDeviceLedger.layer)),
+    Layer.provideMerge(HttpRouter.layer),
+    Layer.provideMerge(core),
+    Layer.provideMerge(layerE2eeCrypto),
+  );
+};
+
+// ── The relay, in this process ───────────────────────────────────────────────
+
+/** The parts of `infra/k3-relay` these tests drive. */
+export interface InProcessRelay {
+  readonly store: { getHost(hostId: string): unknown };
+  readonly metrics: { snapshot(): { readonly controls: number } };
+  listen(): Promise<number>;
+  close(): Promise<void>;
+}
+
+/**
+ * The relay is its own package with its own lint and type rules, so it is loaded at run time
+ * rather than type-checked as part of the server.
+ */
+const loadRelay = async () => {
+  const testkit = (await import(
+    /* @vite-ignore */ new URL(
+      "../../../../../infra/k3-relay/src/relay.testkit.ts",
+      import.meta.url,
+    ).href
+  )) as { readonly TEST_CONFIG: object };
+  const server = (await import(
+    /* @vite-ignore */ new URL("../../../../../infra/k3-relay/src/server.ts", import.meta.url).href
+  )) as {
+    readonly createRelay: (options: {
+      readonly config: object;
+      readonly now: () => number;
+      readonly logger: {
+        info(event: string, fields?: object): void;
+        error(event: string, fields?: object): void;
+      };
+    }) => InProcessRelay;
+  };
+  return { config: testkit.TEST_CONFIG, createRelay: server.createRelay };
+};
+
+/**
+ * A real relay on an ephemeral port for the scope. It reads the test's clock; `clock.skewMs` moves
+ * it ahead, where it drops the host's revocations as stale.
+ */
+export const startK3RelayTestRelayWith = (overrides: object) =>
+  Effect.acquireRelease(
+    Clock.clockWith((testClock) =>
+      Effect.promise(async () => {
+        const { config, createRelay } = await loadRelay();
+        const clock = { skewMs: 0 };
+        // What the relay would write to its log, so a test can check what it leaves out.
+        const logs: Array<string> = [];
+        const record = (event: string, fields?: object) =>
+          void logs.push(JSON.stringify({ event, ...fields }));
+        const relay = createRelay({
+          config: { ...config, authTimeoutMs: 10_000, sessionSetupMs: 10_000, ...overrides },
+          now: () => testClock.currentTimeMillisUnsafe() + clock.skewMs,
+          logger: { info: record, error: record },
+        });
+        const port = await relay.listen();
+        return { relay, port, clock, logs, url: `ws://127.0.0.1:${port}` };
+      }),
+    ),
+    ({ relay }) => Effect.promise(() => relay.close()),
+  );
+
+export const startK3RelayTestRelay = startK3RelayTestRelayWith({});
+
+// ── A promise-shaped handle, for tests outside this package ──────────────────
+
+/**
+ * What a test in another package (the client runtime) needs from a real host. Plain values and
+ * promises only, so nothing of this package's types or Effect services crosses the boundary.
+ */
+export interface K3RelayTestHost {
+  readonly hostId: string;
+  readonly hostIdentityKey: Uint8Array;
+  readonly environmentId: string;
+  readonly state: () => Promise<K3RelayHostState>;
+  /** Resolves with the first state, current or next, that passes `predicate`. */
+  readonly awaitState: (
+    predicate: (state: K3RelayHostState) => boolean,
+    timeoutMs?: number,
+  ) => Promise<K3RelayHostState>;
+  readonly createPairingOffer: () => Promise<K3RelayPairingOffer>;
+  readonly approvePairing: (deviceId: string, confirmationCode?: string) => Promise<K3RelayDevice>;
+  readonly rejectPairing: () => Promise<void>;
+  readonly revokeDevice: (deviceId: string) => Promise<K3RelayDevice>;
+  /** As the host's user does in Settings: grants or withdraws `devices:invite`. */
+  readonly setDevicePermissions: (deviceId: string, invite: boolean) => Promise<K3RelayDevice>;
+  /** Seals and sends a notification of this kind for this thread to every registered device. */
+  readonly notify: (
+    kind: "approval" | "input" | "completed" | "failed",
+    threadId: string,
+  ) => Promise<ReadonlyArray<string>>;
+  /** This host's account at the relay (spec §20.4), as the settings screen drives it. */
+  readonly account: {
+    readonly signIn: (provider: K3RelayAccountProvider) => Promise<{ authorizeUrl: string }>;
+    readonly signOut: () => Promise<void>;
+    readonly state: () => Promise<K3RelayAccountState>;
+    readonly awaitState: (
+      predicate: (state: K3RelayAccountState) => boolean,
+      timeoutMs?: number,
+    ) => Promise<K3RelayAccountState>;
+    readonly setApproval: (input: {
+      readonly requireApproval: boolean;
+      readonly acknowledgedRisk: boolean;
+    }) => Promise<K3RelayAccountState>;
+  };
+  /** A grant this host signs, as if issued at `issuedAt`, for a device key. */
+  readonly signGrant: (input: {
+    readonly alg: K3RelayDeviceAlgorithm;
+    readonly devicePublicKey: Uint8Array;
+    readonly issuedAt: number;
+  }) => Promise<RelayGrant>;
+  readonly dispose: () => Promise<void>;
+}
+
+export interface K3RelayTestRelayHandle {
+  readonly url: string;
+  /** Every line the relay logged so far. */
+  readonly logs: () => ReadonlyArray<string>;
+  readonly dispose: () => Promise<void>;
+}
+
+const runtimeLayer = Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, layerE2eeCrypto);
+
+export const startK3RelayTestRelayHandle = async (
+  overrides: object = {},
+): Promise<K3RelayTestRelayHandle> => {
+  const runtime = ManagedRuntime.make(runtimeLayer);
+  const scope = await runtime.runPromise(Scope.make());
+  const dispose = async () => {
+    await runtime.runPromise(Scope.close(scope, Exit.void));
+    await runtime.dispose();
+  };
+  try {
+    const { url, logs } = await runtime.runPromise(
+      startK3RelayTestRelayWith(overrides).pipe(Scope.provide(scope)),
+    );
+    return { url, logs: () => [...logs], dispose };
+  } catch (error) {
+    await dispose();
+    throw error;
+  }
+};
+
+export const startK3RelayTestHost = async (
+  options: K3RelayTestHostOptions,
+): Promise<K3RelayTestHost> => {
+  const runtime = ManagedRuntime.make(
+    layerK3RelayTestHost(options).pipe(Layer.provideMerge(runtimeLayer)),
+  );
+  const run = <A, E>(
+    effect: Effect.Effect<A, E, ManagedRuntime.ManagedRuntime.Services<typeof runtime>>,
+  ) => runtime.runPromise(effect);
+  const awaitState = (predicate: (state: K3RelayHostState) => boolean, timeoutMs = 20_000) =>
+    run(
+      Effect.flatMap(RelayConnector.RelayConnector, (connector) =>
+        connector.changes.pipe(
+          Stream.filter(predicate),
+          Stream.runHead,
+          Effect.map(Option.getOrThrow),
+          Effect.timeout(timeoutMs),
+        ),
+      ),
+    );
+  try {
+    const { keypair, environmentId } = await run(
+      Effect.gen(function* () {
+        const keypair = yield* (yield* ServerE2eeIdentity.ServerE2eeIdentity).getKeypair;
+        const environmentId = yield* (yield* ServerEnvironment.ServerEnvironment).getEnvironmentId;
+        return { keypair, environmentId };
+      }),
+    );
+    const connected = await awaitState((state) => state.status === "connected");
+    return {
+      hostId: connected.hostId ?? "",
+      hostIdentityKey: keypair.publicKey,
+      environmentId,
+      state: () => run(Effect.flatMap(RelayConnector.RelayConnector, (c) => c.state)),
+      awaitState,
+      createPairingOffer: () =>
+        run(Effect.flatMap(RelayConnector.RelayConnector, (c) => c.createPairingOffer)),
+      approvePairing: (deviceId, confirmationCode) =>
+        run(
+          Effect.flatMap(RelayConnector.RelayConnector, (c) =>
+            c.approvePairing(deviceId, confirmationCode),
+          ),
+        ),
+      rejectPairing: () =>
+        run(Effect.flatMap(RelayConnector.RelayConnector, (c) => c.rejectPairing)),
+      revokeDevice: (deviceId) =>
+        run(Effect.flatMap(RelayConnector.RelayConnector, (c) => c.revokeDevice(deviceId))),
+      setDevicePermissions: (deviceId, invite) =>
+        run(
+          Effect.flatMap(RelayConnector.RelayConnector, (c) =>
+            c.setDevicePermissions(deviceId, invite),
+          ),
+        ),
+      notify: (kind, threadId) =>
+        run(Effect.flatMap(RelayNotifier.RelayNotifier, (n) => n.notify({ kind, threadId }))),
+      account: {
+        signIn: (provider) =>
+          run(Effect.flatMap(RelayAccount.RelayAccount, (a) => a.signIn(provider))),
+        signOut: () => run(Effect.flatMap(RelayAccount.RelayAccount, (a) => a.signOut)),
+        state: () => run(Effect.flatMap(RelayAccount.RelayAccount, (a) => a.state)),
+        awaitState: (predicate, timeoutMs = 20_000) =>
+          run(
+            Effect.flatMap(RelayAccount.RelayAccount, (account) =>
+              account.changes.pipe(
+                Stream.filter(predicate),
+                Stream.runHead,
+                Effect.map(Option.getOrThrow),
+                Effect.timeout(timeoutMs),
+              ),
+            ),
+          ),
+        setApproval: (input) =>
+          run(Effect.flatMap(RelayAccount.RelayAccount, (a) => a.setApproval(input))),
+      },
+      signGrant: (input) =>
+        run(
+          signGrant({
+            hostIdentitySeed: keypair.seed,
+            alg: input.alg,
+            devicePublicKey: input.devicePublicKey,
+            now: input.issuedAt,
+            nonce: `test-grant-${input.issuedAt}`.padEnd(24, "0"),
+          }),
+        ),
+      dispose: () => runtime.dispose(),
+    };
+  } catch (error) {
+    await runtime.dispose();
+    throw error;
+  }
+};

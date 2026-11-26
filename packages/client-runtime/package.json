@@ -211,6 +211,10 @@
       "types": "./src/relay/index.ts",
       "default": "./src/relay/index.ts"
     },
+    "./k3relay": {
+      "types": "./src/k3relay/index.ts",
+      "default": "./src/k3relay/index.ts"
+    },
     "./state/auth": {
       "types": "./src/state/auth.ts",
       "default": "./src/state/auth.ts"
@@ -298,6 +302,10 @@
     "./state/device": {
       "types": "./src/state/device.ts",
       "default": "./src/state/device.ts"
+    },
+    "./state/k3relay": {
+      "types": "./src/state/k3relay.ts",
+      "default": "./src/state/k3relay.ts"
     },
     "./state/deviceHubAccess": {
       "types": "./src/state/deviceHubAccess.ts",

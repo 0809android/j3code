@@ -2,6 +2,7 @@ import { EasDeviceHostConfigs, SimlockDeviceHostConfigs, SshDeviceHostConfigs } 
 import {
   AuthOrchestrationOperateScope,
   AuthAccessWriteScope,
+  AuthRelayConfigureScope,
   AuthSettingsWriteScope,
   AuthProvidersManageScope,
   type AuthEnvironmentScope,
@@ -28,6 +29,7 @@ import { SecretProviderId, SecretProviderSlug } from "./secretReference.ts";
 import { containsSecretReference, SettingsSecretValue } from "./settingsSecretValue.ts";
 import { EnvironmentMachineKind, ThreadEnvMode, WorktreeSubmodules } from "./environment.ts";
 import { KeybindingShortcut } from "./keybindings.ts";
+import { K3RelaySettings, K3RelaySettingsPatch } from "./k3Relay.ts";
 import {
   CustomModelSetting,
   DEFAULT_TEXT_GENERATION_MODEL,
@@ -592,7 +594,7 @@ export const ClientSettingsSchema = Schema.Struct({
   ),
   speechCorrectionWord: SpeechCorrectionCue.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   // A locale code or "system". Open string so new locales and downgrades need no migration.
-  language: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed("en"))),
+  language: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed("ja"))),
   snapShotEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   snapShotIncludeAccessibility: Schema.Boolean.pipe(
     Schema.withDecodingDefault(Effect.succeed(true)),
@@ -1148,6 +1150,20 @@ export type ResponseStreamingMode = typeof ResponseStreamingMode.Type;
 export const AgentFeedbackMode = Schema.Literals(["off", "on-request", "auto"]);
 export type AgentFeedbackMode = typeof AgentFeedbackMode.Type;
 
+/**
+ * Which transports may reach this server from another machine. `any` keeps
+ * every route; `private-e2ee-only` refuses tunnel, proxy, and plain-LAN peers
+ * and answers only loopback, Tailscale/WireGuard, and SSH-forwarded ones.
+ */
+export const RemoteTransportPolicy = Schema.Literals(["any", "private-e2ee-only"]);
+export type RemoteTransportPolicy = typeof RemoteTransportPolicy.Type;
+const DEFAULT_REMOTE_TRANSPORT_POLICY: RemoteTransportPolicy = "any";
+
+/** Application-layer E2EE on the WebSocket RPC channel. */
+export const E2eeMode = Schema.Literals(["off", "prefer", "require"]);
+export type E2eeMode = typeof E2eeMode.Type;
+const DEFAULT_E2EE_MODE: E2eeMode = "off";
+
 const StorageRetentionDays = Schema.NullOr(
   Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 3650 })),
 );
@@ -1411,6 +1427,16 @@ export const ServerSettings = Schema.Struct({
   requireConnectDeviceApproval: Schema.Boolean.pipe(
     Schema.withDecodingDefault(Effect.succeed(false)),
   ),
+  /** Restricts remote access to loopback, Tailscale, and SSH transports. */
+  remoteTransportPolicy: RemoteTransportPolicy.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_REMOTE_TRANSPORT_POLICY)),
+  ),
+  /** Application-layer E2EE for remote WebSocket clients. */
+  e2eeMode: E2eeMode.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_E2EE_MODE))),
+  /** The K3 relay: this host dials out to it, so devices reach it without a public address. */
+  relay: K3RelaySettings.pipe(
+    Schema.withDecodingDefault(Effect.succeed(Schema.decodeSync(K3RelaySettings)({}))),
+  ),
 
   enableAgentBrowserAccess: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   /** Lets clients reach this machine's loopback ports over `/api/preview/tunnel`. */
@@ -1501,7 +1527,7 @@ export const ServerSettings = Schema.Struct({
    * and tasks on another machine; tasks already running there finish.
    */
   linkedEnvironmentsEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
-  /** Beta: durable workflows from the workflows folder of the T3 home. Off runs none of them. */
+  /** Beta: durable workflows from the workflows folder of the K3 home. Off runs none of them. */
   workflowsEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   /** Beta: Claude and Codex predict the next prompt after completed turns. Codex follows a change at once; open Claude threads after they restart. */
   promptSuggestionsEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
@@ -1879,6 +1905,9 @@ export const ServerSettingsPatch = Schema.Struct({
   continueThreadsAfterServerUpdate: Schema.optionalKey(Schema.Boolean),
   keepAwakeWhileAgentsWork: Schema.optionalKey(Schema.Boolean),
   requireConnectDeviceApproval: Schema.optionalKey(Schema.Boolean),
+  remoteTransportPolicy: Schema.optionalKey(RemoteTransportPolicy),
+  e2eeMode: Schema.optionalKey(E2eeMode),
+  relay: Schema.optionalKey(K3RelaySettingsPatch),
   enableAgentBrowserAccess: Schema.optionalKey(Schema.Boolean),
   enablePreviewTunnel: Schema.optionalKey(Schema.Boolean),
   cloudSpeechCredentials: Schema.optionalKey(
@@ -2028,11 +2057,16 @@ export function requiredScopesForServerSettingsPatch(
   let changesProviders = false;
   let changesSettings = false;
   let changesAccess = false;
+  let changesRelay = false;
   for (const [key, value] of Object.entries(patch)) {
     if (value === undefined) continue;
-    if (key === "requireConnectDeviceApproval" || key === "enablePreviewTunnel") {
+    if (key === "relay") {
+      changesRelay = true;
+    } else if (key === "requireConnectDeviceApproval" || key === "enablePreviewTunnel") {
       changesAccess = true;
     } else if (
+      key === "remoteTransportPolicy" ||
+      key === "e2eeMode" ||
       key === "providers" ||
       key === "providerInstances" ||
       key === "usageLimitSources" ||
@@ -2051,9 +2085,13 @@ export function requiredScopesForServerSettingsPatch(
     changesSettings = true;
   }
   return [
-    ...(changesSettings || (!changesProviders && !changesAccess) ? [AuthSettingsWriteScope] : []),
+    ...(changesSettings || (!changesProviders && !changesAccess && !changesRelay)
+      ? [AuthSettingsWriteScope]
+      : []),
     ...(changesProviders ? [AuthProvidersManageScope] : []),
     ...(changesAccess ? [AuthAccessWriteScope] : []),
+    // The relay opens this host to devices elsewhere, as linking T3 Connect does.
+    ...(changesRelay ? [AuthRelayConfigureScope] : []),
   ];
 }
 

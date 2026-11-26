@@ -1,11 +1,12 @@
 {
   "fill": {
-    "solid": "display-p3:0.00000,0.00000,0.00000,1.00000"
+    "automatic-gradient": "display-p3:0.06667,0.34902,0.92157,1.00000"
   },
   "groups": [
     {
       "layers": [
         {
+          "glass": true,
           "image-name": "text.svg",
           "name": "Text",
           "position": {
@@ -20,7 +21,7 @@
       },
       "translucency": {
         "enabled": true,
-        "value": 0.5
+        "value": 0.2
       }
     }
   ],

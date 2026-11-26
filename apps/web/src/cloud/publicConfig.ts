@@ -1,14 +1,11 @@
-import {
-  clerkFrontendApiHostnameFromPublishableKey,
-  relayClerkTokenOptions,
-} from "@t3tools/shared/relayAuth";
+import { relayClerkTokenOptions } from "@t3tools/shared/relayAuth";
 import { normalizeSecureRelayUrl } from "@t3tools/shared/relayUrl";
 import * as Schema from "effect/Schema";
 
 export class CloudPublicConfigMissingError extends Schema.TaggedError<CloudPublicConfigMissingError>()(
   "CloudPublicConfigMissingError",
   {
-    key: Schema.Literal("T3CODE_CLERK_JWT_TEMPLATE"),
+    key: Schema.Literal("K3CODE_CLERK_JWT_TEMPLATE"),
   },
 ) {
   override get message(): string {
@@ -47,7 +44,7 @@ export function resolveCloudPublicConfig(): CloudPublicConfig {
     ),
     clerkJwtTemplate: trimNonEmpty(import.meta.env.VITE_CLERK_JWT_TEMPLATE as string | undefined),
     relayUrl: normalizeSecureRelayUrl(
-      (import.meta.env.VITE_T3CODE_RELAY_URL as string | undefined) ?? "",
+      (import.meta.env.VITE_K3CODE_RELAY_URL as string | undefined) ?? "",
     ),
     relayTracing: {
       tracesUrl: normalizeSecureUrl(
@@ -86,41 +83,13 @@ export function resolveRelayTracingConfig() {
 }
 
 export function hasCloudPublicConfig(): boolean {
-  const config = resolveCloudPublicConfig();
-  if (!config.clerkPublishableKey || !config.clerkJwtTemplate || !config.relayUrl) {
-    return false;
-  }
-
-  // Electron has its own auth runtime; development keys also support private browser origins.
-  if (
-    typeof window === "undefined" ||
-    window.desktopBridge !== undefined ||
-    !config.clerkPublishableKey.startsWith("pk_live_")
-  ) {
-    return true;
-  }
-
-  try {
-    // Custom Frontend API hosts use clerk.<production domain>.
-    const domain = clerkFrontendApiHostnameFromPublishableKey(config.clerkPublishableKey).replace(
-      /^clerk\./u,
-      "",
-    );
-    const { hostname, protocol, port } = window.location;
-    return (
-      protocol === "https:" &&
-      port === "" &&
-      (hostname === domain || hostname.endsWith(`.${domain}`))
-    );
-  } catch {
-    return false;
-  }
+  return false;
 }
 
 export function resolveRelayClerkTokenOptions() {
   const { clerkJwtTemplate } = resolveCloudPublicConfig();
   if (!clerkJwtTemplate) {
-    throw new CloudPublicConfigMissingError({ key: "T3CODE_CLERK_JWT_TEMPLATE" });
+    throw new CloudPublicConfigMissingError({ key: "K3CODE_CLERK_JWT_TEMPLATE" });
   }
   return relayClerkTokenOptions(clerkJwtTemplate);
 }

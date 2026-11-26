@@ -113,9 +113,9 @@ export function renderPrivilegedScript(plan: ProtectionPlan, mode: "apply" | "un
     for (const { path, contents } of plan.system) {
       lines.push(
         `mkdir -p ${quoteShell(directoryOf(path))}`,
-        `cat >${quoteShell(path)} <<'T3CODE_PROTECT'`,
+        `cat >${quoteShell(path)} <<'K3CODE_PROTECT'`,
         contents.trimEnd(),
-        "T3CODE_PROTECT",
+        "K3CODE_PROTECT",
       );
     }
   } else {

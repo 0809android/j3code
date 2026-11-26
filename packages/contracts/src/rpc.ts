@@ -43,6 +43,13 @@ import {
 } from "./providerSetup.ts";
 import * as Schema from "effect/Schema";
 import * as Rpc from "effect/rpc/Rpc";
+import {
+  K3_RELAY_ACCOUNT_METHODS,
+  WsK3RelayAccountSetApprovalRpc,
+  WsK3RelayAccountSignInRpc,
+  WsK3RelayAccountSignOutRpc,
+  WsK3RelayAccountSubscribeRpc,
+} from "./k3RelayAccount.ts";
 import * as RpcGroup from "effect/rpc/RpcGroup";
 import * as RpcMiddleware from "effect/rpc/RpcMiddleware";
 import { IsoDateTime, NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
@@ -92,6 +99,16 @@ import {
   AuthAccessStreamEvent,
   EnvironmentAuthorizationError,
 } from "./auth.ts";
+import {
+  K3RelayApproveInput,
+  K3RelayDevice,
+  K3RelayDeviceInput,
+  K3RelayError,
+  K3RelayHostState,
+  K3RelayPairingOffer,
+  K3RelayRenameDeviceInput,
+  K3RelaySetDevicePermissionsInput,
+} from "./k3Relay.ts";
 import { ClientActivityReportInput } from "./background.ts";
 import {
   FilesystemGetMetadataInput,
@@ -121,6 +138,15 @@ import {
   AgentSessionScanResult,
   AgentSessionScanError,
 } from "./agentSessions.ts";
+import {
+  LegacyImportError,
+  LegacyImportRestartInput,
+  LegacyImportRestartResult,
+  LegacyImportRunInput,
+  LegacyImportRunResult,
+  LegacyImportScanInput,
+  LegacyImportScanResult,
+} from "./legacyImport.ts";
 import {
   AssetAccessError,
   AssetCreateUrlInput,
@@ -505,6 +531,9 @@ export const WS_METHODS = {
   filesystemGetMetadata: "filesystem.getMetadata",
   agentSessionsScan: "agentSessions.scan",
   agentSessionsImport: "agentSessions.import",
+  legacyImportScan: "legacyImport.scan",
+  legacyImportRun: "legacyImport.run",
+  legacyImportRestart: "legacyImport.restart",
   assetsCreateUrl: "assets.createUrl",
   assetsPersistChatAttachments: "assets.persistChatAttachments",
   attachmentsCreateUploadUrl: "attachments.createUploadUrl",
@@ -737,6 +766,21 @@ export const WS_METHODS = {
   subscribeServerLifecycle: "subscribeServerLifecycle",
   subscribeAuthAccess: "subscribeAuthAccess",
   subscribeResourceTelemetry: "subscribeResourceTelemetry",
+
+  // K3 relay host
+  k3RelaySubscribe: "k3relay.subscribe",
+  k3RelayCreatePairingOffer: "k3relay.createPairingOffer",
+  k3RelayCancelPairing: "k3relay.cancelPairing",
+  k3RelayApprovePairing: "k3relay.approvePairing",
+  k3RelayRejectPairing: "k3relay.rejectPairing",
+  k3RelayRevokeDevice: "k3relay.revokeDevice",
+  k3RelayRenameDevice: "k3relay.renameDevice",
+  k3RelaySetDevicePermissions: "k3relay.setDevicePermissions",
+  k3RelayAccountSubscribe: K3_RELAY_ACCOUNT_METHODS.subscribe,
+  k3RelayAccountSignIn: K3_RELAY_ACCOUNT_METHODS.signIn,
+  k3RelayAccountSignOut: K3_RELAY_ACCOUNT_METHODS.signOut,
+  k3RelayAccountSetApproval: K3_RELAY_ACCOUNT_METHODS.setApproval,
+  k3RelayForgetThisDevice: "k3relay.forgetThisDevice",
 } as const;
 
 const WsServerUpsertKeybindingRpc = Rpc.make(WS_METHODS.serverUpsertKeybinding, {
@@ -1733,6 +1777,24 @@ const WsAgentSessionsScanRpc = Rpc.make(WS_METHODS.agentSessionsScan, {
   error: Schema.Union([AgentSessionScanError, EnvironmentAuthorizationError]),
 });
 
+const WsLegacyImportScanRpc = Rpc.make(WS_METHODS.legacyImportScan, {
+  payload: LegacyImportScanInput,
+  success: LegacyImportScanResult,
+  error: Schema.Union([LegacyImportError, EnvironmentAuthorizationError]),
+});
+
+const WsLegacyImportRunRpc = Rpc.make(WS_METHODS.legacyImportRun, {
+  payload: LegacyImportRunInput,
+  success: LegacyImportRunResult,
+  error: Schema.Union([LegacyImportError, EnvironmentAuthorizationError]),
+});
+
+const WsLegacyImportRestartRpc = Rpc.make(WS_METHODS.legacyImportRestart, {
+  payload: LegacyImportRestartInput,
+  success: LegacyImportRestartResult,
+  error: Schema.Union([LegacyImportError, EnvironmentAuthorizationError]),
+});
+
 const WsAgentSessionsImportRpc = Rpc.make(WS_METHODS.agentSessionsImport, {
   payload: AgentSessionImportInput,
   success: AgentSessionImportResult,
@@ -2446,6 +2508,66 @@ const WsSubscribeAuthAccessRpc = Rpc.make(WS_METHODS.subscribeAuthAccess, {
   stream: true,
 });
 
+const K3RelayRpcError = Schema.Union([K3RelayError, EnvironmentAuthorizationError]);
+
+const WsK3RelaySubscribeRpc = Rpc.make(WS_METHODS.k3RelaySubscribe, {
+  payload: Schema.Struct({}),
+  success: K3RelayHostState,
+  error: EnvironmentAuthorizationError,
+  stream: true,
+});
+
+const WsK3RelayCreatePairingOfferRpc = Rpc.make(WS_METHODS.k3RelayCreatePairingOffer, {
+  payload: Schema.Struct({}),
+  success: K3RelayPairingOffer,
+  error: K3RelayRpcError,
+});
+
+const WsK3RelayCancelPairingRpc = Rpc.make(WS_METHODS.k3RelayCancelPairing, {
+  payload: Schema.Struct({}),
+  error: K3RelayRpcError,
+});
+
+/** Names the device the user compared codes for, so a newer claim is never approved by accident. */
+const WsK3RelayApprovePairingRpc = Rpc.make(WS_METHODS.k3RelayApprovePairing, {
+  payload: K3RelayApproveInput,
+  success: K3RelayDevice,
+  error: K3RelayRpcError,
+});
+
+const WsK3RelayRejectPairingRpc = Rpc.make(WS_METHODS.k3RelayRejectPairing, {
+  payload: Schema.Struct({}),
+  error: K3RelayRpcError,
+});
+
+const WsK3RelayRevokeDeviceRpc = Rpc.make(WS_METHODS.k3RelayRevokeDevice, {
+  payload: K3RelayDeviceInput,
+  success: K3RelayDevice,
+  error: K3RelayRpcError,
+});
+
+const WsK3RelayRenameDeviceRpc = Rpc.make(WS_METHODS.k3RelayRenameDevice, {
+  payload: K3RelayRenameDeviceInput,
+  success: K3RelayDevice,
+  error: K3RelayRpcError,
+});
+
+/** Grants or withdraws `devices:invite`; an introduced device never gets it. */
+const WsK3RelaySetDevicePermissionsRpc = Rpc.make(WS_METHODS.k3RelaySetDevicePermissions, {
+  payload: K3RelaySetDevicePermissionsInput,
+  success: K3RelayDevice,
+  error: K3RelayRpcError,
+});
+
+/**
+ * A device paired through the relay takes itself off the host's ledger. Only its own entry: the
+ * host reads the device from the session, never from the payload, and needs no `relay:configure`.
+ */
+const WsK3RelayForgetThisDeviceRpc = Rpc.make(WS_METHODS.k3RelayForgetThisDevice, {
+  payload: Schema.Struct({}),
+  error: K3RelayRpcError,
+});
+
 const WsSubscribeResourceTelemetryRpc = Rpc.make(WS_METHODS.subscribeResourceTelemetry, {
   payload: Schema.Struct({}),
   success: ResourceTelemetrySnapshot,
@@ -2629,6 +2751,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsFilesystemGetMetadataRpc,
   WsAgentSessionsScanRpc,
   WsAgentSessionsImportRpc,
+  WsLegacyImportScanRpc,
+  WsLegacyImportRunRpc,
+  WsLegacyImportRestartRpc,
   WsAssetsCreateUrlRpc,
   WsAssetsPersistChatAttachmentsRpc,
   WsAttachmentsCreateUploadUrlRpc,
@@ -2693,6 +2818,19 @@ export const WsRpcGroup = RpcGroup.make(
   WsSubscribeServerLifecycleRpc,
   WsSubscribeAuthAccessRpc,
   WsSubscribeResourceTelemetryRpc,
+  WsK3RelaySubscribeRpc,
+  WsK3RelayCreatePairingOfferRpc,
+  WsK3RelayCancelPairingRpc,
+  WsK3RelayApprovePairingRpc,
+  WsK3RelayRejectPairingRpc,
+  WsK3RelayRevokeDeviceRpc,
+  WsK3RelayRenameDeviceRpc,
+  WsK3RelaySetDevicePermissionsRpc,
+  WsK3RelayAccountSubscribeRpc,
+  WsK3RelayAccountSignInRpc,
+  WsK3RelayAccountSignOutRpc,
+  WsK3RelayAccountSetApprovalRpc,
+  WsK3RelayForgetThisDeviceRpc,
   WsOrchestrationV2DispatchCommandRpc,
   WsOrchestrationV2GetWorkflowScriptRpc,
   WsOrchestrationV2GetNativeChildWorkRpc,

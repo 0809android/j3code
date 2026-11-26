@@ -33,6 +33,7 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { useRemoteConnections } from "../../state/use-remote-environment-registry";
 import { ConnectionEnvironmentRow } from "../connection/ConnectionEnvironmentRow";
 import { EnvironmentRoutesSection } from "./EnvironmentRoutesSection";
+import { K3RelaySettingsSection } from "../k3relay/K3RelaySettingsSection";
 import { OutdatedServerUpdateSection } from "./OutdatedServerUpdateSection";
 import { ListActionRow as SettingsActionRow } from "../../components/ui/ListActionRow";
 import { SettingsScreen } from "./components/SettingsScreen";
@@ -137,11 +138,11 @@ function EnvironmentDetail({ environmentId }: { readonly environmentId: Environm
       capabilities.serverSelfUpdate === "desktop-managed"
         ? gt(
             "Install {product} {version}. The desktop app will close and relaunch. Running threads may be interrupted.",
-            { product: "T3 Code", version: targetVersion },
+            { product: "K3 Code", version: targetVersion },
           )
         : gt(
             "Install {product} {version}. The server will restart and reconnect. Running threads may be interrupted.",
-            { product: "T3 Code", version: targetVersion },
+            { product: "K3 Code", version: targetVersion },
           ),
       [
         { text: gt("Cancel"), style: "cancel" },
@@ -222,6 +223,17 @@ function EnvironmentDetail({ environmentId }: { readonly environmentId: Environm
                 navigation.navigate("SettingsEnvironmentNew", { routeFor: environmentId })
               }
             />
+            {connected ? (
+              <K3RelaySettingsSection
+                environmentId={environmentId}
+                canWrite={allowed}
+                networkAccessEnabled={
+                  session?.auth.policy === "remote-reachable" ||
+                  (session?.auth.policy === "loopback-browser" &&
+                    (config?.directEndpoints?.length ?? 0) > 0)
+                }
+              />
+            ) : null}
             {outdated ? (
               <OutdatedServerUpdateSection
                 environmentId={environmentId}
@@ -254,7 +266,7 @@ function EnvironmentDetail({ environmentId }: { readonly environmentId: Environm
             {notice ? <Text className="px-2 text-sm text-foreground-muted">{notice}</Text> : null}
             {config && !outdated ? (
               <>
-                <SettingsSection title="T3 Code">
+                <SettingsSection title="K3 Code">
                   <View className="gap-1 p-4">
                     <Text className="text-base text-foreground">
                       <T>
@@ -298,7 +310,7 @@ function EnvironmentDetail({ environmentId }: { readonly environmentId: Environm
                         {capabilities?.serverSelfUpdate === "desktop-managed"
                           ? gt("Update the desktop app on this machine.")
                           : gt("Update and restart {product} on this machine.", {
-                              product: "T3 Code",
+                              product: "K3 Code",
                             })}
                       </Text>
                     ) : null}

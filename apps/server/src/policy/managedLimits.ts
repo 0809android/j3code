@@ -85,6 +85,16 @@ const refuse = (policy: PolicyDocument, action: string, detail?: string) =>
 
 export const refuseConnect = (policy: PolicyDocument) => refuse(policy, "T3 Connect");
 
+/**
+ * The K3 relay lets a remote device in, as T3 Connect does, so it needs both `limits.connect` and
+ * `remote` in `limits.clients`. `allowsConnect` already implies the second; both are named so the
+ * relay stays shut if either rule ever stops implying the other.
+ */
+export const allowsRelay = (policy: PolicyDocument) =>
+  allowsConnect(policy) && allowsRemoteClients(policy);
+
+export const refuseRelay = (policy: PolicyDocument) => refuse(policy, "the K3 relay");
+
 // Node throws ENOTDIR, outside the spawner's error mapping, when PATH ends in a file.
 const isMissingCli = (cause: unknown) =>
   (PlatformError.isPlatformError(cause) && cause.reason._tag === "NotFound") ||
@@ -222,7 +232,7 @@ export const checkServerReachability = Effect.fn("managedLimits.checkServerReach
       refuseRemoteClients(
         policy,
         input.privateNetworkOnly === true
-          ? "so the background service cannot listen on private networks; set T3CODE_HOST=127.0.0.1 in its service.env"
+          ? "so the background service cannot listen on private networks; set K3CODE_HOST=127.0.0.1 in its service.env"
           : `so the server cannot listen on ${input.host === "" ? "every interface" : (input.host ?? "this host")}`,
       );
     if (!allowsAuthPolicy(policy, input.authPolicy)) {

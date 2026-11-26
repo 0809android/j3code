@@ -1,8 +1,10 @@
 import * as Dialog from "../../components/ui/Dialog";
 import { buildNewThreadLink, type LinkedPrompt } from "@t3tools/shared/promptLinks";
+import Constants from "expo-constants";
 import { msg } from "gt-react-native";
 
 import { m } from "../../i18n/messages";
+import { configuredHostedAppUrl } from "../../lib/hostedApp";
 
 import { tryCopyTextWithHaptic } from "../../lib/copyTextWithHaptic";
 import {
@@ -46,7 +48,16 @@ export async function applyLinkedPromptToThreadDraft(
 }
 
 export async function copyPromptLink(prompt: string): Promise<void> {
-  if (!(await tryCopyTextWithHaptic(buildNewThreadLink({ prompt }), { target: "prompt link" }))) {
+  // Without a hosted app the link is this app's own scheme link, such as k3code://new.
+  // The app's own scheme comes first; `k3relay` after it is only for pairing links.
+  const configured = Constants.expoConfig?.scheme;
+  const scheme = Array.isArray(configured) ? configured[0] : configured;
+  const link = buildNewThreadLink({
+    prompt,
+    origin: configuredHostedAppUrl(),
+    ...(scheme === undefined ? {} : { scheme }),
+  });
+  if (!(await tryCopyTextWithHaptic(link, { target: "prompt link" }))) {
     Dialog.alert(m(msg("Could not copy")), m(msg("Try again.")));
   }
 }

@@ -68,7 +68,7 @@ it.effect("binds only the loopback address it approved when remote clients are n
       tailscaleServeEnabled: false,
       privateNetworkOnly: true,
     }).pipe(Effect.flip);
-    assert.include(service.message, "set T3CODE_HOST=127.0.0.1 in its service.env");
+    assert.include(service.message, "set K3CODE_HOST=127.0.0.1 in its service.env");
     assert.equal(yield* bind("localhost", { document: undefined }), "localhost");
     assert.equal(yield* bind(undefined, { document: undefined }), "127.0.0.1");
   }),
@@ -129,6 +129,19 @@ it.effect("tells clients Connect is off when the policy leaves out remote client
     assert.isFalse(ManagedLimits.allowsConnect(policy({ connect: false })));
   }),
 );
+
+it("shuts the relay when either connect or remote clients is off", () => {
+  assert.isTrue(ManagedLimits.allowsRelay({ document: undefined }));
+  assert.isTrue(ManagedLimits.allowsRelay(policy()));
+  assert.isTrue(ManagedLimits.allowsRelay(policy({ clients: ["remote"] })));
+  assert.isFalse(ManagedLimits.allowsRelay(policy({ connect: false })));
+  assert.isFalse(ManagedLimits.allowsRelay(policy({ clients: ["desktop", "local-browser"] })));
+  assert.isFalse(ManagedLimits.allowsRelay(policy({ clients: ["remote"], connect: false })));
+  assert.equal(
+    ManagedLimits.refuseRelay(policy({ connect: false })).message,
+    "Example Corp's policy does not allow the K3 relay.",
+  );
+});
 
 it.effect(
   "turns off only the Tailscale Serve routes that forward here, and refuses to start if one stays",

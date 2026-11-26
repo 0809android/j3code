@@ -10,6 +10,7 @@ import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
@@ -17,6 +18,7 @@ import packageJson from "../../package.json" with { type: "json" };
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import { resolveServerInstallation } from "../cli/invocation.ts";
 import { readAgentActivityPublishingActive } from "../cloud/config.ts";
+import { optionalHostedAppUrlConfig } from "../cloud/publicConfig.ts";
 import { resolveServerSelfUpdateCapability } from "../cloud/selfUpdate.ts";
 import { resolveServiceLauncherMode } from "../cloud/serviceLauncherClient.ts";
 import * as ServerConfig from "../config.ts";
@@ -207,6 +209,12 @@ export const make = Effect.gen(function* () {
     serverConfig.desktopAppUpdate === true &&
     serverConfig.desktopTelemetryControlFd !== undefined;
 
+  // Agent sign-ins are approved on a hosted app only when one is configured.
+  const hostedApproval = yield* optionalHostedAppUrlConfig.pipe(
+    Effect.map(Option.isSome),
+    Effect.orElseSucceed(() => false),
+  );
+
   const databaseMigration = databaseMigrationHead(serverConfig.dbPath);
   const descriptor: ExecutionEnvironmentDescriptor = {
     environmentId,
@@ -303,10 +311,11 @@ export const make = Effect.gen(function* () {
       linkPairingForLink: true,
       mcpApprovalCodes: true,
       peerLinkPairingCodes: true,
-      mcpHostedApproval: true,
+      ...(hostedApproval ? { mcpHostedApproval: true } : {}),
       shellThreadFamilies: true,
       shellOlderSettled: true,
-      agentFeedback: true,
+      // Reports are never sent anywhere, so the setting is not offered.
+      agentFeedback: false,
     },
   };
 

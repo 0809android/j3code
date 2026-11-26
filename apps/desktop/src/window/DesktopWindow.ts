@@ -14,7 +14,6 @@ import { msg } from "gt-i18n";
 import { type DesktopSnapShotEvent, DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts";
 
 import * as DesktopAssets from "../app/DesktopAssets.ts";
-import * as DesktopClerk from "../app/DesktopClerk.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopPrimaryPaste from "../app/DesktopPrimaryPaste.ts";
 import { makeComponentLogger } from "../app/DesktopObservability.ts";
@@ -493,6 +492,8 @@ export const make = Effect.gen(function* () {
         preload: environment.preloadPath,
         // Hidden-renderer throttling stalls first paint; re-enable it after the first reveal.
         backgroundThrottling: false,
+        // Cache renderer V8 bytecode on first load for faster cold starts on macOS/desktop.
+        v8CacheOptions: "bypassHeatCheck",
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,
@@ -1045,7 +1046,6 @@ export const make = Effect.gen(function* () {
       {
         desktopOrigin: getDesktopOrigin(environment.isDevelopment),
         mainWebContentsId: window.webContents.id,
-        clerkFrontendApiHostname: DesktopClerk.desktopClerkFrontendApiHostname,
         devServerOrigin: Option.getOrUndefined(
           Option.map(environment.devServerUrl, (url) => url.origin),
         ),

@@ -31,6 +31,22 @@
       "types": "./src/socketFrameParts.ts",
       "import": "./src/socketFrameParts.ts"
     },
+    "./mux": {
+      "types": "./src/mux/index.ts",
+      "import": "./src/mux/index.ts"
+    },
+    "./socketE2ee": {
+      "types": "./src/socketE2ee.ts",
+      "import": "./src/socketE2ee.ts"
+    },
+    "./relay": {
+      "types": "./src/relay/index.ts",
+      "import": "./src/relay/index.ts"
+    },
+    "./notify": {
+      "types": "./src/notify/index.ts",
+      "import": "./src/notify/index.ts"
+    },
     "./composerPullRequestMatches": {
       "types": "./src/composerPullRequestMatches.ts",
       "import": "./src/composerPullRequestMatches.ts"
@@ -215,10 +231,6 @@
       "types": "./src/dpopCommon.ts",
       "import": "./src/dpopCommon.ts"
     },
-    "./telemetryId": {
-      "types": "./src/telemetryId.ts",
-      "import": "./src/telemetryId.ts"
-    },
     "./relayAuth": {
       "types": "./src/relayAuth.ts",
       "import": "./src/relayAuth.ts"
@@ -250,6 +262,14 @@
     "./connectAuth": {
       "types": "./src/connectAuth.ts",
       "import": "./src/connectAuth.ts"
+    },
+    "./projectLinks": {
+      "types": "./src/projectLinks.ts",
+      "import": "./src/projectLinks.ts"
+    },
+    "./hostedApp": {
+      "types": "./src/hostedApp.ts",
+      "import": "./src/hostedApp.ts"
     },
     "./symlink": {
       "types": "./src/symlink.ts",

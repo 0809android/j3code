@@ -214,7 +214,7 @@ const latestRecordedMigrationId = Effect.gen(function* () {
 const layerT3Home = ServerConfig.layerTest(process.cwd(), { prefix: "t3-sqlite-cli-" });
 
 it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("layerCliConfig", (it) => {
-  it.effect("does not migrate a T3 home a running server owns", () =>
+  it.effect("does not migrate a K3 home a running server owns", () =>
     Effect.gen(function* () {
       const recorded = Math.max(...migrationManifest.map(([id]) => id)) - 1;
       yield* migrateTo(recorded);
@@ -233,12 +233,55 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("layerCliConfig",
     }).pipe(Effect.scoped, Effect.provide(layerT3Home)),
   );
 
-  it.effect("opens a current T3 home while a running server owns it", () =>
+  it.effect("opens a current K3 home while a running server owns it", () =>
     Effect.gen(function* () {
       yield* migrateTo();
       yield* ownT3Home();
 
       yield* Effect.void.pipe(Effect.provide(SqlitePersistence.layerCliConfig));
+    }).pipe(Effect.scoped, Effect.provide(layerT3Home)),
+  );
+});
+
+it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("layerConfig", (it) => {
+  it.effect("applies a staged legacy import while this process holds server ownership", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const { dbPath, stateDir } = yield* ServerConfig.ServerConfig;
+      yield* migrateTo();
+      yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* sql`CREATE TABLE import_marker (value TEXT NOT NULL)`;
+        yield* sql`INSERT INTO import_marker VALUES ('before-import')`;
+      }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: dbPath })));
+
+      const stagingDir = NodePath.join(stateDir, "legacy-import");
+      const stagedPath = NodePath.join(stagingDir, "statev2.sqlite");
+      yield* fs.makeDirectory(stagingDir, { recursive: true });
+      yield* runMigrations().pipe(
+        Effect.andThen(
+          Effect.flatMap(SqlClient.SqlClient, (sql) =>
+            sql`CREATE TABLE import_marker (value TEXT NOT NULL)`.pipe(
+              Effect.andThen(sql`INSERT INTO import_marker VALUES ('from-t3-code')`),
+            ),
+          ),
+        ),
+        Effect.provide(NodeSqliteClient.layer({ filename: stagedPath })),
+      );
+
+      yield* ownT3Home();
+
+      const marker = yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const rows = yield* sql<{ readonly value: string }>`SELECT value FROM import_marker`;
+        return rows[0]?.value;
+      }).pipe(Effect.provide(SqlitePersistence.layerConfig));
+
+      assert.equal(marker, "from-t3-code");
+      assert.isFalse(yield* fs.exists(stagedPath));
+      assert.isTrue(
+        (yield* fs.readDirectory(stateDir)).some((name) => name.includes(".before-import-")),
+      );
     }).pipe(Effect.scoped, Effect.provide(layerT3Home)),
   );
 });

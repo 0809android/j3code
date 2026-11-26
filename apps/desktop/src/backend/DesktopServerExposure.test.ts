@@ -85,7 +85,7 @@ function layerEnvironmentFor(baseDir: string, env: Record<string, string | undef
       Layer.mergeAll(
         NodeServices.layer,
         NodeCrypto.layer,
-        DesktopConfig.layerTest({ T3CODE_HOME: baseDir, ...env }),
+        DesktopConfig.layerTest({ K3CODE_HOME: baseDir, ...env }),
       ),
     ),
   );
@@ -99,7 +99,7 @@ function layer(input: {
   readonly desktopSettingsLayer?: Layer.Layer<DesktopAppSettings.DesktopAppSettings>;
   readonly managedPolicyLayer?: Layer.Layer<DesktopManagedPolicy.DesktopManagedPolicy>;
 }) {
-  const env = { T3CODE_HOME: input.baseDir, ...input.env };
+  const env = { K3CODE_HOME: input.baseDir, ...input.env };
   const layerEnvironment = layerEnvironmentFor(input.baseDir, env);
   const layerNetwork = Layer.succeed(DesktopNetworkInterfaces.DesktopNetworkInterfaces, {
     read: Effect.succeed(input.networkInterfaces ?? emptyNetworkInterfaces),
@@ -512,9 +512,40 @@ describe("DesktopServerExposure", () => {
         );
       }),
       {
-        T3CODE_DESKTOP_LAN_HOST: "100.90.1.2",
-        T3CODE_DESKTOP_HTTPS_ENDPOINTS: "https://public.example.test",
+        K3CODE_DESKTOP_LAN_HOST: "100.90.1.2",
+        K3CODE_DESKTOP_HTTPS_ENDPOINTS: "https://public.example.test",
       },
+    ),
+  );
+
+  it.effect("advertises WireGuard and direct mesh interfaces without Tailscale", () =>
+    withHarness(
+      {
+        ...lanNetworkInterfaces,
+        wg0: [
+          {
+            address: "10.88.0.3",
+            family: "IPv4",
+            internal: false,
+          },
+        ],
+      },
+      Effect.gen(function* () {
+        const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
+        yield* serverExposure.configureFromSettings({ port: 4173 });
+        yield* serverExposure.setMode("network-accessible");
+
+        const endpoints = yield* serverExposure.getAdvertisedEndpoints;
+        assert.deepEqual(
+          endpoints.map((endpoint) => endpoint.httpBaseUrl),
+          ["http://127.0.0.1:4173/", "http://192.168.1.20:4173/", "http://10.88.0.3:4173/"],
+        );
+        const mesh = endpoints.find(
+          (endpoint) => endpoint.httpBaseUrl === "http://10.88.0.3:4173/",
+        );
+        assert.equal(mesh?.provider.id, "direct-mesh");
+        assert.equal(mesh?.label, "Direct mesh (wg0)");
+      }),
     ),
   );
 });

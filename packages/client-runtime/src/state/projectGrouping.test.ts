@@ -89,7 +89,7 @@ const repositoryIdentity = {
   provider: SourceControlProviderKind.make("github"),
   owner: "t3tools",
   name: "t3code",
-  displayName: "T3 Code",
+  displayName: "K3 Code",
 };
 
 function makeProject(
@@ -250,8 +250,8 @@ describe("buildProjectGroups", () => {
   it("preserves every physical clone as a selectable member in repository modes", () => {
     const projects = [
       makeProject("t3code", "/work/t3code"),
-      makeProject("t3code-2", "/work/t3code-2"),
-      makeProject("t3code-3", "/work/t3code-3"),
+      makeProject("k3code-2", "/work/t3code-2"),
+      makeProject("k3code-3", "/work/t3code-3"),
     ];
 
     for (const mode of ["repository", "repository_path"] as const) {
@@ -259,8 +259,8 @@ describe("buildProjectGroups", () => {
       expect(groups).toHaveLength(1);
       expect(groups[0]?.members.map((member) => member.project.id)).toEqual([
         "t3code",
-        "t3code-2",
-        "t3code-3",
+        "k3code-2",
+        "k3code-3",
       ]);
       expect(groups[0]?.memberProjectRefs).toHaveLength(3);
     }
@@ -342,13 +342,13 @@ describe("buildProjectGroups", () => {
   it("labels a renamed group by its title even when it matches the repository name", () => {
     const folderTitles = [
       makeProject("t3code", "/work/t3code", { title: "t3code" }),
-      makeProject("t3code-2", "/work/t3code-2", { title: "t3code" }),
+      makeProject("k3code-2", "/work/t3code-2", { title: "t3code" }),
     ];
     const renamed = folderTitles.map((project) => ({ ...project, hasCustomTitle: true }));
 
     const label = (projects: ReadonlyArray<EnvironmentProject>) =>
       buildProjectGroups({ projects, settings: settings("repository") })[0]?.label;
-    expect(label(folderTitles)).toBe("T3 Code");
+    expect(label(folderTitles)).toBe("K3 Code");
     expect(label(renamed)).toBe("t3code");
   });
 
@@ -368,7 +368,7 @@ describe("buildProjectGroups", () => {
       preferredEnvironmentId: environmentId,
     });
     expect(groups).toHaveLength(1);
-    expect(groups[0]?.label).toBe("T3 Code");
+    expect(groups[0]?.label).toBe("K3 Code");
 
     // A subfolder group in repository_path mode keeps its own title.
     const localIdentity = { ...repositoryIdentity, rootPath: "/work/t3code" };
@@ -398,8 +398,8 @@ describe("buildProjectGroups", () => {
 
   it("applies a physical-project override without dropping its siblings", () => {
     const first = makeProject("t3code", "/work/t3code");
-    const second = makeProject("t3code-2", "/work/t3code-2");
-    const third = makeProject("t3code-3", "/work/t3code-3");
+    const second = makeProject("k3code-2", "/work/t3code-2");
+    const third = makeProject("k3code-3", "/work/t3code-3");
     const groups = buildProjectGroups({
       projects: [first, second, third],
       settings: settings("repository", {
@@ -410,8 +410,8 @@ describe("buildProjectGroups", () => {
     expect(groups).toHaveLength(2);
     expect(groups.flatMap((group) => group.members.map((member) => member.project.id))).toEqual([
       "t3code",
-      "t3code-3",
-      "t3code-2",
+      "k3code-3",
+      "k3code-2",
     ]);
   });
 

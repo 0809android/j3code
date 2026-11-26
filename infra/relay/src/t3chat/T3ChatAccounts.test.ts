@@ -1,5 +1,4 @@
 import { describe, expect, it } from "@effect/vitest";
-import { vi } from "vite-plus/test";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as TestClock from "effect/testing/TestClock";
@@ -10,13 +9,6 @@ import * as HttpClientResponse from "effect/http/HttpClientResponse";
 
 import * as RelayConfiguration from "../Config.ts";
 import * as T3ChatAccounts from "./T3ChatAccounts.ts";
-
-const clerk = vi.hoisted(() => ({
-  getUser: async (): Promise<unknown> => ({ primaryEmailAddress: { emailAddress: "a@b.co" } }),
-}));
-vi.mock("@clerk/backend", () => ({
-  createClerkClient: () => ({ users: { getUser: () => clerk.getUser() } }),
-}));
 
 const SECRET = "shared-link-secret";
 
@@ -77,11 +69,13 @@ const provide = (
 describe("T3ChatAccounts", () => {
   it.effect("signs link tokens in the format T3 Chat verifies", () =>
     Effect.gen(function* () {
-      const accounts = yield* T3ChatAccounts.T3ChatAccounts;
-      const url = new URL(yield* accounts.createLinkUrl({ userId: "user_1" }));
-      expect(`${url.origin}${url.pathname}`).toBe("https://chat.example.test/link/t3code");
+      const token = T3ChatAccounts.signLinkToken(SECRET, {
+        sub: "user_1",
+        email: "a@b.co",
+        exp: 600,
+      });
 
-      const [payload = "", signature = ""] = (url.searchParams.get("token") ?? "").split(".");
+      const [payload = "", signature = ""] = token.split(".");
       // Verify with Web Crypto, as T3 Chat does, rather than the signing library.
       const verified = yield* Effect.promise(async () => {
         const encoder = new TextEncoder();
@@ -106,7 +100,7 @@ describe("T3ChatAccounts", () => {
         email: "a@b.co",
         exp: 600,
       });
-    }).pipe(provide(fakeT3Chat({}).client)),
+    }),
   );
 
   it.effect("asks T3 Chat for the link with the shared secret", () => {
@@ -151,16 +145,10 @@ describe("T3ChatAccounts", () => {
     }).pipe(provide(client));
   });
 
-  it.effect("times out when Clerk stalls on the email lookup", () =>
+  it.effect("fails Clerk email lookup since Clerk has been removed", () =>
     Effect.gen(function* () {
-      const getUser = clerk.getUser;
-      clerk.getUser = () => new Promise(() => {});
       const accounts = yield* T3ChatAccounts.T3ChatAccounts;
-      const fiber = yield* Effect.forkChild(Effect.flip(accounts.createLinkUrl({ userId: "u" })));
-      yield* TestClock.adjust("5 seconds");
-      const error = yield* Fiber.join(fiber).pipe(
-        Effect.ensuring(Effect.sync(() => (clerk.getUser = getUser))),
-      );
+      const error = yield* Effect.flip(accounts.createLinkUrl({ userId: "u" }));
       expect(error._tag).toBe("ClerkUserLookupFailed");
     }).pipe(provide(fakeT3Chat({}).client)),
   );

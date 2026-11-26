@@ -1,9 +1,6 @@
 import { msg } from "gt-i18n";
 import { translatableDetail } from "../errors/translatable.ts";
-import type {
-  AuthClientPresentationMetadata,
-  ExecutionEnvironmentDescriptor,
-} from "@t3tools/contracts";
+import type { ExecutionEnvironmentDescriptor } from "@t3tools/contracts";
 import { withRelayClientTracing } from "@t3tools/shared/relayTracing";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -12,11 +9,6 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as HttpClient from "effect/http/HttpClient";
 
-import {
-  appendClientConnectionParams,
-  type ClientOwnerParams,
-  readClientOwnerParams,
-} from "../authorization/remote.ts";
 import * as RemoteEnvironmentAuthorization from "../authorization/service.ts";
 import * as ClientCapabilities from "../platform/capabilities.ts";
 import {
@@ -52,6 +44,7 @@ import {
 } from "./compatibility.ts";
 import { credentialConnectionId } from "./routes.ts";
 import { fetchRemoteEnvironmentDescriptor } from "../environment/descriptor.ts";
+import { makeK3RelayBroker, overTransport } from "../k3relay/broker.ts";
 
 export class ConnectionResolver extends Context.Service<
   ConnectionResolver,
@@ -77,22 +70,16 @@ const isBearerProfile = Schema.is(BearerConnectionProfile);
 const isSshProfile = Schema.is(SshConnectionProfile);
 const isBearerCredential = Schema.is(BearerConnectionCredential);
 
-function primarySocketUrl(
-  target: PrimaryConnectionTarget,
-  clientMetadata: AuthClientPresentationMetadata | undefined,
-  owners: ClientOwnerParams,
-): string {
+function primarySocketUrl(target: PrimaryConnectionTarget): string {
   const url = new URL(target.wsBaseUrl);
   if (url.pathname === "" || url.pathname === "/") {
     url.pathname = "/ws";
   }
-  appendClientConnectionParams(url, clientMetadata, "direct", owners);
   return url.toString();
 }
 
 const makePrimaryBroker = Effect.fn("clientRuntime.connection.broker.makePrimary")(function* () {
   const auth = yield* ClientCapabilities.PrimaryEnvironmentAuth;
-  const presentation = yield* ClientCapabilities.ClientPresentation;
   const remote = yield* RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization;
 
   return Effect.fn("clientRuntime.connection.broker.primary")(function* (
@@ -104,7 +91,7 @@ const makePrimaryBroker = Effect.fn("clientRuntime.connection.broker.makePrimary
         environmentId: target.environmentId,
         label: target.label,
         httpBaseUrl: target.httpBaseUrl,
-        socketUrl: primarySocketUrl(target, presentation.metadata, yield* readClientOwnerParams),
+        socketUrl: primarySocketUrl(target),
         httpAuthorization: null,
         target,
       } satisfies PreparedConnection;
@@ -151,12 +138,15 @@ const makeBearerBroker = Effect.fn("clientRuntime.connection.broker.makeBearer")
         actual: profile.environmentId,
       });
     }
+    const e2eePin = profile.serverIdentityKey
+      ? { e2eeServerIdentityKey: profile.serverIdentityKey }
+      : {};
     if (profile.authorization === "t3-connect") {
       const authorized = yield* remote.authorizeDpop({
         expectedEnvironmentId: target.environmentId,
         directEndpoint: { httpBaseUrl: profile.httpBaseUrl, wsBaseUrl: profile.wsBaseUrl },
       });
-      return { ...authorized, target } satisfies PreparedConnection;
+      return { ...authorized, target, ...e2eePin } satisfies PreparedConnection;
     }
     const credential = yield* credentials.get(credentialConnectionId(target.connectionId)).pipe(
       Effect.flatMap(
@@ -184,6 +174,7 @@ const makeBearerBroker = Effect.fn("clientRuntime.connection.broker.makeBearer")
     return {
       ...authorized,
       target,
+      ...e2eePin,
     } satisfies PreparedConnection;
   });
 });
@@ -284,6 +275,7 @@ export const make = Effect.gen(function* () {
   const bearer = yield* makeBearerBroker();
   const relay = yield* makeRelayBroker();
   const ssh = yield* makeSshBroker();
+  const k3relay = yield* makeK3RelayBroker();
   const httpClient = yield* HttpClient.HttpClient;
 
   const authorize = Effect.fn("clientRuntime.connection.broker.authorize")(function* (
@@ -306,6 +298,8 @@ export const make = Effect.gen(function* () {
           return relay(target);
         case "SshConnectionTarget":
           return ssh({ ...entry, target });
+        case "K3RelayConnectionTarget":
+          return k3relay({ ...entry, target });
       }
     })();
     const { descriptor: authorizedDescriptor, ...prepared } = authorized;
@@ -316,6 +310,7 @@ export const make = Effect.gen(function* () {
       }).pipe(
         Effect.mapError(mapRemoteEnvironmentError),
         Effect.provideService(HttpClient.HttpClient, httpClient),
+        overTransport(prepared.transport),
       ));
     if (descriptor.environmentId !== target.environmentId) {
       return yield* environmentMismatchError({

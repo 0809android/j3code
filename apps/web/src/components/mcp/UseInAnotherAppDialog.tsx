@@ -1,5 +1,5 @@
 import { thrownErrorMessage } from "@t3tools/client-runtime/errors";
-import { useAuth } from "@clerk/react";
+import { useCloudAuth as useAuth } from "../../cloud/managedAuth";
 import { useAtomValue } from "@effect/atom-react";
 import {
   managedCapabilityDenial,
@@ -42,6 +42,7 @@ import { readLocalApi } from "~/localApi";
 import { appAtomRegistry } from "~/rpc/atomRegistry";
 import {
   type EnvironmentPresentation,
+  useEnvironmentHttpBaseUrl,
   useEnvironmentIdentities,
   usePrimaryEnvironmentId,
 } from "~/state/environments";
@@ -86,23 +87,17 @@ export function UseInAnotherAppDialogHost() {
 function UseInAnotherAppDialog({ requested }: { readonly requested: EnvironmentId | null }) {
   const { environment, label } = useAccessEnvironment(requested);
   const gt = useGT();
-  const title = `${gt("Use T3 Code in another app (MCP)")} · ${label ?? "T3 Code"}`;
+  const title = `${gt("Use K3 Code in another app (MCP)")} · ${label ?? "K3 Code"}`;
   return (
     <Dialog open onOpenChange={(open) => (open ? undefined : close())}>
       <WizardPopup>
-        {environment !== null && hasCloudPublicConfig() ? (
+        {environment !== null ? (
           <Wizard key={environment.environmentId} environment={environment} title={title} />
         ) : (
           <>
             <WizardHeader title={title} />
             <WizardPanel>
-              <GateMessage
-                title={
-                  environment === null
-                    ? gt("Connect to an environment first.")
-                    : gt("T3 Connect is not available in this build.")
-                }
-              />
+              <GateMessage title={gt("Connect to an environment first.")} />
             </WizardPanel>
           </>
         )}
@@ -266,6 +261,15 @@ function useGate(environment: EnvironmentPresentation) {
   const thisMachine =
     environmentId === usePrimaryEnvironmentId() ||
     isDesktopLocalConnectionTarget(environment.entry.target);
+  const httpBaseUrl = useEnvironmentHttpBaseUrl(environmentId);
+  const directMcpUrl = !hasCloudPublicConfig()
+    ? (() => {
+        const base =
+          httpBaseUrl ??
+          (thisMachine && typeof window !== "undefined" ? window.location.origin : null);
+        return base ? `${base.replace(/\/+$/, "")}/mcp` : null;
+      })()
+    : null;
   const discovery = useAtomValue(relayEnvironmentDiscovery.stateValueAtom);
   const refreshDiscovery = useAtomCommand(relayEnvironmentDiscovery.refresh, {
     reportFailure: false,
@@ -298,6 +302,7 @@ function useGate(environment: EnvironmentPresentation) {
       linkState,
       linkStateError: controller.linkState.error,
       thisMachine,
+      directMcpUrl,
       relay:
         !discovery.refreshing && (discovery.offline || Option.isSome(discovery.error))
           ? { status: "failed" }
@@ -446,7 +451,7 @@ function GateScreen({
         </GateMessage>
       );
     case "update":
-      return <GateMessage title={gt("Update T3 Code on {environment}", { environment: name })} />;
+      return <GateMessage title={gt("Update K3 Code on {environment}", { environment: name })} />;
     case "no-relay-read":
       return (
         <GateMessage
@@ -513,7 +518,7 @@ function GateScreen({
               <CommandBlock command="t3 connect link" />
               <p>
                 <T>
-                  Restart T3 Code on <Var>{name}</Var>.
+                  Restart K3 Code on <Var>{name}</Var>.
                 </T>
               </p>
               {checkAgain}

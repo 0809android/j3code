@@ -15,7 +15,6 @@ import * as ElectronSafeStorage from "../electron/ElectronSafeStorage.ts";
 import { installDesktopIpcHandlers } from "../ipc/DesktopIpcHandlers.ts";
 import * as DesktopAppActivation from "./DesktopAppActivation.ts";
 import * as DesktopAppIdentity from "./DesktopAppIdentity.ts";
-import * as DesktopClerk from "./DesktopClerk.ts";
 import * as DesktopCliShim from "./DesktopCliShim.ts";
 import * as DesktopCliCommand from "./DesktopCliCommand.ts";
 import * as DesktopApplicationMenu from "../window/DesktopApplicationMenu.ts";
@@ -27,6 +26,7 @@ import * as DesktopHomeOwner from "../backend/DesktopHomeOwner.ts";
 import * as DesktopLocalEnvironmentAuth from "../backend/DesktopLocalEnvironmentAuth.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopLegacyLocalStorage from "./DesktopLegacyLocalStorage.ts";
+import { registerK3RelayLinks } from "./DesktopK3RelayLinks.ts";
 import * as DesktopLifecycle from "./DesktopLifecycle.ts";
 import * as DesktopLinuxUrlHandler from "./DesktopLinuxUrlHandler.ts";
 import * as DesktopObservability from "./DesktopObservability.ts";
@@ -78,7 +78,7 @@ export class DesktopDevelopmentBackendPortRequiredError extends Schema.TaggedErr
   {},
 ) {
   override get message(): string {
-    return "T3CODE_PORT is required in desktop development.";
+    return "K3CODE_PORT is required in desktop development.";
   }
 }
 
@@ -150,7 +150,7 @@ const handleFatalStartupError = Effect.fn("desktop.startup.handleFatalStartupErr
   const wasQuitting = yield* Ref.getAndSet(state.quitting, true);
   if (!wasQuitting) {
     yield* electronDialog.showErrorBox(
-      m(msg("T3 Code failed to start")),
+      m(msg("K3 Code failed to start")),
       `Stage: ${stage}\n${message}${detail}`,
     );
   }
@@ -175,7 +175,7 @@ const stopAllPoolInstances = Effect.fn("desktop.app.stopAllPoolInstances")(
 
 // Spawns the local backend as soon as the protocol, IPC, and legacy storage that every window needs exist.
 /**
- * The server reads T3CODE_FEATURE_FLAGS once at start, from the value cached at the last
+ * The server reads K3CODE_FEATURE_FLAGS once at start, from the value cached at the last
  * discovery. When the login shell now sets different flags, restart it so they apply.
  */
 const restartOnFeatureFlagChange = Effect.fn("desktop.restartOnFeatureFlagChange")(function* (
@@ -183,15 +183,15 @@ const restartOnFeatureFlagChange = Effect.fn("desktop.restartOnFeatureFlagChange
 ) {
   const state = yield* DesktopState.DesktopState;
   const shellEnvironment = yield* DesktopShellEnvironment.DesktopShellEnvironment;
-  let startedWith = (yield* HostProcess.Environment).T3CODE_FEATURE_FLAGS;
+  let startedWith = (yield* HostProcess.Environment).K3CODE_FEATURE_FLAGS;
   yield* shellEnvironment.updates.pipe(
     Stream.filter((snapshot) => snapshot.discovered),
     Stream.runForEach(
       Effect.fnUntraced(function* (snapshot) {
-        const flags = snapshot.environment.T3CODE_FEATURE_FLAGS ?? undefined;
+        const flags = snapshot.environment.K3CODE_FEATURE_FLAGS ?? undefined;
         if (flags === startedWith || (yield* Ref.get(state.quitting))) return;
         startedWith = flags;
-        yield* logBootstrapInfo("restarting backend for changed T3CODE_FEATURE_FLAGS");
+        yield* logBootstrapInfo("restarting backend for changed K3CODE_FEATURE_FLAGS");
         yield* backend.stop();
         yield* backend.start;
       }),
@@ -213,7 +213,6 @@ const startLocalBackend = Effect.gen(function* () {
     ...(environment.isDevelopment
       ? { targetOrigin: Option.getOrThrow(environment.devServerUrl) }
       : { assetDirectory: environment.clientAssetsDir }),
-    clerkFrontendApiHostname: DesktopClerk.desktopClerkFrontendApiHostname,
   });
   yield* installDesktopIpcHandlers();
   yield* logBootstrapInfo("bootstrap ipc handlers registered");
@@ -241,11 +240,11 @@ const startLocalBackend = Effect.gen(function* () {
     !(yield* DesktopHomeOwner.awaitHomeOwnershipRelease())
   ) {
     const owner = yield* DesktopHomeOwner.readLiveHomeOwner();
-    yield* logBootstrapWarning("bootstrap found another server owning the T3 home", {
+    yield* logBootstrapWarning("bootstrap found another server owning the K3 home", {
       owner: Option.getOrNull(owner),
     });
     yield* (yield* ElectronDialog.ElectronDialog).showErrorBox(
-      m(msg("This T3 home is unavailable")),
+      m(msg("This K3 home is unavailable")),
       DesktopHomeOwner.homeOwnedMessage(owner),
     );
     yield* (yield* ElectronApp.ElectronApp).quit;
@@ -365,7 +364,6 @@ const startup = Effect.gen(function* () {
   const electronApp = yield* ElectronApp.ElectronApp;
   const lifecycle = yield* DesktopLifecycle.DesktopLifecycle;
   const linuxUrlHandler = yield* DesktopLinuxUrlHandler.DesktopLinuxUrlHandler;
-  const clerk = yield* DesktopClerk.DesktopClerk;
   const shellEnvironment = yield* DesktopShellEnvironment.DesktopShellEnvironment;
   const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings;
   const preReadyElectronOptions = yield* DesktopPreReadyPlatform.DesktopPreReadyElectronOptions;
@@ -399,6 +397,14 @@ const startup = Effect.gen(function* () {
   }
   const userDataPath = yield* appIdentity.resolveUserDataPath;
   yield* electronApp.setPath("userData", userDataPath);
+  // One app per profile. On Windows and Linux a `k3relay://` link launches a second process; it
+  // hands its arguments to this one (`second-instance`) and quits. Development builds skip the
+  // lock so several worktrees can run side by side.
+  if (!environment.isDevelopment && !(yield* electronApp.requestSingleInstanceLock)) {
+    yield* logStartupInfo("another instance is running; handing over and quitting");
+    yield* electronApp.quit;
+    return yield* Effect.interrupt;
+  }
   yield* logStartupInfo("runtime logging configured", { logDir: environment.logDir });
   yield* desktopSettings.load;
 
@@ -415,7 +421,7 @@ const startup = Effect.gen(function* () {
 
   yield* appIdentity.configure;
   yield* lifecycle.register;
-  yield* clerk.configure;
+  yield* registerK3RelayLinks;
 
   yield* electronApp.whenReady.pipe(
     Effect.withSpan("desktop.electron.whenReady"),

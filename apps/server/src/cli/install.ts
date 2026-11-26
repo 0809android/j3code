@@ -1,4 +1,6 @@
+import { CLI_NPM_PACKAGE_NAME } from "@t3tools/shared/cliRelease";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import { K3_RELEASES_URL } from "@t3tools/shared/projectLinks";
 import { pathSetupCommand, resolveCommandPath } from "@t3tools/shared/shell";
 import * as Console from "effect/Console";
 import * as Duration from "effect/Duration";
@@ -30,7 +32,7 @@ export class CliInstallError extends Schema.TaggedError<CliInstallError>()("CliI
   }
 }
 
-/** `<T3 home>/runtime/versions/<version>/t3`: the layout the install scripts and npm launcher share. */
+/** `<K3 home>/runtime/versions/<version>/t3`: the layout the install scripts and npm launcher share. */
 const standaloneRuntime = Effect.gen(function* () {
   const path = yield* Path.Path;
   if (!(yield* HostProcess.IsExecutable)) return Option.none();
@@ -53,29 +55,26 @@ export const installCli = Effect.fn("cli.install.install")(function* () {
   const runtime = yield* standaloneRuntime;
   const windows = platform === "win32";
   if (Option.isNone(runtime)) {
-    const script = windows
-      ? "irm https://t3.codes/install.ps1 | iex"
-      : "curl -fsSL https://t3.codes/install.sh | sh";
     return yield* new CliInstallError({
-      reason: `Only the standalone t3 can install itself. Use \`${script}\`, or Settings in the desktop app.`,
+      reason: `Only the standalone t3 can install itself. Download a release from ${K3_RELEASES_URL}, or use Settings in the desktop app.`,
     });
   }
   const { executable, versionsDir, runtimeDir } = runtime.value;
   // cmd.exe expands `%` and reads the shim in the OEM code page, so such a path would not run.
   if (windows && /[%\u0080-\uffff]/.test(executable)) {
     return yield* new CliInstallError({
-      reason: `A t3.cmd cannot run ${executable}, because the path has % or non-ASCII characters. Keep using npx t3.`,
+      reason: `A t3.cmd cannot run ${executable}, because the path has % or non-ASCII characters. Keep using npx ${CLI_NPM_PACKAGE_NAME}.`,
     });
   }
   // Absolute, so the PATH hint never adds a folder that changes with the working directory.
   const binDir = path.resolve(
-    environment.T3CODE_INSTALL_BIN_DIR?.trim() || path.join(home, ".local", "bin"),
+    environment.K3CODE_INSTALL_BIN_DIR?.trim() || path.join(home, ".local", "bin"),
   );
   const name = windows ? "t3.cmd" : "t3";
   const link = path.join(binDir, name);
   const failed = (reason: string) => (cause: unknown) => new CliInstallError({ reason, cause });
 
-  // Resolve fully so a link through a symlinked T3 home still counts as ours; a dangling one
+  // Resolve fully so a link through a symlinked K3 home still counts as ours; a dangling one
   // (a pruned version) falls back to its own text.
   const realVersionsDir = yield* fs
     .realPath(versionsDir)
@@ -287,7 +286,7 @@ export const inTerminalForeground = Effect.gen(function* () {
 
 /**
  * Before a command run through npx, pnpm dlx, or bunx at a terminal, asks to install the `t3`
- * command. Yes is the default. No, no answer, or a failed install is saved in the T3 home until
+ * command. Yes is the default. No, no answer, or a failed install is saved in the K3 home until
  * the next minor release. Returns false when the user quits the prompt, so the command does not run.
  */
 export const offerCliInstall = Effect.fn("cli.install.offer")(function* <E, R, E2, R2>(input: {

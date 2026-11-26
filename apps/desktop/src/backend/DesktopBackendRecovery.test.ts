@@ -100,7 +100,7 @@ describe.runIf(NodeProcess.platform === "darwin")("macOS desktop backend recover
       await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-record-")),
     );
     cleanup.defer(() => NodeFSP.rm(stateDir, { recursive: true, force: true }));
-    const directory = NodePath.join(stateDir, "t3code-backend-recovery");
+    const directory = NodePath.join(stateDir, "k3code-backend-recovery");
     await NodeFSP.mkdir(directory, { mode: 0o700 });
     const scope = NodeCrypto.createHash("sha256")
       .update(JSON.stringify([stateDir, await NodeFSP.realpath(NodeProcess.execPath)]))
@@ -182,7 +182,7 @@ describe.runIf(NodeProcess.platform === "darwin")("macOS desktop backend recover
     await otherHome.recover();
     assert.deepEqual(recovered, []);
 
-    const records = NodePath.join(appDataDirectory, "t3code-backend-recovery");
+    const records = NodePath.join(appDataDirectory, "k3code-backend-recovery");
     for (const name of await NodeFSP.readdir(records))
       await NodeFSP.chmod(NodePath.join(records, name), 0o644);
     await recovery.recover();

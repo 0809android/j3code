@@ -50,6 +50,7 @@ vi.mock("../connection/runtime", () => ({ connectionAtomRuntime: {} }));
 vi.mock("../connection/catalog", () => ({
   environmentCatalog: { sessionGenerationAtom: () => null },
 }));
+vi.mock("../lib/relayAssetFiles", () => ({ relayAssets: {} }));
 vi.mock("@t3tools/client-runtime/state/assets", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@t3tools/client-runtime/state/assets")>()),
   createAssetEnvironmentAtoms: () => ({ createUrl: state.assetQuery }),

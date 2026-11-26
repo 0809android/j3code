@@ -56,11 +56,37 @@ import {
   PEER_LINK_PAIRING_SUBJECT_PREFIX,
 } from "../persistence/AuthPairingLinks.ts";
 import { requestUrl } from "../requestUrl.ts";
+import { isRelayRequest, RELAY_CLIENT_ADDRESS } from "./transportSecurity.ts";
 
 const DEFAULT_SESSION_SUBJECT = "cli-issued-session";
 export const INTERNAL_ADMINISTRATIVE_BOOTSTRAP_SUBJECT = "administrative-bootstrap";
 /** Sessions and pairing links T3 Connect minted for a device signed in to the linked account. */
 export const CLOUD_CONNECT_SUBJECT = "cloud-connect";
+/** Sessions a device gets through the K3 relay after its pairing is approved on this host. */
+export const RELAY_PAIRED_DEVICE_SUBJECT = "relay-paired-device";
+
+/** Each relay device has its own subject, so revoking the device finds every session it holds. */
+export const relayPairedDeviceSubject = (deviceId: string) =>
+  `${RELAY_PAIRED_DEVICE_SUBJECT}:${deviceId}`;
+
+export const isRelayPairedDeviceSubject = (subject: string) =>
+  subject === RELAY_PAIRED_DEVICE_SUBJECT || subject.startsWith(`${RELAY_PAIRED_DEVICE_SUBJECT}:`);
+
+/** The relay device a session belongs to; undefined for any other session. */
+export const relayPairedDeviceIdOf = (subject: string): string | undefined => {
+  const prefix = `${RELAY_PAIRED_DEVICE_SUBJECT}:`;
+  const deviceId = subject.startsWith(prefix) ? subject.slice(prefix.length) : "";
+  return deviceId.length > 0 ? deviceId : undefined;
+};
+
+/**
+ * Stands in for a DPoP thumbprint on a relay device's bootstrap credential. A JWK thumbprint is
+ * base64url and never holds a colon, so only an exchange the relay bridge made for that
+ * E2E-authenticated device presents it; the session itself binds the device's real DPoP key.
+ */
+const relayDeviceCredentialBinding = (deviceId: string) => `k3relay-device:${deviceId}`;
+
+const RELAY_DEVICE_BOOTSTRAP_TTL = Duration.minutes(10);
 
 export interface IssuedPairingLink {
   readonly id: string;
@@ -99,7 +125,7 @@ export interface McpClientSession {
   readonly sessionId: AuthSessionId;
   readonly label: string;
   readonly access: AuthMcpClientAccess;
-  /** Another T3 Code environment's link, whose work here stays within it. */
+  /** Another K3 Code environment's link, whose work here stays within it. */
   readonly peerLink: boolean;
   /** When a peer link's session ends unless it is used again; the linking side keeps this. */
   readonly linkExpiresAt?: DateTime.Utc;
@@ -518,6 +544,8 @@ export class EnvironmentAuth extends Context.Service<
       requestMetadata: AuthClientMetadata,
       input?: {
         readonly proofKeyThumbprint?: string;
+        /** The E2E-authenticated device of a request that came through the K3 relay. */
+        readonly relayDeviceId?: string;
       },
     ) => Effect.Effect<
       AuthAccessTokenResult,
@@ -573,6 +601,21 @@ export class EnvironmentAuth extends Context.Service<
       ReadonlyArray<AuthConnectDevice>,
       ServerAuthInternalError
     >;
+    /**
+     * A one-time credential for a K3 relay device, spendable only through the relay by that
+     * device. An earlier unused one for the device is revoked, so at most one is outstanding.
+     */
+    readonly issueRelayDeviceBootstrapCredential: (input: {
+      readonly deviceId: string;
+      readonly label: string;
+    }) => Effect.Effect<
+      { readonly credential: string; readonly expiresAt: DateTime.Utc },
+      ServerAuthInternalError | ManagedLimits.ManagedPolicyRefusedError
+    >;
+    /** Ends every session and unused credential of a K3 relay device; returns how many. */
+    readonly revokeRelayDevice: (
+      deviceId: string,
+    ) => Effect.Effect<number, ServerAuthInternalError>;
     /** Stops trusting a device key and ends the sessions it holds. */
     readonly revokeConnectDevice: (
       proofKeyThumbprint: string,
@@ -867,7 +910,27 @@ export const make = Effect.gen(function* () {
     ...config.devAllowedOrigins,
   ]);
 
+  // The policy is read once at startup and revokes relay sessions then; this also stops a
+  // relayed request that arrives with a credential the policy never saw.
+  const rejectRelayRequestTheManagedPolicyDisallows = (
+    request: HttpServerRequest.HttpServerRequest,
+  ) =>
+    isRelayRequest(request) && !ManagedLimits.allowsRelay(managedPolicy)
+      ? Effect.fail(
+          new ServerAuthInvalidCredentialError({
+            diagnostic: ManagedLimits.refuseRelay(managedPolicy).message,
+          }),
+        )
+      : Effect.void;
+
   const authenticateRequest = (
+    request: HttpServerRequest.HttpServerRequest,
+  ): Effect.Effect<AuthenticatedSession, ServerAuthCredentialError | ServerAuthInternalError> =>
+    rejectRelayRequestTheManagedPolicyDisallows(request).pipe(
+      Effect.andThen(authenticateRequestUnchecked(request)),
+    );
+
+  const authenticateRequestUnchecked = (
     request: HttpServerRequest.HttpServerRequest,
   ): Effect.Effect<AuthenticatedSession, ServerAuthCredentialError | ServerAuthInternalError> => {
     const dpopToken = parseDpopToken(request);
@@ -1106,11 +1169,36 @@ export const make = Effect.gen(function* () {
 
   const exchangeBootstrapCredentialForAccessToken: EnvironmentAuth["Service"]["exchangeBootstrapCredentialForAccessToken"] =
     (credential, requestedScopes, requestMetadata, input) => {
+      const relayDeviceId = input?.relayDeviceId;
+      // A relay device spends its credential under the device binding, never a DPoP key, and
+      // must still bring a DPoP key for the session: the relay credential is never a bearer one.
+      if (relayDeviceId !== undefined && input?.proofKeyThumbprint === undefined) {
+        return Effect.fail(
+          new ServerAuthInvalidCredentialError({
+            diagnostic: "A relay device exchanges its credential with a DPoP proof.",
+            dpopFailureReason: "invalid_proof",
+          }),
+        );
+      }
       return resolveBootstrapGrant(credential, {
-        ...input,
         requestMetadata,
         ...(requestedScopes !== undefined ? { requestedScopes } : {}),
+        ...(relayDeviceId !== undefined
+          ? { proofKeyThumbprint: relayDeviceCredentialBinding(relayDeviceId) }
+          : input?.proofKeyThumbprint !== undefined
+            ? { proofKeyThumbprint: input.proofKeyThumbprint }
+            : {}),
       }).pipe(
+        Effect.filterOrFail(
+          (grant) =>
+            relayDeviceId === undefined
+              ? !isRelayPairedDeviceSubject(grant.subject)
+              : grant.subject === relayPairedDeviceSubject(relayDeviceId),
+          () =>
+            new ServerAuthInvalidCredentialError({
+              diagnostic: "This credential belongs to another route or device.",
+            }),
+        ),
         // Every T3 Connect key that gets in is remembered, so turning approval on later
         // keeps the devices already in use and lists them for review.
         Effect.tap((grant) =>
@@ -1134,7 +1222,7 @@ export const make = Effect.gen(function* () {
             const renewable =
               input?.proofKeyThumbprint !== undefined &&
               grant.method === "one-time-token" &&
-              grant.subject === PAIRING_LINK_SUBJECT;
+              (grant.subject === PAIRING_LINK_SUBJECT || isRelayPairedDeviceSubject(grant.subject));
             return yield* sessions
               .issue({
                 method: input?.proofKeyThumbprint ? "dpop-access-token" : "bearer-access-token",
@@ -1370,6 +1458,53 @@ export const make = Effect.gen(function* () {
       Effect.withSpan("EnvironmentAuth.listSessions"),
     );
 
+  const revokeRelayDeviceCredentials = (subject: string) =>
+    bootstrapCredentials.listActive().pipe(
+      Effect.flatMap((links) =>
+        Effect.forEach(
+          links.filter((link) => link.subject === subject),
+          (link) => bootstrapCredentials.revoke(link.id),
+        ),
+      ),
+      Effect.map((revoked) => revoked.filter(Boolean).length),
+      Effect.mapError((cause) => new ServerAuthPairingLinkRevocationError({ cause })),
+    );
+
+  const issueRelayDeviceBootstrapCredential: EnvironmentAuth["Service"]["issueRelayDeviceBootstrapCredential"] =
+    Effect.fn("EnvironmentAuth.issueRelayDeviceBootstrapCredential")(function* (input) {
+      if (!ManagedLimits.allowsRelay(managedPolicy)) {
+        return yield* ManagedLimits.refuseRelay(managedPolicy);
+      }
+      const subject = relayPairedDeviceSubject(input.deviceId);
+      yield* revokeRelayDeviceCredentials(subject);
+      const issued = yield* issuePairingLink({
+        scopes: AuthStandardClientScopes,
+        subject,
+        label: input.label,
+        ttl: RELAY_DEVICE_BOOTSTRAP_TTL,
+        proofKeyThumbprint: relayDeviceCredentialBinding(input.deviceId),
+      });
+      return { credential: issued.credential, expiresAt: issued.expiresAt };
+    });
+
+  const revokeRelayDevice: EnvironmentAuth["Service"]["revokeRelayDevice"] = Effect.fn(
+    "EnvironmentAuth.revokeRelayDevice",
+  )(function* (deviceId) {
+    const subject = relayPairedDeviceSubject(deviceId);
+    const active = yield* sessions
+      .listActive()
+      .pipe(Effect.mapError((cause) => new ServerAuthSessionsListError({ cause })));
+    const revokedSessions = yield* Effect.forEach(
+      active.filter((session) => session.subject === subject),
+      (session) =>
+        sessions
+          .revoke(session.sessionId)
+          .pipe(Effect.mapError((cause) => new ServerAuthSessionRevocationError({ cause }))),
+    );
+    const revokedLinks = yield* revokeRelayDeviceCredentials(subject);
+    return revokedSessions.filter(Boolean).length + revokedLinks;
+  });
+
   const revokeSession: EnvironmentAuth["Service"]["revokeSession"] = (sessionId) =>
     sessions.revoke(sessionId).pipe(
       Effect.mapError((cause) => new ServerAuthSessionRevocationError({ cause })),
@@ -1534,6 +1669,7 @@ export const make = Effect.gen(function* () {
 
   const authenticateWebSocketUpgrade: EnvironmentAuth["Service"]["authenticateWebSocketUpgrade"] =
     Effect.fn("EnvironmentAuth.authenticateWebSocketUpgrade")(function* (request, use) {
+      yield* rejectRelayRequestTheManagedPolicyDisallows(request);
       const url = requestUrl(request);
       if (Option.isSome(url)) {
         const query = yield* decodeWebSocketUpgradeQuery(
@@ -1724,6 +1860,8 @@ export const make = Effect.gen(function* () {
     connectRequestsShowingCode,
     listConnectDevices,
     revokeConnectDevice,
+    issueRelayDeviceBootstrapCredential,
+    revokeRelayDevice,
     connectDevicesShowingCode,
     issuePairingCredential,
     issueStartupPairingCredential,
@@ -1760,7 +1898,11 @@ const mcpApprovalLevel = (subject: string): AuthMcpClientAccess | undefined => {
 };
 
 /** Subjects of sessions and links a pairing link created, keyed by how the client paired. */
-const LINK_PAIRED_SUBJECTS = { link: "one-time-token", connect: CLOUD_CONNECT_SUBJECT } as const;
+const LINK_PAIRED_SUBJECTS = {
+  link: "one-time-token",
+  connect: CLOUD_CONNECT_SUBJECT,
+  relay: RELAY_PAIRED_DEVICE_SUBJECT,
+} as const;
 
 /**
  * Revokes sessions and unused links from pairing the policy no longer allows, so a policy rolled
@@ -1779,10 +1921,16 @@ const revokePairedClientsThePolicyDisallows = Effect.fn(
   const disallowed = new Set<string>();
   if (!remoteAllowed) disallowed.add(LINK_PAIRED_SUBJECTS.link);
   if (!ManagedLimits.allowsConnect(policy)) disallowed.add(LINK_PAIRED_SUBJECTS.connect);
+  const relayAllowed = ManagedLimits.allowsRelay(policy);
+  if (!relayAllowed) disallowed.add(LINK_PAIRED_SUBJECTS.relay);
   if (disallowed.size === 0) return;
+  const isDisallowed = (subject: string) =>
+    disallowed.has(subject) || (!relayAllowed && isRelayPairedDeviceSubject(subject));
   const sessions = (yield* stores.sessions.listActive()).filter(
     (session) =>
-      disallowed.has(session.subject) ||
+      isDisallowed(session.subject) ||
+      // Whatever subject a session has, one that came through the relay goes with it.
+      (!relayAllowed && session.client.ipAddress === RELAY_CLIENT_ADDRESS) ||
       // The startup link also pairs browsers on this machine; only a device elsewhere goes.
       (!remoteAllowed &&
         session.subject === INTERNAL_ADMINISTRATIVE_BOOTSTRAP_SUBJECT &&
@@ -1791,7 +1939,7 @@ const revokePairedClientsThePolicyDisallows = Effect.fn(
   );
   const links = (yield* stores.pairingLinks.listActive()).filter(
     (link) =>
-      disallowed.has(link.subject) ||
+      isDisallowed(link.subject) ||
       // Approval codes let an agent elsewhere sign in, as plain codes do.
       (!remoteAllowed && link.subject.startsWith(MCP_APPROVAL_SUBJECT_PREFIX)),
   );

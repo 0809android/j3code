@@ -1664,7 +1664,7 @@ describe("AcpRegistryAdapterV2", () => {
       });
       // Several agents can run from one directory at once; the spawn env is how
       // a process the agent starts (an MCP server, a shell tool) finds its own
-      // T3 thread, the same way Claude and Codex sessions do.
+      // K3 thread, the same way Claude and Codex sessions do.
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const spawnEnvironments: Array<Record<string, unknown> | undefined> = [];
       const capturingSpawner = ChildProcessSpawner.make((command) =>
@@ -1717,7 +1717,7 @@ describe("AcpRegistryAdapterV2", () => {
         (environment) => environment?.T3_ACP_SESSION_LIFECYCLE === "1",
       );
       assert.isDefined(agentEnvironment, "the agent itself must have been spawned");
-      assert.equal(agentEnvironment?.T3CODE_THREAD_ID, "thread-acp-registry-thread-env");
+      assert.equal(agentEnvironment?.K3CODE_THREAD_ID, "thread-acp-registry-thread-env");
       assert.equal(agentEnvironment?.T3_ACP_MCP_ENDPOINT, endpoint);
       assert.equal(agentEnvironment?.T3_ACP_MCP_AUTHORIZATION, "Bearer thread-env-token");
     }).pipe(Effect.provide(layerTest)),

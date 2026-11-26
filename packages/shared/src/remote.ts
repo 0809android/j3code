@@ -3,10 +3,11 @@ import * as Schema from "effect/Schema";
 import { parseUrl } from "./url.ts";
 
 const PAIRING_TOKEN_PARAM = "token";
+const PAIRING_SERVER_KEY_PARAM = "pk";
 const HOSTED_PAIRING_HOST_PARAM = "host";
 const HOSTED_PAIRING_LABEL_PARAM = "label";
 const PAIRING_APP_LINK_PARAM = "pairingUrl";
-const APP_LINK_PROTOCOL = /^t3code(?:-[a-z]+)?:$/;
+const APP_LINK_PROTOCOL = /^k3code(?:-[a-z]+)?:$/;
 const SUPPORTED_REMOTE_BACKEND_PROTOCOLS = new Set(["http:", "https:", "ws:", "wss:"]);
 
 export const readHashParams = (url: URL): URLSearchParams =>
@@ -137,6 +138,8 @@ export interface ResolvedRemotePairingTarget {
   readonly credential: string;
   readonly httpBaseUrl: string;
   readonly wsBaseUrl: string;
+  /** The server's E2EE identity key pinned by the pairing link, when present. */
+  readonly serverIdentityKey?: string;
 }
 
 export interface HostedPairingRequest {
@@ -173,6 +176,23 @@ export const setPairingTokenOnUrl = (url: URL, credential: string): URL => {
   return next;
 };
 
+/** The server's pinned E2EE identity key carried beside the pairing token. */
+const getPairingServerKeyFromUrl = (url: URL): string | null => {
+  const hashKey = readHashParams(url).get(PAIRING_SERVER_KEY_PARAM)?.trim() ?? "";
+  if (hashKey.length > 0) return hashKey;
+  const searchKey = url.searchParams.get(PAIRING_SERVER_KEY_PARAM)?.trim() ?? "";
+  return searchKey.length > 0 ? searchKey : null;
+};
+
+export const setPairingServerKeyOnUrl = (url: URL, serverKey: string): URL => {
+  const next = new URL(url.toString());
+  next.searchParams.delete(PAIRING_SERVER_KEY_PARAM);
+  const hashParams = readHashParams(next);
+  hashParams.set(PAIRING_SERVER_KEY_PARAM, serverKey);
+  next.hash = hashParams.toString();
+  return next;
+};
+
 export const readHostedPairingRequest = (url: URL): HostedPairingRequest | null => {
   const host = url.searchParams.get(HOSTED_PAIRING_HOST_PARAM)?.trim() ?? "";
   const token = getPairingTokenFromUrl(url)?.trim() ?? "";
@@ -189,11 +209,11 @@ export const readHostedPairingRequest = (url: URL): HostedPairingRequest | null 
   };
 };
 
-/** Wraps a pairing URL in the `t3code://pair` link that desktop opens and mobile scans. */
+/** Wraps a pairing URL in the `k3code://pair` link that desktop opens and mobile scans. */
 export const buildPairingAppLink = (pairingUrl: string): string =>
-  `t3code://pair?${new URLSearchParams([[PAIRING_APP_LINK_PARAM, pairingUrl]])}`;
+  `k3code://pair?${new URLSearchParams([[PAIRING_APP_LINK_PARAM, pairingUrl]])}`;
 
-/** Reads the pairing URL from a `t3code://pair` link on any app channel scheme. */
+/** Reads the pairing URL from a `k3code://pair` link on any app channel scheme. */
 export const readPairingAppLink = (value: string): string | null => {
   const url = parseUrl(value);
   if (!url) return null;
@@ -230,6 +250,9 @@ export const resolveRemotePairingTarget = (input: {
         credential: hostedPairingRequest.token,
         httpBaseUrl: toHttpBaseUrl(hostedBackendUrl),
         wsBaseUrl: toWsBaseUrl(hostedBackendUrl),
+        ...(getPairingServerKeyFromUrl(url)
+          ? { serverIdentityKey: getPairingServerKeyFromUrl(url)! }
+          : {}),
       };
     }
 
@@ -241,6 +264,9 @@ export const resolveRemotePairingTarget = (input: {
       credential,
       httpBaseUrl: toHttpBaseUrl(url),
       wsBaseUrl: toWsBaseUrl(url),
+      ...(getPairingServerKeyFromUrl(url)
+        ? { serverIdentityKey: getPairingServerKeyFromUrl(url)! }
+        : {}),
     };
   }
 

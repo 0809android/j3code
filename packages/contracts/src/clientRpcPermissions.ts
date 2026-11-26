@@ -7,6 +7,7 @@ import {
   AuthOrchestrationReadScope,
   AuthPreviewOperateScope,
   AuthProvidersManageScope,
+  AuthRelayConfigureScope,
   AuthSettingsWriteScope,
   AuthSourceControlWriteScope,
   AuthTerminalOperateScope,
@@ -17,6 +18,19 @@ import { WS_METHODS } from "./rpc.ts";
 
 /** Incremental client enforcement; the server still authorizes every request. */
 export const CLIENT_GUARDED_RPC_SCOPES = {
+  // Who may reach this host through the K3 relay is the owner's call, as linking T3 Connect is.
+  [WS_METHODS.k3RelayCreatePairingOffer]: AuthRelayConfigureScope,
+  [WS_METHODS.k3RelayCancelPairing]: AuthRelayConfigureScope,
+  [WS_METHODS.k3RelayApprovePairing]: AuthRelayConfigureScope,
+  [WS_METHODS.k3RelayRejectPairing]: AuthRelayConfigureScope,
+  [WS_METHODS.k3RelayRevokeDevice]: AuthRelayConfigureScope,
+  [WS_METHODS.k3RelayRenameDevice]: AuthRelayConfigureScope,
+  // Who may introduce devices is the owner's call; a device can never grant it.
+  [WS_METHODS.k3RelaySetDevicePermissions]: AuthRelayConfigureScope,
+  // Putting this host on an account, and the approval policy, are the owner's call too.
+  [WS_METHODS.k3RelayAccountSignIn]: AuthRelayConfigureScope,
+  [WS_METHODS.k3RelayAccountSignOut]: AuthRelayConfigureScope,
+  [WS_METHODS.k3RelayAccountSetApproval]: AuthRelayConfigureScope,
   [WS_METHODS.providerAuthRemoveMethod]: AuthProvidersManageScope,
   // An MCP sign-in stores a credential for the agent, as an account sign-in does.
   [WS_METHODS.providerMcpSignInStart]: AuthProvidersManageScope,
@@ -29,6 +43,9 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.serverReclaimDatabaseSpace]: AuthEnvironmentMaintainScope,
   [WS_METHODS.serverCheckOtlpEndpoint]: AuthSettingsWriteScope,
   [WS_METHODS.serverCheckSecretSource]: AuthSettingsWriteScope,
+  [WS_METHODS.legacyImportRun]: AuthSettingsWriteScope,
+  // Restarts the server, as an update does.
+  [WS_METHODS.legacyImportRestart]: AuthEnvironmentMaintainScope,
   // Listing models spends the stored API key, so only those who can choose a model may.
   [WS_METHODS.serverListTextGeneratorModels]: AuthSettingsWriteScope,
   [WS_METHODS.serverRefreshProviders]: AuthOrchestrationReadScope,

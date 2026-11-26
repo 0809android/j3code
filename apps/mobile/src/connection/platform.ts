@@ -26,6 +26,8 @@ import { appAtomRegistry } from "../state/atom-registry";
 import { mobileApplicationActiveWakeup } from "./app-state-wakeups";
 import * as EnvironmentOwnedDataCleanup from "./environment-owned-data-cleanup";
 import * as ConnectionStorage from "./storage";
+import * as K3RelayDeviceKeys from "./k3relayDeviceKeys";
+import * as K3RelayNotifications from "../features/agent-awareness/k3relayNotifications";
 
 function networkStatus(state: Network.NetworkState): "unknown" | "offline" | "online" {
   if (state.isConnected === false) {
@@ -190,10 +192,6 @@ const layerCapabilities = Layer.effectContext(
           bearerToken: Effect.succeedNone,
         }),
       ),
-      // The relay device id already persists in secure storage; analytics only sends its hash.
-      Context.add(ClientCapabilities.AnalyticsDevice, {
-        id: storage.loadOrCreateAgentAwarenessDeviceId.pipe(Effect.option),
-      }),
       Context.add(
         ClientCapabilities.RelayDeviceIdentity,
         ClientCapabilities.RelayDeviceIdentity.of({
@@ -264,9 +262,14 @@ const layerPlatformConnectionSource = Layer.succeed(
 
 const layerProvidedConnectionStorage = ConnectionStorage.layer.pipe(Layer.provide(Runtime.layer));
 const layerProvidedCapabilities = layerCapabilities.pipe(Layer.provide(Runtime.layer));
+const layerProvidedK3RelayNotifications = K3RelayNotifications.layer.pipe(
+  Layer.provide(Runtime.layer),
+);
 
 type ConnectionPlatformLayerSource =
   | typeof layerProvidedConnectionStorage
+  | typeof K3RelayDeviceKeys.layer
+  | typeof layerProvidedK3RelayNotifications
   | typeof Runtime.layer
   | typeof layerConnectivity
   | typeof layerWakeups
@@ -280,6 +283,8 @@ export const layer: Layer.Layer<
   Layer.Services<ConnectionPlatformLayerSource>
 > = Layer.mergeAll(
   layerProvidedConnectionStorage,
+  K3RelayDeviceKeys.layer,
+  layerProvidedK3RelayNotifications,
   Runtime.layer,
   layerConnectivity,
   layerWakeups,

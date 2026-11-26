@@ -17,8 +17,6 @@ import * as Stream from "effect/Stream";
 import { vi } from "vite-plus/test";
 
 vi.mock("electron", () => ({}));
-vi.mock("@clerk/electron", () => ({ createClerkBridge: vi.fn() }));
-vi.mock("@clerk/electron/storage", () => ({ storage: vi.fn() }));
 vi.mock("../ipc/DesktopIpcHandlers.ts", () => ({
   installDesktopIpcHandlers: () => Effect.void,
 }));
@@ -28,7 +26,6 @@ vi.mock("./DesktopStartupRecovery.ts", () => ({ listen: Effect.void }));
 import * as DesktopApp from "./DesktopApp.ts";
 import * as DesktopAppActivation from "./DesktopAppActivation.ts";
 import * as DesktopAppIdentity from "./DesktopAppIdentity.ts";
-import * as DesktopClerk from "./DesktopClerk.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopLegacyLocalStorage from "./DesktopLegacyLocalStorage.ts";
 import * as DesktopLifecycle from "./DesktopLifecycle.ts";
@@ -58,6 +55,7 @@ import * as DesktopCliCommand from "./DesktopCliCommand.ts";
 import * as DesktopCliShim from "./DesktopCliShim.ts";
 import * as DesktopClientSettings from "../settings/DesktopClientSettings.ts";
 import * as DesktopConnectionCatalogStore from "./DesktopConnectionCatalogStore.ts";
+import * as DesktopK3RelayDeviceKeys from "./DesktopK3RelayDeviceKeys.ts";
 import * as DesktopIpc from "../ipc/DesktopIpc.ts";
 import * as DesktopLocalEnvironmentAuth from "../backend/DesktopLocalEnvironmentAuth.ts";
 import * as DesktopManagedPolicy from "./DesktopManagedPolicy.ts";
@@ -101,6 +99,7 @@ const runStubbedDesktop = (stub: StubbedDesktop) =>
         } as DesktopAppIdentity.DesktopAppIdentity["Service"]),
         Effect.provideService(ElectronApp.ElectronApp, {
           setPath: () => Effect.void,
+          requestSingleInstanceLock: Effect.succeed(true),
           whenReady: stub.record("ready"),
         } as unknown as ElectronApp.ElectronApp["Service"]),
         Effect.provideService(ElectronDialog.ElectronDialog, {
@@ -137,9 +136,6 @@ const runStubbedDesktop = (stub: StubbedDesktop) =>
           register: Effect.void,
           relaunch: () => Effect.void,
         }),
-        Effect.provideService(DesktopClerk.DesktopClerk, {
-          configure: Effect.void,
-        } as DesktopClerk.DesktopClerk["Service"]),
         Effect.provideService(ElectronSafeStorage.ElectronSafeStorage, {
           selectedStorageBackend: Effect.succeedNone,
         } as unknown as ElectronSafeStorage.ElectronSafeStorage["Service"]),
@@ -209,6 +205,7 @@ const runStubbedDesktop = (stub: StubbedDesktop) =>
           Layer.mock(DesktopCliCommand.DesktopCliCommand, {}),
           Layer.mock(DesktopClientSettings.DesktopClientSettings, {}),
           Layer.mock(DesktopConnectionCatalogStore.DesktopConnectionCatalogStore, {}),
+          Layer.mock(DesktopK3RelayDeviceKeys.DesktopK3RelayDeviceKeys, {}),
           Layer.mock(DesktopIpc.DesktopIpc, {}),
           Layer.mock(DesktopLocalEnvironmentAuth.DesktopLocalEnvironmentAuth, {
             getBearerToken: stub
@@ -342,8 +339,8 @@ it.effect(
         baseDir,
         platform: "linux",
       } as DesktopEnvironment.DesktopEnvironment["Service"]);
-      const removedAppImage = path.join(baseDir, "T3-Code-0.1.6-x86_64.AppImage");
-      const updatedAppImage = path.join(baseDir, "T3-Code-0.1.7-x86_64.AppImage");
+      const removedAppImage = path.join(baseDir, "K3-Code-0.1.6-x86_64.AppImage");
+      const updatedAppImage = path.join(baseDir, "K3-Code-0.1.7-x86_64.AppImage");
       yield* fs.makeDirectory(path.dirname(launcher), { recursive: true });
       yield* fs.writeFileString(
         launcher,

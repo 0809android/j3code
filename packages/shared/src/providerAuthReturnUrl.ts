@@ -1,13 +1,22 @@
+import { hostedAppOrigin } from "./hostedApp.ts";
 import { isLoopbackHost } from "./preview.ts";
 
-export function providerAuthReturnUrl(value: string | undefined): string | undefined {
+/**
+ * Where a provider sign-in may send the browser back to: the desktop app, this machine, or the
+ * hosted app named by `hostedAppUrl`. With no hosted app configured, only the first two qualify.
+ */
+export function providerAuthReturnUrl(
+  value: string | undefined,
+  hostedAppUrl?: string | undefined,
+): string | undefined {
   if (!value) return undefined;
   try {
     const url = new URL(value);
-    const desktop = ["t3code:", "t3code-dev:"].includes(url.protocol) && url.host === "app";
+    const hostedOrigin = hostedAppOrigin(hostedAppUrl);
+    const desktop = ["k3code:", "k3code-dev:"].includes(url.protocol) && url.host === "app";
     const web =
       ["http:", "https:"].includes(url.protocol) &&
-      (isLoopbackHost(url.hostname) || url.origin === "https://app.t3.codes");
+      (isLoopbackHost(url.hostname) || (hostedOrigin !== undefined && url.origin === hostedOrigin));
     if (
       url.username ||
       url.password ||

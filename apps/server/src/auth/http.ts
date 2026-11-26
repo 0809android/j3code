@@ -19,6 +19,8 @@ import {
   EnvironmentScopeRequiredError,
   EnvironmentAuthenticatedAuth,
   EnvironmentAuthenticatedPrincipal,
+  K3RelayUnsupportedError,
+  type K3RelayUnsupportedFeature,
   mcpClientScopes,
 } from "@t3tools/contracts";
 import type { AuthEnvironmentScope, DpopFailureReason } from "@t3tools/contracts";
@@ -36,6 +38,13 @@ import { HttpServerRequest, HttpServerResponse } from "effect/http";
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 
 import * as EnvironmentAuth from "./EnvironmentAuth.ts";
+import {
+  classifyRequestTransport,
+  isRelayRequest,
+  relayDeviceIdOf,
+  transportAllowedByPolicy,
+} from "./transportSecurity.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import * as SessionStore from "./SessionStore.ts";
 import { traceAuthenticatedRelayRequest, traceRelayRequest } from "../cloud/traceRelayRequest.ts";
 import { deriveAuthClientMetadata } from "./utils.ts";
@@ -167,8 +176,14 @@ export function failEnvironmentNotFound(reason: EnvironmentResourceNotFoundReaso
  */
 export const authenticateMediaRequest =
   /* Request instrumentation already owns the span; keep this helper in that context. */
-  Effect.fnUntraced(function* (requiredScope: AuthEnvironmentScope) {
+  Effect.fnUntraced(function* (
+    requiredScope: AuthEnvironmentScope,
+    feature: K3RelayUnsupportedFeature = "media-ticket",
+  ) {
     const request = yield* HttpServerRequest.HttpServerRequest;
+    // Media routes take credentials in the URL and reach for the Node socket under the request;
+    // the relay bridge refuses them first, and so does this, whatever path led here.
+    if (isRelayRequest(request)) return yield* K3RelayUnsupportedError.of(feature);
     const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
     const session = yield* serverAuth.authenticateWebSocketUpgrade(request, "media").pipe(
       Effect.catch((error) =>
@@ -254,9 +269,32 @@ export const layerAuthenticatedAuth = Layer.effect(
   EnvironmentAuthenticatedAuth,
   Effect.gen(function* () {
     const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+    // Optional so narrow test runtimes without settings skip the check; the
+    // real server always provides it.
+    const settingsService = yield* Effect.serviceOption(ServerSettings.ServerSettingsService);
     return (httpEffect) =>
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
+        // The transport policy guards every authenticated environment request,
+        // not just the WebSocket upgrade.
+        if (Option.isSome(settingsService)) {
+          const settings = yield* settingsService.value.getSettings.pipe(Effect.orDie);
+          if (
+            !transportAllowedByPolicy(
+              classifyRequestTransport(request),
+              settings.remoteTransportPolicy,
+            )
+          ) {
+            return HttpServerResponse.jsonUnsafe(
+              {
+                code: "REMOTE_TRANSPORT_NOT_ALLOWED",
+                message:
+                  "This host only accepts remote connections over private end-to-end-encrypted transports (Tailscale or SSH). Connect over one of those, or change the policy on the host.",
+              },
+              { status: 403 },
+            );
+          }
+        }
         const startTime = yield* Clock.currentTimeNanos;
         const session = yield* serverAuth.authenticateHttpRequest(request).pipe(
           Effect.catchIf(EnvironmentAuth.isServerAuthCredentialError, (error) =>
@@ -423,6 +461,7 @@ export const layer = HttpApiBuilder.group(
                 proof.consume,
               );
             }
+            const relayDeviceId = relayDeviceIdOf(request);
             return yield* serverAuth.exchangeBootstrapCredentialForAccessToken(
               args.payload.subject_token,
               requestedScopes,
@@ -436,7 +475,10 @@ export const layer = HttpApiBuilder.group(
                   ...(args.payload.client_os ? { os: args.payload.client_os } : {}),
                 },
               }),
-              proof ? { proofKeyThumbprint: proof.thumbprint } : undefined,
+              {
+                ...(proof ? { proofKeyThumbprint: proof.thumbprint } : {}),
+                ...(relayDeviceId === undefined ? {} : { relayDeviceId }),
+              },
             );
           },
           traceRelayRequest,
@@ -474,7 +516,14 @@ export const layer = HttpApiBuilder.group(
             yield* annotateEnvironmentRequest(args.endpoint.name);
             const session = yield* EnvironmentAuthenticatedPrincipal;
             yield* appendCredentialResponseHeaders;
-            return yield* serverAuth.issueWebSocketTicket(session);
+            // A ticket without a route would also open the media routes; through the relay it
+            // opens the RPC socket only.
+            return yield* serverAuth.issueWebSocketTicket(
+              session,
+              isRelayRequest(yield* HttpServerRequest.HttpServerRequest)
+                ? { use: "rpc" }
+                : undefined,
+            );
           },
           Effect.catchIf(EnvironmentAuth.isServerAuthInternalError, (error) =>
             failEnvironmentInternal("websocket_ticket_issuance_failed", error),
@@ -487,6 +536,12 @@ export const layer = HttpApiBuilder.group(
           function* (args) {
             yield* annotateEnvironmentRequest(args.endpoint.name);
             const session = yield* EnvironmentAuthenticatedPrincipal;
+            if (
+              args.params.use === "media" &&
+              isRelayRequest(yield* HttpServerRequest.HttpServerRequest)
+            ) {
+              return yield* K3RelayUnsupportedError.of("media-ticket");
+            }
             yield* appendCredentialResponseHeaders;
             return yield* serverAuth.issueWebSocketTicket(session, { use: args.params.use });
           },

@@ -12,6 +12,7 @@ import { hasPendingMigrations, runMigrations } from "./Migrations.ts";
 import { initializeV2Database } from "./initializeV2Database.ts";
 import * as ServerConfig from "../config.ts";
 import * as ServerOwnership from "../serverOwnership.ts";
+import { applyStagedLegacyImport } from "../legacyImport/stagedImport.ts";
 
 const WAL_SIZE_LIMIT_BYTES = 128 * 1024 * 1024;
 
@@ -20,7 +21,7 @@ export class ServerOwnsDatabaseError extends Schema.TaggedError<ServerOwnsDataba
   { stateDir: Schema.String },
 ) {
   override get message(): string {
-    return `Another T3 Code process, usually a running server, owns ${this.stateDir}, and this CLI would change its database schema. Use the \`t3\` that matches the running server, or stop that server, then retry. The database was not changed.`;
+    return `Another K3 Code process, usually a running server, owns ${this.stateDir}, and this CLI would change its database schema. Use the \`t3\` that matches the running server, or stop that server, then retry. The database was not changed.`;
   }
 }
 
@@ -46,7 +47,7 @@ const damagedDatabaseError = (dbPath: string, cause: SqlError.SqlError) =>
     reason: new SqlError.UnknownError({
       cause,
       operation: "open",
-      message: `The T3 Code database at ${dbPath} is damaged or is not a SQLite database, so T3 Code cannot start. To recover, quit T3 Code, then move that file and any -wal and -shm files next to it out of the folder, or replace them with a backup. T3 Code creates a new database on the next start.`,
+      message: `The K3 Code database at ${dbPath} is damaged or is not a SQLite database, so K3 Code cannot start. To recover, quit K3 Code, then move that file and any -wal and -shm files next to it out of the folder, or replace them with a backup. K3 Code creates a new database on the next start.`,
     }),
   });
 
@@ -85,6 +86,11 @@ const makeLayerSetup = <E, R>(migrate: Effect.Effect<unknown, E, R>) =>
       // Keep statement journals and sort spills off the disk.
       // Large statements and open savepoints can increase peak memory use.
       yield* sql`PRAGMA temp_store = MEMORY;`;
+      // Give SQLite a 64 MiB page cache and 256 MiB memory-mapped I/O window
+      // (SQLite defaults to ~2 MiB cache and 0 mmap) to eliminate repeated pread syscalls
+      // on Apple Silicon unified memory during thread switches and search.
+      yield* sql`PRAGMA cache_size = -64000;`;
+      yield* sql`PRAGMA mmap_size = 268435456;`;
       // PASSIVE checkpoints retain peak WAL size until the last connection closes.
       yield* sql.unsafe(`PRAGMA journal_size_limit = ${WAL_SIZE_LIMIT_BYTES};`);
       yield* migrate;
@@ -115,7 +121,7 @@ const makeLayerFromPath = <E, R>(makeSetup: (dbPath: string) => Layer.Layer<neve
         writerWorker: true,
         spanAttributes: {
           "db.name": path.basename(dbPath),
-          "service.name": "t3code-server",
+          "service.name": "k3code-server",
         },
       }),
     ).pipe(
@@ -139,20 +145,23 @@ export const layerMemory = Layer.provideMerge(
   NodeSqliteClient.layer({ filename: ":memory:" }),
 );
 
+// Callers of `layerConfig` already hold server ownership (unlike `layerCliConfig`, where `applyStagedImport` is false).
 const makeLayerConfig = <E, R>(
   fromPath: (dbPath: string) => Layer.Layer<SqlClient.SqlClient, E, R>,
+  applyStagedImport = false,
 ) =>
   Layer.unwrap(
     Effect.gen(function* () {
-      const { dbPath } = yield* ServerConfig.ServerConfig;
+      const { dbPath, stateDir } = yield* ServerConfig.ServerConfig;
+      if (applyStagedImport) yield* applyStagedLegacyImport(stateDir, dbPath);
       yield* initializeV2Database(dbPath);
       return fromPath(dbPath);
     }),
   );
 
-export const layerConfig = makeLayerConfig(layerFromPath);
+export const layerConfig = makeLayerConfig(layerFromPath, true);
 
-/** For CLI commands: pending migrations run only while no server owns the T3 home. */
+/** For CLI commands: pending migrations run only while no server owns the K3 home. */
 export const layerCliConfig = makeLayerConfig(
   makeLayerFromPath(() => makeLayerSetup(runMigrationsAsOwner())),
 );

@@ -3,6 +3,9 @@ import {
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   EnvironmentHttpApi,
+  K3_RELAY_ASSET_ROUTE_PREFIX,
+  K3_RELAY_UPLOAD_ROUTE_PREFIX,
+  k3RelayUnsupportedResponse,
 } from "@t3tools/contracts";
 import { isDevProxiedPath } from "@t3tools/shared/devProxy";
 import { injectMcpAppCookieBootstrap, injectMcpAppThemeBootstrap } from "@t3tools/shared/mcpApp";
@@ -33,14 +36,21 @@ import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 import { OtlpTracer, OtlpSerialization } from "effect/observability";
 
 import * as ServerConfig from "./config.ts";
-import { ASSET_ROUTE_PREFIX, readMcpAppHtml, resolveAsset } from "./assets/AssetAccess.ts";
+import {
+  ASSET_ROUTE_PREFIX,
+  readMcpAppHtml,
+  resolveAsset,
+  resolveRelayAsset,
+} from "./assets/AssetAccess.ts";
 import { sourceControlMediaResponse } from "./assets/sourceControlMediaResponse.ts";
 import { statMediaFile, streamMediaFile, type OpenMediaFile } from "./assets/MediaFile.ts";
 import {
   ATTACHMENT_UPLOAD_ROUTE_PREFIX,
+  redeemRelayUploadHandle,
   storeAttachmentUpload,
   validateAttachmentUploadToken,
 } from "./assets/AttachmentUpload.ts";
+import { isRelayRequest } from "./auth/transportSecurity.ts";
 import * as BrowserTraceCollector from "./observability/BrowserTraceCollector.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import { traceRelayRequest } from "./cloud/traceRelayRequest.ts";
@@ -484,16 +494,29 @@ export const layerAssetRoute = HttpRouter.add(
       return HttpServerResponse.text("Bad Request", { status: 400 });
     }
 
-    const suffix = url.value.pathname.slice(`${ASSET_ROUTE_PREFIX}/`.length);
+    const relayed = isRelayRequest(request);
+    const relayHandlePrefix = `${K3_RELAY_ASSET_ROUTE_PREFIX.slice(ASSET_ROUTE_PREFIX.length + 1)}/`;
+    let suffix = url.value.pathname.slice(`${ASSET_ROUTE_PREFIX}/`.length);
+    const viaHandle = suffix.startsWith(relayHandlePrefix);
+    if (viaHandle !== relayed) {
+      // A handle is redeemed only through the relay; a signed URL never is (spec §12).
+      return relayed
+        ? HttpServerResponse.jsonUnsafe(k3RelayUnsupportedResponse("signed-url"), { status: 403 })
+        : HttpServerResponse.text("Not Found", { status: 404 });
+    }
+    if (viaHandle) suffix = suffix.slice(relayHandlePrefix.length);
     const separatorIndex = suffix.indexOf("/");
     if (separatorIndex <= 0) {
       return HttpServerResponse.text("Not Found", { status: 404 });
     }
 
-    const asset = yield* resolveAsset(
-      suffix.slice(0, separatorIndex),
-      suffix.slice(separatorIndex + 1),
-    );
+    const asset = viaHandle
+      ? yield* resolveRelayAsset(
+          request,
+          suffix.slice(0, separatorIndex),
+          suffix.slice(separatorIndex + 1),
+        )
+      : yield* resolveAsset(suffix.slice(0, separatorIndex), suffix.slice(separatorIndex + 1));
     if (!asset) {
       return HttpServerResponse.text("Not Found", { status: 404 });
     }
@@ -543,11 +566,23 @@ export const layerAttachmentUploadRoute = HttpRouter.add(
       return HttpServerResponse.text("Bad Request", { status: 400 });
     }
 
-    const token = url.value.pathname.slice(`${ATTACHMENT_UPLOAD_ROUTE_PREFIX}/`.length);
+    const relayed = isRelayRequest(request);
+    const relayHandlePrefix = `${K3_RELAY_UPLOAD_ROUTE_PREFIX.slice(ATTACHMENT_UPLOAD_ROUTE_PREFIX.length + 1)}/`;
+    let token = url.value.pathname.slice(`${ATTACHMENT_UPLOAD_ROUTE_PREFIX}/`.length);
+    const viaHandle = token.startsWith(relayHandlePrefix);
+    if (viaHandle !== relayed) {
+      // As with assets: a relay handle only through the relay, a signed URL never through it.
+      return relayed
+        ? HttpServerResponse.jsonUnsafe(k3RelayUnsupportedResponse("signed-url"), { status: 403 })
+        : HttpServerResponse.text("Not Found", { status: 404 });
+    }
+    if (viaHandle) token = token.slice(relayHandlePrefix.length);
     if (!token) {
       return HttpServerResponse.text("Not Found", { status: 404 });
     }
-    const claims = yield* validateAttachmentUploadToken(token);
+    const claims = viaHandle
+      ? yield* redeemRelayUploadHandle(request, token)
+      : yield* validateAttachmentUploadToken(token);
     if (!claims) {
       return HttpServerResponse.text("Not Found", { status: 404 });
     }

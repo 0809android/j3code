@@ -357,7 +357,7 @@ export const make = Effect.gen(function* () {
   );
 
   const stop = Effect.fn("AgentScope.stop")(function* (unit: string) {
-    if (!unit.startsWith("t3code-") || !unit.endsWith(".scope")) return;
+    if (!unit.startsWith("k3code-") || !unit.endsWith(".scope")) return;
     const scope = yield* systemd;
     if (scope === undefined) return;
     const state = yield* readScope(scope.systemctl, unit);
@@ -437,7 +437,7 @@ export const make = Effect.gen(function* () {
       const scope = yield* systemd;
       if (scope === undefined) return agentScopeCommand({ command: resolved, args });
       yield* scope.applyMemoryLimits;
-      const unit = `t3code-${name}-${NodeCrypto.randomUUID().slice(0, 8)}.scope`;
+      const unit = `k3code-${name}-${NodeCrypto.randomUUID().slice(0, 8)}.scope`;
       // A continuing shared scope cannot attribute a tool's OOM to one thread.
       // Clear the launch thread's previous scope instead.
       const continuing = shared === true && scope.supportsOomPolicy;

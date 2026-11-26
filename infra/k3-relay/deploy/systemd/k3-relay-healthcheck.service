@@ -1,0 +1,7 @@
+[Unit]
+Description=K3 relay outside health check
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/k3-relay/healthcheck.env
+ExecStart=@@RELAY_DIR@@/deploy/healthcheck.sh
