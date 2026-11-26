@@ -382,7 +382,11 @@ export function K3RelayAccountCard({
                     )}
                   >
                     {provider === "apple" && Platform.OS === "ios" ? (
-                      <SymbolView name="apple.logo" size={18} tintColor="#ffffff" />
+                      <SymbolView
+                        name={{ ios: "apple.logo", android: "lock" }}
+                        size={18}
+                        tintColor="#ffffff"
+                      />
                     ) : null}
                     <Text
                       className={cn(

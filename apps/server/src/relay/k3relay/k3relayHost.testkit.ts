@@ -442,7 +442,7 @@ export const startK3RelayTestRelayWith = (overrides: object) =>
         const record = (event: string, fields?: object) =>
           void logs.push(JSON.stringify({ event, ...fields }));
         const relay = createRelay({
-          config: { ...config, ...overrides },
+          config: { ...config, authTimeoutMs: 10_000, sessionSetupMs: 10_000, ...overrides },
           now: () => testClock.currentTimeMillisUnsafe() + clock.skewMs,
           logger: { info: record, error: record },
         });

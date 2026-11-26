@@ -1,4 +1,5 @@
 import {
+  type CloudAccountSource,
   createCloudAccountService,
   ManagedRelay,
   setManagedRelaySession,
@@ -26,13 +27,10 @@ import { removeCloudEnvironments } from "./cloud-drafts";
 import { clearConnectOnboardingRequest, requestConnectOnboarding } from "./connectOnboarding";
 import { resolveRelayClerkTokenOptions } from "./publicConfig";
 
-interface CloudAuthInstance {
+interface CloudAuthInstance extends CloudAccountSource {
   readonly session?: {
     readonly getToken: (options?: unknown) => Promise<string | null>;
   } | null;
-  readonly addListener: (
-    listener: (resources: { readonly user?: { readonly id?: string | null } | null }) => void,
-  ) => () => void;
 }
 
 type ClerkInstance = CloudAuthInstance;
