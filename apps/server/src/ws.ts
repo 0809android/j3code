@@ -17,6 +17,7 @@ import * as PeerThreadRelay from "./peer/PeerThreadRelay.ts";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Base64 from "effect/encoding/Base64";
+import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
@@ -161,6 +162,7 @@ import {
 import {
   buildBoundedThreadStreamSnapshot,
   decideThreadResume,
+  invalidatesInheritedRows,
   isThreadReplayRawPayloadSafe,
   threadReplayEncodedBytes,
   THREAD_RESUME_MAX_REPLAY_EVENTS,
@@ -199,6 +201,7 @@ import * as ServerSettings from "./serverSettings.ts";
 import { invalidateSettingsSecrets } from "./sourceControl/sourceControlHostSecrets.ts";
 import * as DatabaseStorage from "./persistence/DatabaseStorage.ts";
 import * as StorageCleanup from "./storageCleanup.ts";
+import * as ThreadHistoryTrim from "./orchestration-v2/ThreadHistoryTrim.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import { makePrepareTerminalLaunch } from "./workspace/restoreMissingWorktree.ts";
 import { terminalOutputStream, withOutputWindow } from "./terminal/OutputProtocol.ts";
@@ -890,6 +893,31 @@ export const subscribeOrchestrationV2Thread = Effect.fn("ws.orchestrationV2.subs
         .pipe(
           Stream.map(threadStreamEventItem),
           coalesceThreadLiveStream,
+          // Rows this fork inherits were trimmed at their source: send what it shows now.
+          // Per array, so an ordinary batch passes through as one message.
+          Stream.mapArrayEffect(
+            (
+              items,
+            ): Effect.Effect<
+              Arr.NonEmptyReadonlyArray<OrchestrationV2ThreadStreamItem>,
+              OrchestrationV2GetThreadProjectionError
+            > => {
+              const invalidates = (item: OrchestrationV2ThreadStreamItem) =>
+                item.kind === "event" && invalidatesInheritedRows(item.event, input.threadId);
+              if (!items.some(invalidates)) return Effect.succeed(items);
+              return Effect.forEach(
+                items,
+                (
+                  item,
+                ): Effect.Effect<
+                  OrchestrationV2ThreadStreamItem,
+                  OrchestrationV2GetThreadProjectionError
+                > => (invalidates(item) ? loadSnapshotItem() : Effect.succeed(item)),
+              ).pipe(
+                Effect.map((mapped) => (Arr.isReadonlyArrayNonEmpty(mapped) ? mapped : items)),
+              );
+            },
+          ),
           Stream.mapError(
             (cause) =>
               new OrchestrationV2GetThreadProjectionError({
@@ -933,7 +961,7 @@ export const subscribeOrchestrationV2Thread = Effect.fn("ws.orchestrationV2.subs
         ? Stream.make({ kind: "synchronized" as const })
         : Stream.empty;
 
-    const snapshotThenLive = Effect.fn("ws.orchestrationV2.threadSnapshotThenLive")(function* () {
+    const loadSnapshotItem = Effect.fn("ws.orchestrationV2.loadThreadSnapshotItem")(function* () {
       const useBoundedSnapshot = shouldUseBoundedThreadSnapshot(input);
       const snapshot = yield* (
         useBoundedSnapshot
@@ -969,9 +997,13 @@ export const subscribeOrchestrationV2Thread = Effect.fn("ws.orchestrationV2.subs
               projection: dedupeBodies ? dedupeSnapshotBodies(projection) : projection,
             };
           })();
+      return snapshotItem;
+    });
+    const snapshotThenLive = Effect.fn("ws.orchestrationV2.threadSnapshotThenLive")(function* () {
+      const snapshotItem = yield* loadSnapshotItem();
       return rpcInitialItems([snapshotItem]).pipe(
         Stream.concat(completionMarker),
-        Stream.concat(eventStreamFrom(snapshotSequence)),
+        Stream.concat(eventStreamFrom(snapshotItem.snapshotSequence)),
         withLiveDedupe,
       );
     });
@@ -1062,6 +1094,13 @@ export const subscribeOrchestrationV2Thread = Effect.fn("ws.orchestrationV2.subs
         return yield* snapshotThenLive();
       }
       const replay = coalesceLiveUpdatedEvents(replayed);
+      if (
+        replay.some(
+          (item) => item.kind === "event" && invalidatesInheritedRows(item.event, input.threadId),
+        )
+      ) {
+        return yield* snapshotThenLive();
+      }
       const plan = decideThreadResume({
         afterSequence: input.afterSequence,
         highWater,
@@ -1490,6 +1529,7 @@ export const layerWsRpc = (
       const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents;
       const storageCleanup = yield* StorageCleanup.StorageCleanup;
       const databaseStorage = yield* DatabaseStorage.DatabaseStorage;
+      const threadHistoryTrim = yield* ThreadHistoryTrim.ThreadHistoryTrim;
       const serverSettings = yield* ServerSettings.ServerSettingsService;
       // Resolved once: the identity key only changes through an explicit rotate.
       const e2eeIdentity = yield* Effect.serviceOption(ServerE2eeIdentity.ServerE2eeIdentity);
@@ -2691,6 +2731,10 @@ export const layerWsRpc = (
         [WS_METHODS.serverGetStorageCleanupReport]: () => storageCleanup.reports,
         [WS_METHODS.serverGetDatabaseStorage]: () => databaseStorage.status,
         [WS_METHODS.serverReclaimDatabaseSpace]: () => databaseStorage.requestReclaim,
+        [WS_METHODS.serverGetThreadHistoryTrim]: () => threadHistoryTrim.status,
+        [WS_METHODS.serverPreviewThreadHistoryTrim]: () =>
+          threadHistoryTrim.preview.pipe(Effect.orDie),
+        [WS_METHODS.serverTrimThreadHistory]: () => threadHistoryTrim.trimNow.pipe(Effect.orDie),
         [WS_METHODS.peerLinksList]: (_input) =>
           peerLinks.list.pipe(Effect.map((links) => ({ links }))),
         [WS_METHODS.peerLinksNames]: (_input) =>

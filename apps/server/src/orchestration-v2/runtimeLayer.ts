@@ -56,6 +56,7 @@ import * as ResourceCleanupService from "./ResourceCleanupService.ts";
 import * as RuntimePolicy from "./RuntimePolicy.ts";
 import * as RuntimeRequestService from "./RuntimeRequestService.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
+import * as ThreadHistoryTrim from "./ThreadHistoryTrim.ts";
 import * as PeerLinks from "../peer/PeerLinks.ts";
 import * as PeerMcpClient from "../peer/PeerMcpClient.ts";
 import * as WorkflowRuntime from "../workflows/WorkflowRuntime.ts";
@@ -458,6 +459,7 @@ export const layerProduction = Layer.mergeAll(
   layerAgentSessionScannerProvided,
   layerAgentSessionImporterProvided,
   EffectOutbox.layerPruneWorker.pipe(Layer.provide(EffectOutbox.layer)),
+  ThreadHistoryTrim.layer.pipe(Layer.provide(Layer.merge(layerEventSink, IdAllocator.layer))),
 ).pipe(
   Layer.provide(ResourceCleanupService.layer.pipe(Layer.provide(layerScheduledTaskProvided))),
   Layer.provideMerge(layerProjectService),
