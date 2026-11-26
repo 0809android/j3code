@@ -1243,7 +1243,7 @@ jobs:
             exit 1
           fi
 
-          router_url="${K3CODE_WEB_ROUTER_URL:-$K3CODE_HOSTED_APP_URL}"
+          router_url="${K3CODE_WEB_ROUTER_URL:-${K3CODE_HOSTED_APP_URL:-}}"
           if [[ "${{ needs.preflight.outputs.release_channel }}" == "stable" ]]; then
             channel_name="latest"
           else
@@ -1324,7 +1324,7 @@ jobs:
             exit 1
           fi
 
-          router_url="${K3CODE_WEB_ROUTER_URL:-$K3CODE_HOSTED_APP_URL}"
+          router_url="${K3CODE_WEB_ROUTER_URL:-${K3CODE_HOSTED_APP_URL:-}}"
           latest_domain="${K3CODE_WEB_LATEST_DOMAIN:-}"
           nightly_domain="${K3CODE_WEB_NIGHTLY_DOMAIN:-}"
           router_domain="${router_url#http://}"

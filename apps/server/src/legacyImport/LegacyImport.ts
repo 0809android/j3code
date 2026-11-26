@@ -100,6 +100,12 @@ const maxMigrationId = (databasePath: string) => {
   }
 };
 
+const decodeUnknownJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown));
+const decodeServerSettingsPatchOption = Schema.decodeUnknownOption(ServerSettingsPatch);
+const decodeServerSettingsPatch = Schema.decodeEffect(ServerSettingsPatch);
+const decodeProviderInstanceConfigMap = Schema.decodeUnknownOption(ProviderInstanceConfigMap);
+const isLegacyImportError = Schema.is(LegacyImportError);
+
 const make = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -125,7 +131,7 @@ const make = Effect.gen(function* () {
 
   const readJsonObject = (file: string) =>
     fs.readFileString(file).pipe(
-      Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))),
+      Effect.flatMap(decodeUnknownJson),
       Effect.map((value) =>
         typeof value === "object" && value !== null && !Array.isArray(value)
           ? Option.some(value as Record<string, unknown>)
@@ -166,18 +172,18 @@ const make = Effect.gen(function* () {
   const importSettings = Effect.gen(function* () {
     const legacy = yield* readJsonObject(sourceFile("settings.json"));
     if (Option.isSome(legacy)) {
-      const decode = Schema.decodeUnknownOption(ServerSettingsPatch);
       const patch: Record<string, unknown> = {};
       // Decoded key by key, so one setting this version no longer accepts skips only itself.
       for (const key of SETTINGS_KEYS) {
-        if (key in legacy.value && Option.isSome(decode({ [key]: legacy.value[key] }))) {
+        if (
+          key in legacy.value &&
+          Option.isSome(decodeServerSettingsPatchOption({ [key]: legacy.value[key] }))
+        ) {
           patch[key] = legacy.value[key];
         }
       }
       if (Object.keys(patch).length > 0) {
-        yield* serverSettings.updateSettings(
-          yield* Schema.decodeEffect(ServerSettingsPatch)(patch),
-        );
+        yield* serverSettings.updateSettings(yield* decodeServerSettingsPatch(patch));
       }
     }
 
@@ -203,9 +209,7 @@ const make = Effect.gen(function* () {
   const importProviders = Effect.gen(function* () {
     const legacy = yield* readJsonObject(sourceFile("settings.json"));
     if (Option.isNone(legacy)) return;
-    const instances = Schema.decodeUnknownOption(ProviderInstanceConfigMap)(
-      legacy.value.providerInstances ?? {},
-    );
+    const instances = decodeProviderInstanceConfigMap(legacy.value.providerInstances ?? {});
     if (Option.isNone(instances)) return;
     for (const [instanceId, instance] of Object.entries(instances.value)) {
       yield* serverSettings.updateProviderInstance({
@@ -222,14 +226,17 @@ const make = Effect.gen(function* () {
     const source = sourceFile(DATABASE_FILENAME);
     yield* fs.makeDirectory(stagingDir, { recursive: true });
     yield* fs.remove(stagedDatabase, { force: true });
-    const sessionsError = (cause: unknown) => new LegacyImportError({ operation: "sessions", cause });
+    const sessionsError = (cause: unknown) =>
+      new LegacyImportError({ operation: "sessions", cause });
     // An older app cannot run a database a newer app has migrated.
     const compatible = yield* Effect.try({
       try: () => maxMigrationId(source) <= maxMigrationId(config.dbPath),
       catch: sessionsError,
     });
     if (!compatible) {
-      return yield* sessionsError("The T3 Code data is newer than this app. Update this app first.");
+      return yield* sessionsError(
+        "The T3 Code data is newer than this app. Update this app first.",
+      );
     }
     yield* Effect.try({
       try: () => {
@@ -257,9 +264,7 @@ const make = Effect.gen(function* () {
     }
   }).pipe(
     Effect.mapError((cause) =>
-      Schema.is(LegacyImportError)(cause)
-        ? cause
-        : new LegacyImportError({ operation: "sessions", cause }),
+      isLegacyImportError(cause) ? cause : new LegacyImportError({ operation: "sessions", cause }),
     ),
   );
 

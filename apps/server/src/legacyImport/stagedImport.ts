@@ -20,23 +20,23 @@ export const hasStagedLegacyImport = Effect.fn("LegacyImport.hasStaged")(functio
  * Before the database opens: a snapshot staged by the import replaces it, and the previous
  * files stay beside it so nothing is lost.
  */
-export const applyStagedLegacyImport = Effect.fn("LegacyImport.applyStaged")(function* (
-  stateDir: string,
-  databasePath: string,
-) {
-  const fs = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
-  const stagingDir = path.join(stateDir, STAGING_DIRNAME);
-  const staged = path.join(stagingDir, DATABASE_FILENAME);
-  if (!(yield* fs.exists(staged))) return;
+export const applyStagedLegacyImport = Effect.fn("LegacyImport.applyStaged")(
+  function* (stateDir: string, databasePath: string) {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const stagingDir = path.join(stateDir, STAGING_DIRNAME);
+    const staged = path.join(stagingDir, DATABASE_FILENAME);
+    if (!(yield* fs.exists(staged))) return;
 
-  const stamp = DateTime.formatIso(yield* DateTime.now).replaceAll(":", "-");
-  for (const suffix of ["", "-wal", "-shm"]) {
-    const current = `${databasePath}${suffix}`;
-    if (yield* fs.exists(current)) {
-      yield* fs.rename(current, `${databasePath}.before-import-${stamp}${suffix}`);
+    const stamp = DateTime.formatIso(yield* DateTime.now).replaceAll(":", "-");
+    for (const suffix of ["", "-wal", "-shm"]) {
+      const current = `${databasePath}${suffix}`;
+      if (yield* fs.exists(current)) {
+        yield* fs.rename(current, `${databasePath}.before-import-${stamp}${suffix}`);
+      }
     }
-  }
-  yield* fs.rename(staged, databasePath);
-  yield* fs.remove(stagingDir, { recursive: true, force: true });
-}, Effect.ignoreCause({ log: true }));
+    yield* fs.rename(staged, databasePath);
+    yield* fs.remove(stagingDir, { recursive: true, force: true });
+  },
+  Effect.ignoreCause({ log: true }),
+);

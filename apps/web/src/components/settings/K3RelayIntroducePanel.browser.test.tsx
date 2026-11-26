@@ -39,9 +39,11 @@ describe("K3RelayIntroduceView", () => {
       />,
     );
     const compare = screen.getByTestId("k3relay-introduce-compare");
-    await expect.element(compare).toHaveTextContent("New tablet wants to join Studio, Laptop");
-    await expect.element(compare).toHaveTextContent("K7QM-2XFD");
-    await expect.element(compare).toHaveTextContent("did not reach Server");
+    await expect
+      .element(compare.getByText(/New tablet wants to join Studio, Laptop/))
+      .toBeVisible();
+    await expect.element(compare.getByText("K7QM-2XFD")).toBeVisible();
+    await expect.element(compare.getByText(/did not reach Server/)).toBeVisible();
     expect(onApprove).not.toHaveBeenCalled();
     await screen.getByRole("button", { name: "Approve" }).click();
     expect(onApprove).toHaveBeenCalledTimes(1);

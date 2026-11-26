@@ -131,7 +131,7 @@ export function K3RelayPairingView({
             className="flex items-center justify-center gap-2 text-xs text-muted-foreground"
             role="status"
           >
-            <Spinner className="size-3" />
+            <Spinner aria-hidden className="size-3" />
             <T>Waiting for the host to approve…</T>
           </p>
         </div>

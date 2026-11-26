@@ -24,11 +24,11 @@ describe("hasCloudPublicConfig", () => {
     });
 
     it.each(["https://example.com", "https://nightly.app.example.com:443"])(
-      "enables production auth on the configured root and subdomains: %s",
+      "keeps hosted Clerk auth disabled even on configured domains: %s",
       (origin) => {
         vi.stubGlobal("window", { location: new URL(origin) });
 
-        expect(hasCloudPublicConfig()).toBe(true);
+        expect(hasCloudPublicConfig()).toBe(false);
       },
     );
 
@@ -60,19 +60,19 @@ describe("hasCloudPublicConfig", () => {
     );
 
     it.each([
-      ["https://tenant.clerk.accounts.dev", true],
+      ["https://tenant.clerk.accounts.dev", false],
       ["https://other.clerk.accounts.dev", false],
-    ])("keeps a provider hostname scoped to its own instance: %s", (origin, expected) => {
+    ])("keeps Clerk provider origins disabled: %s", (origin, expected) => {
       vi.stubEnv("VITE_CLERK_PUBLISHABLE_KEY", `pk_live_${btoa("tenant.clerk.accounts.dev$")}`);
       vi.stubGlobal("window", { location: new URL(origin) });
 
       expect(hasCloudPublicConfig()).toBe(expected);
     });
 
-    it("keeps production keys available in the Electron auth shell", () => {
+    it("keeps Clerk keys disabled in the Electron shell", () => {
       vi.stubGlobal("window", { location: new URL("file:///app/index.html"), desktopBridge: {} });
 
-      expect(hasCloudPublicConfig()).toBe(true);
+      expect(hasCloudPublicConfig()).toBe(false);
     });
   });
 });

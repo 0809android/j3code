@@ -1,9 +1,9 @@
 import type { DesktopBridge, DesktopUpdateState } from "@t3tools/contracts";
-import { K3_NEW_ISSUE_URL, K3_RELEASES_URL } from "@t3tools/shared/projectLinks";
 
 const FALLBACK_TRIAGE_COMMAND = "npx @kinocode/k3code triage";
-const DOWNLOAD_URL = K3_RELEASES_URL;
-const ISSUE_URL = K3_NEW_ISSUE_URL;
+// Keep bootError free of workspace runtime imports so isolated bootstrap bundles run standalone.
+const DOWNLOAD_URL = "https://github.com/kinocode-jp/k3code/releases";
+const ISSUE_URL = "https://github.com/kinocode-jp/k3code/issues/new";
 const LAST_FAILURE_KEY = "k3code:boot-failed-at";
 const REPEAT_FAILURE_MS = 5 * 60_000;
 const MAX_CAUSES = 3;

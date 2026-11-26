@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { userEvent } from "vite-plus/test/browser";
 
 import { render } from "../../../test/render";
+import "~/index.css";
 import { type K3RelaySettingsActions, K3RelaySettingsView } from "./K3RelaySettings";
 
 const NOW = 1_800_000_000_000;
@@ -66,8 +67,8 @@ describe("K3RelaySettingsView", () => {
       />,
     );
     const pending = screen.getByTestId("k3relay-pending");
-    await expect.element(pending).toHaveTextContent("Kino's phone wants to connect");
-    await expect.element(pending).toHaveTextContent("K7QM-2XFD");
+    await expect.element(pending.getByText(/Kino's phone wants to connect/)).toBeVisible();
+    await expect.element(pending.getByText("K7QM-2XFD")).toBeVisible();
     await expect
       .element(pending.getByText(/is in your hands and shows this exact code/))
       .toBeVisible();
@@ -309,8 +310,10 @@ describe("K3RelaySettingsView", () => {
       />,
     );
     await expect
-      .element(screen.getByTestId("k3relay-introduction"))
-      .toHaveTextContent("Phone is introducing New tablet");
+      .element(
+        screen.getByTestId("k3relay-introduction").getByText(/Phone is introducing New tablet/),
+      )
+      .toBeVisible();
     await expect
       .element(screen.getByTestId("k3relay-device-introduced"))
       .toHaveTextContent("Added by introduction from Phone");
