@@ -37,6 +37,7 @@ export const applyStagedLegacyImport = Effect.fn("LegacyImport.applyStaged")(
     }
     yield* fs.rename(staged, databasePath);
     yield* fs.remove(stagingDir, { recursive: true, force: true });
+    yield* Effect.logInfo("Applied staged T3 Code database import", { databasePath });
   },
   Effect.ignoreCause({ log: true }),
 );

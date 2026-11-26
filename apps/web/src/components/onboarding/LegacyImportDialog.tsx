@@ -4,14 +4,15 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import type { EnvironmentId, LegacyImportKind } from "@t3tools/contracts";
+import type { EnvironmentId, LegacyImportKind, LegacyImportScanResult } from "@t3tools/contracts";
 import { ClientSettingsPatch } from "@t3tools/contracts/settings";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import { AsyncResult } from "effect/reactivity";
+import { AsyncResult, type AtomRegistry } from "effect/reactivity";
 import { T, useGT } from "gt-react";
-import { useContext, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 
+import { isElectron } from "../../env";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { updateClientSettings } from "../../hooks/useSettings";
 import { legacyImportRestart, legacyImportRun, legacyImportScan } from "../../state/legacyImport";
@@ -30,7 +31,69 @@ import {
 
 const scanAtom = (environmentId: EnvironmentId) => legacyImportScan({ environmentId, input: {} });
 
+const SERVER_SHUTDOWN_DELAY_MS = 750;
+const RESTART_POLL_INTERVAL_MS = 300;
+const RESTART_TIMEOUT_MS = 20_000;
+
 const megabytes = (bytes: number) => Math.max(1, Math.round(bytes / (1024 * 1024)));
+
+function waitForLegacyImportApplied(
+  registry: AtomRegistry.AtomRegistry,
+  atom: ReturnType<typeof scanAtom>,
+  signal: AbortSignal,
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (signal.aborted) {
+      resolve(false);
+      return;
+    }
+    let settled = false;
+    let readyToCheck = false;
+    let pollTimer: number | undefined;
+
+    const finish = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(delayTimer);
+      window.clearTimeout(timeoutTimer);
+      if (pollTimer !== undefined) window.clearInterval(pollTimer);
+      unsubscribe();
+      signal.removeEventListener("abort", onAbort);
+      resolve(ok);
+    };
+
+    const check = (result: AsyncResult.AsyncResult<LegacyImportScanResult, unknown>) => {
+      if (!readyToCheck) return;
+      if (!result.waiting && result._tag === "Success" && !result.value.sessionsStaged) {
+        finish(true);
+      }
+    };
+
+    const onAbort = () => finish(false);
+    signal.addEventListener("abort", onAbort);
+
+    const unsubscribe = registry.subscribe(atom, check);
+    const delayTimer = window.setTimeout(() => {
+      readyToCheck = true;
+      const current = registry.get(atom);
+      check(current);
+      if (!settled && !current.waiting) {
+        registry.refresh(atom);
+      }
+      if (!settled) {
+        pollTimer = window.setInterval(() => {
+          const latest = registry.get(atom);
+          check(latest);
+          if (!settled && !latest.waiting) {
+            registry.refresh(atom);
+          }
+        }, RESTART_POLL_INTERVAL_MS);
+      }
+    }, SERVER_SHUTDOWN_DELAY_MS);
+
+    const timeoutTimer = window.setTimeout(() => finish(false), RESTART_TIMEOUT_MS);
+  });
+}
 
 /** Reads the other install's device-local settings key by key, so one stale key skips only itself. */
 function decodeClientSettings(settings: Readonly<Record<string, unknown>>) {
@@ -58,10 +121,12 @@ export function LegacyImportDialog({
   environmentId,
   open,
   onOpenChange,
+  onRestarted,
 }: {
   readonly environmentId: EnvironmentId;
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
+  readonly onRestarted?: () => void;
 }) {
   const gt = useGT();
   const registry = useContext(RegistryContext);
@@ -70,6 +135,10 @@ export function LegacyImportDialog({
   const restart = useAtomCommand(legacyImportRestart, { reportFailure: false });
   const [unchecked, setUnchecked] = useState<ReadonlySet<LegacyImportKind>>(new Set());
   const [outcome, setOutcome] = useState<Outcome>({ _tag: "idle" });
+  const restartAbortRef = useRef<AbortController | null>(null);
+
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- aborts any pending restart wait when the dialog unmounts
+  useEffect(() => () => restartAbortRef.current?.abort(), []);
 
   const available = (scan?.items ?? []).filter((item) => item.available);
   const chosen = available.filter((item) => !unchecked.has(item.kind));
@@ -79,6 +148,12 @@ export function LegacyImportDialog({
     settings: gt("Settings and keyboard shortcuts"),
     providers: gt("Provider settings"),
     sessions: gt("Sessions and history"),
+  };
+
+  const close = () => {
+    if (busy) return;
+    setOutcome({ _tag: "idle" });
+    onOpenChange(false);
   };
 
   const startImport = async () => {
@@ -108,14 +183,60 @@ export function LegacyImportDialog({
   };
 
   const restartNow = async () => {
+    restartAbortRef.current?.abort();
+    const controller = new AbortController();
+    restartAbortRef.current = controller;
+
     setOutcome({ _tag: "restarting" });
-    await restart({ environmentId, input: {} });
+    const result = await restart({ environmentId, input: {} });
+    if (controller.signal.aborted) return;
+    if (result._tag !== "Success") {
+      if (isAtomCommandInterrupted(result)) {
+        setOutcome({ _tag: "done", restartRequired: true });
+        return;
+      }
+      setOutcome({
+        _tag: "failed",
+        message: thrownErrorMessage(squashAtomCommandFailure(result)) ?? gt("Unknown error."),
+      });
+      return;
+    }
+    if (!result.value.restarting) {
+      registry.refresh(scanAtom(environmentId));
+      setOutcome({ _tag: "done", restartRequired: true });
+      return;
+    }
+
+    const restarted = await waitForLegacyImportApplied(
+      registry,
+      scanAtom(environmentId),
+      controller.signal,
+    );
+    if (controller.signal.aborted) return;
+    if (!restarted) {
+      registry.refresh(scanAtom(environmentId));
+      setOutcome({ _tag: "done", restartRequired: true });
+      return;
+    }
+
+    onOpenChange(false);
+    if (onRestarted !== undefined) {
+      onRestarted();
+    } else {
+      window.location.reload();
+    }
   };
 
   const done = outcome._tag === "done" || outcome._tag === "restarting";
 
   return (
-    <Dialog open={open} onOpenChange={(next) => (busy ? undefined : onOpenChange(next))}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) close();
+        else onOpenChange(next);
+      }}
+    >
       <DialogPopup className="w-full sm:w-[30rem]">
         <DialogHeader>
           <DialogTitle>{gt("Import from T3 Code")}</DialogTitle>
@@ -195,10 +316,12 @@ export function LegacyImportDialog({
           </DialogPanel>
         ) : null}
         <DialogFooter>
-          {outcome._tag === "done" && outcome.restartRequired && scan?.canRestart === true ? (
+          {outcome._tag === "restarting" ? (
+            <Button disabled>{gt("Restarting…")}</Button>
+          ) : outcome._tag === "done" && outcome.restartRequired && scan?.canRestart === true ? (
             <Button onClick={() => void restartNow()}>{gt("Restart now")}</Button>
           ) : null}
-          <Button variant="outline" disabled={busy} onClick={() => onOpenChange(false)}>
+          <Button variant="outline" disabled={busy} onClick={close}>
             {done ? gt("Close") : gt("Skip")}
           </Button>
           {!done && available.length > 0 ? (
@@ -228,6 +351,15 @@ export function LegacyImportPrompt({ environmentId }: { readonly environmentId: 
       open={hasData && !prompted}
       onOpenChange={(open) => {
         if (!open) setPrompted(true);
+      }}
+      onRestarted={() => {
+        setPrompted(true);
+        if (isElectron) {
+          window.location.hash = "#/";
+          window.location.reload();
+        } else {
+          window.location.replace("/");
+        }
       }}
     />
   );
