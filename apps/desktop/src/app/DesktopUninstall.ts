@@ -7,6 +7,7 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 import {
   K3_LINUX_SYSTEMD_UNITS,
   K3_MAC_LAUNCH_AGENT_LABELS,
+  buildWindowsWaitAndRemoveCommand,
   collectK3SystemPaths,
   filterSafeRemovalPaths,
   isK3HomeDirectory,
@@ -180,8 +181,6 @@ const POSIX_CLEANUP_SCRIPT = [
   "done",
 ].join("\n");
 
-const WINDOWS_PID_WAIT_SECONDS = 15;
-
 /** schtasks invocations that stop, disable, and unregister K3 Code's Windows background service. */
 export function windowsServiceTaskCommands(
   taskName: string,
@@ -193,24 +192,18 @@ export function windowsServiceTaskCommands(
   ];
 }
 
-/**
- * The cmd.exe command line that waits (up to 15 seconds) for `pid` to exit and then deletes each
- * `K3_UNINSTALL_TARGET_<n>` environment path. Only a tasklist line naming the PID keeps the wait
- * going, so a localized "no tasks" message ends it.
- */
+/** The cmd.exe command line that waits for `pid` to exit, then deletes each target path. */
 export function buildWindowsCleanupCommand(input: {
   readonly pid: number;
   readonly targetCount: number;
 }): string {
-  const waitStep = `for /l %i in (1,1,${WINDOWS_PID_WAIT_SECONDS}) do (tasklist /FI "PID eq ${input.pid}" /NH 2>nul | findstr /C:" ${input.pid} " >nul && ping -n 2 127.0.0.1 >nul)`;
-  const deleteSteps: Array<string> = [];
-  for (let index = 0; index < input.targetCount; index += 1) {
-    const key = `K3_UNINSTALL_TARGET_${index}`;
-    deleteSteps.push(
-      `if exist "%${key}%" (rmdir /s /q "%${key}%" 2>nul || del /f /q "%${key}%" 2>nul)`,
-    );
-  }
-  return `"${waitStep} & ping -n 2 127.0.0.1 >nul & ${deleteSteps.join(" & ")}"`;
+  return buildWindowsWaitAndRemoveCommand({
+    pid: input.pid,
+    pathEnvNames: Array.from(
+      { length: input.targetCount },
+      (_, index) => `K3_UNINSTALL_TARGET_${index}`,
+    ),
+  });
 }
 
 /**

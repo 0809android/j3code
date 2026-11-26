@@ -12,6 +12,7 @@ import * as Schema from "effect/Schema";
 import { Command, Flag, GlobalFlag, Prompt } from "effect/cli";
 
 import {
+  buildWindowsWaitAndRemoveCommand,
   collectK3SystemPaths,
   filterSafeRemovalPaths,
   isK3HomeDirectory,
@@ -26,6 +27,7 @@ import {
   readPosixLauncherTarget,
   resolveLauncherPath,
 } from "../cloud/pinnedRuntime.ts";
+import { readPersistedServerRuntimeState } from "../serverRuntimeState.ts";
 import { stateDirOwned } from "../serviceLauncher.ts";
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
 import * as CliService from "./service.ts";
@@ -193,8 +195,9 @@ export const findRecordedLaunchers = Effect.fn("cli.uninstall.find_recorded_laun
   return owned;
 });
 
-// cmd.exe needs verbatim quoting and a literal path, with delayed expansion disabled.
-export function spawnWindowsRemoval(comspec: string, dir: string) {
+// cmd.exe needs verbatim quoting and a literal path, with delayed expansion disabled. The shell
+// waits for `pid` (this CLI) to exit before deleting.
+export function spawnWindowsRemoval(comspec: string, dir: string, pid: number) {
   return NodeChildProcess.spawn(
     comspec,
     [
@@ -202,7 +205,7 @@ export function spawnWindowsRemoval(comspec: string, dir: string) {
       "/v:off",
       "/s",
       "/c",
-      '"ping -n 3 127.0.0.1 >nul & rmdir /s /q "%T3_UNINSTALL_RUNTIME%""',
+      buildWindowsWaitAndRemoveCommand({ pid, pathEnvNames: ["T3_UNINSTALL_RUNTIME"] }),
     ],
     {
       env: { ...process.env, T3_UNINSTALL_RUNTIME: dir },
@@ -286,22 +289,11 @@ const planUninstall = Effect.fn("cli.uninstall.plan")(function* (input: {
 const readServiceManaged = Effect.fn("cli.uninstall.read_service_managed")(function* (
   baseDir: string,
 ) {
-  const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const text = yield* fs
-    .readFileString(path.join(baseDir, "userdata", "server-runtime.json"))
-    .pipe(Effect.orElseSucceed(() => ""));
-  try {
-    const record: unknown = JSON.parse(text);
-    return (
-      typeof record === "object" &&
-      record !== null &&
-      "serviceManaged" in record &&
-      record.serviceManaged === true
-    );
-  } catch {
-    return false;
-  }
+  const state = yield* readPersistedServerRuntimeState(
+    path.join(baseDir, "userdata", "server-runtime.json"),
+  );
+  return Option.isSome(state) && state.value.serviceManaged === true;
 });
 
 /**
@@ -319,9 +311,13 @@ export const ensureNoRunningServer = Effect.fn("cli.uninstall.ensure_no_running_
       fs.exists(path.join(stateDir, "server-runtime.json")),
     ]).pipe(Effect.orElseSucceed(() => [false, false]));
     if (!traces.some(Boolean)) return;
-    const owned = yield* Effect.tryPromise(() => stateDirOwned(input.baseDir)).pipe(
-      Effect.orElseSucceed(() => false),
-    );
+    const owned = yield* Effect.tryPromise({
+      try: () => stateDirOwned(input.baseDir),
+      catch: (cause) =>
+        new CliUninstallError({
+          reason: `Could not tell whether K3 Code is running for ${input.baseDir}: ${String(cause)}. Nothing was removed.`,
+        }),
+    });
     if (!owned) return;
     if (input.serviceWillBeRemoved && (yield* readServiceManaged(input.baseDir))) return;
     return yield* new CliUninstallError({
@@ -510,7 +506,7 @@ const runUninstall = Effect.fn("cli.uninstall.run")(function* (input: {
     // Windows refuses to unlink this running executable; a detached shell removes it after exit.
     if (platform === "win32") {
       const comspec = environment["ComSpec"] ?? environment["COMSPEC"] ?? "cmd.exe";
-      yield* awaitDetachedSpawn(() => spawnWindowsRemoval(comspec, dirToRemove)).pipe(
+      yield* awaitDetachedSpawn(() => spawnWindowsRemoval(comspec, dirToRemove, process.pid)).pipe(
         Effect.matchEffect({
           onSuccess: () => Console.log(`${dirToRemove} will be removed once the CLI exits.`),
           onFailure: () =>
