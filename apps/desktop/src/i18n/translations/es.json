@@ -72,7 +72,7 @@
   "bd6818c7f005654c": "Actualización lista",
   "e9ca999de6f2274a": "Una nueva versión de K3 Code está lista para instalarse.",
   "35eeed2f4ff67f4a": "K3 Code {version} está listo para instalarse.",
-  "73ff9d977c2ec6ee": "K3 Code se reiniciará para instalarla. Las tareas en ejecución se interrumpirán.",
+  "a37ea30e4318f130": "K3 Code se reiniciará para instalarla. Los turnos en ejecución se pausan primero y se reanudan tras el reinicio.",
   "2f0a8211a72e29aa": "Reiniciar",
   "116a21f6cc215e5f": "Error al buscar actualizaciones",
   "32c88cd9421abf33": "No se pudo buscar actualizaciones.",

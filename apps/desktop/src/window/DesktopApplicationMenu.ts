@@ -129,7 +129,11 @@ const checkForUpdatesFromMenu = Effect.gen(function* () {
         version === null
           ? m(msg("A new version of K3 Code is ready to install."))
           : m(msg("K3 Code {version} is ready to install."), { version }),
-      detail: m(msg("K3 Code will restart to install it. Any running tasks will be interrupted.")),
+      detail: m(
+        msg(
+          "K3 Code will restart to install it. Running turns pause first and resume after the restart.",
+        ),
+      ),
       buttons: [m(msg("Restart", { $context: "button, restarts the app" })), m(msg("Later"))],
       defaultId: 0,
       cancelId: 1,
