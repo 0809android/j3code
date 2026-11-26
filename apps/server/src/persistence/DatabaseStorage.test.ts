@@ -199,3 +199,19 @@ it.effect(
       yield* Deferred.await(restarted);
     }).pipe(Effect.provide(testConfig.pipe(Layer.provideMerge(NodeServices.layer)))),
 );
+
+it("drains a reclaim backlog in seconds, but backs off when a pass frees nothing", () => {
+  const pages = (reclaimableBytes: number, incrementalVacuum = true) => ({
+    reclaimableBytes,
+    incrementalVacuum,
+  });
+  // Progress with pages left over keeps the short interval.
+  assert.equal(DatabaseStorage.reclaimDelay(pages(8192), pages(4096)), "5 seconds");
+  // A failed or stuck incremental_vacuum leaves the count unchanged.
+  assert.equal(DatabaseStorage.reclaimDelay(pages(4096), pages(4096)), "1 minute");
+  // Nothing left, or a database that does not shrink incrementally, is the usual minute.
+  assert.equal(DatabaseStorage.reclaimDelay(pages(4096), pages(0)), "1 minute");
+  assert.equal(DatabaseStorage.reclaimDelay(pages(8192, false), pages(4096, false)), "1 minute");
+  // A pass whose pages could not be read has nothing to compare, so it does not spin.
+  assert.equal(DatabaseStorage.reclaimDelay(pages(4096), null), "1 minute");
+});

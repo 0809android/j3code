@@ -512,7 +512,21 @@ const make = Effect.gen(function* () {
             nodeIds: nodeIds.flatMap((row) => (nodes.has(row.id) ? [row.id] : [])),
           },
         });
-        // Each fork's revision moves with the rows it inherits; its copy stays a few bytes.
+        return events;
+      }),
+    );
+    return { outcome, removed };
+  });
+
+  /**
+   * Moves each live fork's revision once per thread, after its last page: every copy makes a
+   * subscribed fork re-read and resend its whole snapshot, so one per page would repeat that.
+   */
+  const copyToForks = Effect.fn("ThreadHistoryTrim.copyToForks")(function* (threadId: ThreadId) {
+    yield* eventSink.writeBuilt(
+      Effect.gen(function* () {
+        const occurredAt = yield* DateTime.now;
+        const events: Array<OrchestrationV2DomainEvent> = [];
         for (const { id: fork } of yield* readForks(threadId)) {
           events.push({
             id: yield* ids.allocate.event({ threadId: fork }),
@@ -525,7 +539,6 @@ const make = Effect.gen(function* () {
         return events;
       }),
     );
-    return { outcome, removed };
   });
 
   const trimThread = Effect.fn("ThreadHistoryTrim.trimThread")(function* (
@@ -539,13 +552,18 @@ const make = Effect.gen(function* () {
     ];
     let itemCount = 0;
     let bytes = 0;
+    let removedAny = false;
     for (let offset = 0; offset < rows.length; offset += DELETE_PAGE_SIZE) {
       const page = rows.slice(offset, offset + DELETE_PAGE_SIZE);
       const { outcome, removed } = yield* trimPage(candidate.threadId, {
         itemIds: page.flatMap((row) => (row.kind === "item" ? [row.id] : [])),
         nodeIds: page.flatMap((row) => (row.kind === "node" ? [row.id] : [])),
       });
-      if (outcome !== "trimmed") return { outcome, itemCount, bytes };
+      removedAny ||= removed.itemIds.size > 0 || removed.nodeIds.size > 0;
+      if (outcome !== "trimmed") {
+        if (removedAny) yield* copyToForks(candidate.threadId);
+        return { outcome, itemCount, bytes };
+      }
       for (const row of page) {
         if (!(row.kind === "item" ? removed.itemIds : removed.nodeIds).has(row.id)) continue;
         if (row.kind === "item") itemCount += 1;
@@ -554,6 +572,7 @@ const make = Effect.gen(function* () {
       // Never hold the writer across a rest: foreground commits run between pages.
       yield* rest;
     }
+    if (removedAny) yield* copyToForks(candidate.threadId);
     return { outcome: "trimmed" as const, itemCount, bytes };
   });
 

@@ -853,6 +853,38 @@ it.layer(hookedFixture)("ThreadHistoryTrim during a pass", (it) => {
       assert.deepEqual(yield* itemTitles(fork.threadId), everyItem);
     }),
   );
+
+  it.effect("copies a multi-page trim to each fork once, after the last page", () =>
+    Effect.gen(function* () {
+      yield* isolate;
+      // More than two pages of 200 rows.
+      const source = yield* seedThread("fork-pages", { extraReasoning: 450 });
+      const fork = yield* seedThread("fork-of-pages", {
+        userMessageAt: recent,
+        thread: {
+          lineage: {
+            parentThreadId: source.threadId,
+            relationshipToParent: "fork",
+            rootThreadId: source.threadId,
+          },
+          forkedFrom: { type: "run", threadId: source.threadId, runId: source.runId },
+        },
+      });
+      yield* trim;
+      const events = (threadId: ThreadId) =>
+        Effect.flatMap(EventStore.EventStoreV2, (store) =>
+          Stream.runCollect(store.read({ threadId, afterSequence: 0 })),
+        );
+      const sourceTrims = Array.from(yield* events(source.threadId)).filter(
+        (stored) => stored.event.type === "thread.history-trimmed",
+      );
+      assert.isAtLeast(sourceTrims.length, 3);
+      const forkCopies = Array.from(yield* events(fork.threadId)).filter((stored) =>
+        invalidatesInheritedRows(stored.event, fork.threadId),
+      );
+      assert.lengthOf(forkCopies, 1);
+    }),
+  );
 });
 
 it.layer(layerTest(0))("ThreadHistoryTrim turned off", (it) => {

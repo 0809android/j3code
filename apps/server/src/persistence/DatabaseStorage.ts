@@ -186,13 +186,14 @@ const make = Effect.gen(function* () {
     publishStatus.pipe(
       Effect.andThen(Effect.sleep("1 minute")),
       Effect.andThen(
-        reclaim.pipe(
-          Effect.andThen(publishStatus),
-          Effect.andThen(readPages),
-          // A pass that leaves pages behind has a backlog, as a history trim does; drain it in minutes.
-          Effect.map((pages) => pages.incrementalVacuum && pages.reclaimableBytes > 0),
-          Effect.orElseSucceed(() => false),
-          Effect.flatMap((backlog) => Effect.sleep(backlog ? "5 seconds" : "1 minute")),
+        Effect.gen(function* () {
+          const before = yield* readPages.pipe(Effect.orElseSucceed(() => null));
+          yield* reclaim;
+          yield* publishStatus;
+          const after = yield* readPages.pipe(Effect.orElseSucceed(() => null));
+          return reclaimDelay(before, after);
+        }).pipe(
+          Effect.flatMap((delay) => Effect.sleep(delay)),
           Effect.forever,
         ),
       ),
@@ -251,5 +252,20 @@ const make = Effect.gen(function* () {
     requestReclaim,
   });
 });
+
+type ReclaimPages = { readonly reclaimableBytes: number; readonly incrementalVacuum: boolean };
+
+/**
+ * A pass that freed pages and left more behind has a backlog, as a history trim does; drain it in
+ * seconds. One that freed nothing (including a failed `incremental_vacuum`, which `reclaim` only
+ * logs) would otherwise repeat every few seconds forever, so it waits the usual minute.
+ */
+export const reclaimDelay = (before: ReclaimPages | null, after: ReclaimPages | null) =>
+  after !== null &&
+  after.incrementalVacuum &&
+  after.reclaimableBytes > 0 &&
+  (before === null || after.reclaimableBytes < before.reclaimableBytes)
+    ? ("5 seconds" as const)
+    : ("1 minute" as const);
 
 export const layer = Layer.effect(DatabaseStorage, make);
