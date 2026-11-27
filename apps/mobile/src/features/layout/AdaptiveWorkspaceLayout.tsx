@@ -54,6 +54,7 @@ import {
   isWorkspaceListPath,
   nativeInspectorColumnWidth,
 } from "../../lib/layout";
+import { resolveDefaultThreadEnvironmentId } from "../settings/defaultThreadEnvironment";
 import type { ThreadListFilters } from "../../persistence/mobile-preferences";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { useProjects } from "../../state/entities";
@@ -630,6 +631,10 @@ function AdaptiveWorkspaceLayoutContent(
       appAtomRegistry.get(savedConnectionsByIdAtom)[listFilters.environmentId] !== undefined
         ? listFilters.environmentId
         : null;
+    const defaultEnvironmentId = resolveDefaultThreadEnvironmentId(
+      saved?.defaultThreadEnvironmentId,
+      (id) => appAtomRegistry.get(savedConnectionsByIdAtom)[id] !== undefined,
+    );
     const filteredScope = resolveHomeProjectFilterScope(
       buildHomeProjectScopes({ projects, environmentId: listEnvironmentId, projectGroupingMode }),
       projects,
@@ -650,12 +655,12 @@ function AdaptiveWorkspaceLayoutContent(
         filteredProject: filteredScope
           ? newTaskFilteredProject(
               filteredScope,
-              listEnvironmentId ?? saved?.defaultThreadEnvironmentId ?? null,
+              listEnvironmentId ?? defaultEnvironmentId,
               connectedEnvironmentIds,
               saved?.lastThreadProject,
             )
           : undefined,
-        defaultEnvironmentId: saved?.defaultThreadEnvironmentId ?? null,
+        defaultEnvironmentId,
         // The sidebar's order, so the default machine's first project matches what the list shows.
         projectGroups: sortHomeProjectScopes({
           scopes: buildHomeProjectScopes({ projects, environmentId: null, projectGroupingMode }),
