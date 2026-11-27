@@ -1035,13 +1035,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/about",
   },
   {
-    id: "uninstall-app",
-    title: msg("Uninstall K3 Code"),
-    to: "/settings/about",
-    desktopOnly: true,
-    searchTerms: [msg("uninstall remove delete purge wipe reset completely")],
-  },
-  {
     id: "keybindings",
     title: msg("Keybindings"),
     to: "/settings/keybindings",

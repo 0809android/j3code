@@ -40,7 +40,6 @@ import * as DesktopAppIdentity from "./app/DesktopAppIdentity.ts";
 import * as DesktopConnectionCatalogStore from "./app/DesktopConnectionCatalogStore.ts";
 import * as DesktopK3RelayDeviceKeys from "./app/DesktopK3RelayDeviceKeys.ts";
 import * as DesktopCliCommand from "./app/DesktopCliCommand.ts";
-import * as DesktopUninstall from "./app/DesktopUninstall.ts";
 import * as DesktopApplicationMenu from "./window/DesktopApplicationMenu.ts";
 import * as DesktopAssets from "./app/DesktopAssets.ts";
 import * as DesktopPrimaryPaste from "./app/DesktopPrimaryPaste.ts";
@@ -219,7 +218,6 @@ const layerDesktopApplication = Layer.mergeAll(
   DesktopApplicationMenu.layer,
   DesktopLinuxUrlHandler.layer,
   DesktopCliCommand.layer,
-  DesktopUninstall.layer.pipe(Layer.provide(DesktopCliCommand.layer)),
 ).pipe(
   Layer.provideMerge(layerDesktopSnapShot),
   Layer.provideMerge(

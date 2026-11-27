@@ -427,10 +427,6 @@
       "types": "./src/devHome.ts",
       "import": "./src/devHome.ts"
     },
-    "./uninstallTargets": {
-      "types": "./src/uninstallTargets.ts",
-      "import": "./src/uninstallTargets.ts"
-    },
     "./devProxy": {
       "types": "./src/devProxy.ts",
       "import": "./src/devProxy.ts"
