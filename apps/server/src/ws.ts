@@ -2716,7 +2716,7 @@ export const layerWsRpc = (
           threadHistoryTrim.preview.pipe(Effect.orDie),
         [WS_METHODS.serverTrimThreadHistory]: () =>
           threadHistoryTrim.trimNow.pipe(
-            Effect.catchTag("ThreadHistoryTrimError", (error) => Effect.die(error)),
+            Effect.catchTags({ ThreadHistoryTrimError: (error) => Effect.die(error) }),
           ),
         [WS_METHODS.peerLinksList]: (_input) =>
           peerLinks.list.pipe(Effect.map((links) => ({ links }))),
