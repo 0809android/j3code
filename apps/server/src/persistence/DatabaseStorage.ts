@@ -19,8 +19,11 @@ import * as ProjectionMaintenance from "../orchestration-v2/ProjectionMaintenanc
 import * as DatabaseMaintenance from "./DatabaseMaintenance.ts";
 import { forkParked } from "../serverActivation.ts";
 
-// Bound each reclaim pass to one minute of churn.
+// One reclaim pass is a short burst of this many pages. A backlog repeats it only after resting
+// nine times as long as the pass took (see `reclaimDelay`), so reclaiming stays at 10% duty.
 const RECLAIM_PAGES_PER_PASS = 1024;
+const RECLAIM_BACKLOG_MIN_REST_MS = 5_000;
+const RECLAIM_IDLE_REST_MS = 60_000;
 const COMPACTION_INTERVAL = Duration.hours(6);
 
 export class DatabaseStorage extends Context.Service<
@@ -117,25 +120,40 @@ const make = Effect.gen(function* () {
     Effect.catch((cause) => Effect.logWarning("Database storage inspection failed", { cause })),
   );
 
-  const reclaim = Effect.suspend(() => {
+  // The driver steps once per statement; incremental_vacuum frees one page per step. Yield between pages.
+  // Pages freed are counted from the freelist before and after each step, so a write reusing free
+  // pages elsewhere does not look like progress.
+  const reclaimPass = Effect.suspend(() => {
+    const result: ReclaimResult = { freedPages: 0, remainingPages: 0, failed: false };
     let page = 0;
     return Effect.gen(function* () {
-      if (!(yield* readLayout).incrementalVacuum) return;
-      // The driver steps once per statement; incremental_vacuum frees one page per step. Yield between pages.
-      for (; page < RECLAIM_PAGES_PER_PASS; page++) {
+      if (!(yield* readLayout).incrementalVacuum) return result;
+      let previous: number | null = null;
+      for (;;) {
         const free = yield* sql<{ readonly freelist_count: number }>`PRAGMA freelist_count`;
-        if ((free[0]?.freelist_count ?? 0) === 0) break;
+        const current = free[0]?.freelist_count ?? 0;
+        if (previous !== null) result.freedPages += Math.max(0, previous - current);
+        result.remainingPages = current;
+        if (current === 0 || page >= RECLAIM_PAGES_PER_PASS) break;
         yield* sql`PRAGMA incremental_vacuum(1)`;
+        previous = current;
+        page++;
         yield* Effect.yieldNow;
       }
+      return result;
     }).pipe(
       Effect.ensuring(Effect.suspend(() => Effect.annotateCurrentSpan("db.reclaimed_pages", page))),
-      Effect.catch((cause) => Effect.logWarning("Database space reclamation failed", { cause })),
+      Effect.catch((cause) =>
+        Effect.logWarning("Database space reclamation failed", { cause }).pipe(
+          Effect.as({ ...result, failed: true }),
+        ),
+      ),
       // The pass owns the span; tracing each page's two PRAGMAs floods the server trace.
       Effect.withTracerEnabled(false),
       Effect.withSpan("DatabaseStorage.reclaim"),
     );
   });
+  const reclaim = Effect.asVoid(reclaimPass);
 
   // Even a pass that deletes nothing scans the event store. Persist completion
   // so restarting does not trigger another scan before the six-hour interval.
@@ -187,11 +205,11 @@ const make = Effect.gen(function* () {
       Effect.andThen(Effect.sleep("1 minute")),
       Effect.andThen(
         Effect.gen(function* () {
-          const before = yield* readPages.pipe(Effect.orElseSucceed(() => null));
-          yield* reclaim;
+          const started = yield* Clock.monotonicTimeNanos;
+          const result = yield* reclaimPass;
+          const elapsed = (yield* Clock.monotonicTimeNanos) - started;
           yield* publishStatus;
-          const after = yield* readPages.pipe(Effect.orElseSucceed(() => null));
-          return reclaimDelay(before, after);
+          return reclaimDelay(result, elapsed);
         }).pipe(
           Effect.flatMap((delay) => Effect.sleep(delay)),
           Effect.forever,
@@ -253,19 +271,23 @@ const make = Effect.gen(function* () {
   });
 });
 
-type ReclaimPages = { readonly reclaimableBytes: number; readonly incrementalVacuum: boolean };
+export type ReclaimResult = {
+  freedPages: number;
+  remainingPages: number;
+  failed: boolean;
+};
 
 /**
- * A pass that freed pages and left more behind has a backlog, as a history trim does; drain it in
- * seconds. One that freed nothing (including a failed `incremental_vacuum`, which `reclaim` only
- * logs) would otherwise repeat every few seconds forever, so it waits the usual minute.
+ * A pass that freed pages and left more behind has a backlog, as a history trim does: it repeats
+ * after resting nine times as long as the pass took (at least five seconds), which keeps the WAL
+ * writes at 10% duty. A pass that freed nothing (including a failed `incremental_vacuum`) would
+ * otherwise repeat forever, so it waits the usual minute, as does a failed or finished one.
  */
-export const reclaimDelay = (before: ReclaimPages | null, after: ReclaimPages | null) =>
-  after !== null &&
-  after.incrementalVacuum &&
-  after.reclaimableBytes > 0 &&
-  (before === null || after.reclaimableBytes < before.reclaimableBytes)
-    ? ("5 seconds" as const)
-    : ("1 minute" as const);
+export const reclaimDelay = (result: ReclaimResult, elapsedNanos: bigint) =>
+  !result.failed && result.freedPages > 0 && result.remainingPages > 0
+    ? Duration.millis(
+        Math.max(RECLAIM_BACKLOG_MIN_REST_MS, Math.ceil((Number(elapsedNanos) / 1_000_000) * 9)),
+      )
+    : Duration.millis(RECLAIM_IDLE_REST_MS);
 
 export const layer = Layer.effect(DatabaseStorage, make);

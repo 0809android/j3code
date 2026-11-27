@@ -1,6 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -200,18 +201,24 @@ it.effect(
     }).pipe(Effect.provide(testConfig.pipe(Layer.provideMerge(NodeServices.layer)))),
 );
 
-it("drains a reclaim backlog in seconds, but backs off when a pass frees nothing", () => {
-  const pages = (reclaimableBytes: number, incrementalVacuum = true) => ({
-    reclaimableBytes,
-    incrementalVacuum,
+it("drains a reclaim backlog at 10% duty, but backs off when a pass frees nothing", () => {
+  const pass = (freedPages: number, remainingPages: number, failed = false) => ({
+    freedPages,
+    remainingPages,
+    failed,
   });
-  // Progress with pages left over keeps the short interval.
-  assert.equal(DatabaseStorage.reclaimDelay(pages(8192), pages(4096)), "5 seconds");
-  // A failed or stuck incremental_vacuum leaves the count unchanged.
-  assert.equal(DatabaseStorage.reclaimDelay(pages(4096), pages(4096)), "1 minute");
-  // Nothing left, or a database that does not shrink incrementally, is the usual minute.
-  assert.equal(DatabaseStorage.reclaimDelay(pages(4096), pages(0)), "1 minute");
-  assert.equal(DatabaseStorage.reclaimDelay(pages(8192, false), pages(4096, false)), "1 minute");
-  // A pass whose pages could not be read has nothing to compare, so it does not spin.
-  assert.equal(DatabaseStorage.reclaimDelay(pages(4096), null), "1 minute");
+  const delayMs = (result: ReturnType<typeof pass>, elapsedMs: number) =>
+    Duration.toMillis(
+      DatabaseStorage.reclaimDelay(result, BigInt(elapsedMs) * 1_000_000n),
+    );
+  // A quick pass with pages left over keeps the short interval.
+  assert.equal(delayMs(pass(1024, 4096), 10), 5_000);
+  // A slow pass rests nine times as long as it ran, so reclaiming never exceeds 10% duty.
+  assert.equal(delayMs(pass(1024, 4096), 2_000), 18_000);
+  // Nothing freed (a stuck vacuum, or other writes reusing free pages) is the usual minute.
+  assert.equal(delayMs(pass(0, 4096), 10), 60_000);
+  // A failed pass returns to the minute even if it freed some pages first.
+  assert.equal(delayMs(pass(512, 4096, true), 10), 60_000);
+  // Nothing left is the usual minute.
+  assert.equal(delayMs(pass(1024, 0), 10), 60_000);
 });
