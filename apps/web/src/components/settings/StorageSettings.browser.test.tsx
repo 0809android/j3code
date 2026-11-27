@@ -15,6 +15,7 @@ const state = vi.hoisted(() => ({
   report: null as StorageCleanupReport | null,
   selected: null as string[] | null,
   threadHistoryTrim: false,
+  offline: [] as string[],
   maintainDenied: false,
 }));
 
@@ -71,7 +72,9 @@ vi.mock(import("./SettingsScopeContext"), async (original) => ({
     return {
       scope: { kind: "all" },
       environments,
-      connectedEnvironments: environments,
+      connectedEnvironments: environments.filter(
+        ({ environmentId }) => !state.offline.includes(environmentId),
+      ),
       targets: state.selected
         ? state.targets.filter(({ environmentId }) => state.selected?.includes(environmentId))
         : state.targets,
@@ -136,6 +139,7 @@ function setup() {
   state.report = null;
   state.selected = null;
   state.threadHistoryTrim = false;
+  state.offline = [];
   state.maintainDenied = false;
   state.run.mockReset();
   state.update.mockReset();
@@ -404,6 +408,17 @@ it("trims thread history only on the machines picked in the settings scope", asy
   await act(async () => trimNow.click());
 
   expect(state.run.mock.calls.map(([input]) => input.environmentId)).toEqual(["env-a"]);
+});
+
+it("keeps the thread history switch usable when a selected machine is offline", async () => {
+  setup();
+  state.threadHistoryTrim = true;
+  state.offline = ["env-b"];
+  await using screen = await render(panel());
+
+  await expect
+    .element(screen.getByRole("switch", { name: "Trim old threads" }))
+    .not.toBeDisabled();
 });
 
 it("lets someone without maintenance access turn thread history trimming off, not on", async () => {

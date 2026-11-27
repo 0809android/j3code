@@ -645,12 +645,11 @@ function ThreadHistorySection() {
       targetIds.has(environment.environmentId) &&
       environment.serverConfig?.environment.capabilities.threadHistoryTrim === true,
   );
-  const canMaintain = targets.every(
-    (target) =>
-      permissions[
-        connectedEnvironments.findIndex(({ environmentId }) => environmentId === target.environmentId)
-      ] === true,
-  );
+  const canMaintain =
+    supported.length > 0 &&
+    supported.every(
+      (environment) => permissions[connectedEnvironments.indexOf(environment)] === true,
+    );
   const runnable = supported.filter(
     (environment) =>
       permissions[connectedEnvironments.indexOf(environment)] === true &&
