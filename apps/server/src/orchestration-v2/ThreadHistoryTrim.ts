@@ -162,17 +162,22 @@ const make = Effect.gen(function* () {
     readonly threadId?: ThreadId;
   }) => sql<Candidate>`
     -- Run-forks of each thread at any depth, deleted ones included so they pass the link on (see readForks).
-    WITH RECURSIVE forks(root_id, thread_id, deleted) AS (
-      SELECT json_extract(fork.payload_json, '$.forkedFrom.threadId'), fork.thread_id,
+    -- The thread table is scanned once into fork_rows; the walk below joins that small set, not the table.
+    WITH RECURSIVE fork_rows(thread_id, parent_id, deleted) AS MATERIALIZED (
+      SELECT fork.thread_id, json_extract(fork.payload_json, '$.forkedFrom.threadId'),
         fork.deleted_at IS NOT NULL
       FROM orchestration_v2_projection_threads AS fork
       WHERE json_extract(fork.payload_json, '$.forkedFrom.type') = 'run'
         AND COALESCE(json_extract(fork.payload_json, '$.lineage.sideChat'), 0) = 0
-        -- For one thread, start only from the forks of that thread and of the thread its subagent hangs off.
-        AND ${
+    ),
+    forks(root_id, thread_id, deleted) AS (
+      SELECT fork.parent_id, fork.thread_id, fork.deleted
+      FROM fork_rows AS fork
+      -- For one thread, start only from the forks of that thread and of the thread its subagent hangs off.
+      WHERE ${
           input.threadId === undefined
             ? sql`1`
-            : sql`json_extract(fork.payload_json, '$.forkedFrom.threadId') IN (
+            : sql`fork.parent_id IN (
           SELECT ${input.threadId}
           UNION
           SELECT json_extract(own.payload_json, '$.lineage.rootThreadId')
@@ -182,11 +187,9 @@ const make = Effect.gen(function* () {
         )`
         }
       UNION
-      SELECT forks.root_id, fork.thread_id, fork.deleted_at IS NOT NULL
-      FROM orchestration_v2_projection_threads AS fork
-      JOIN forks ON json_extract(fork.payload_json, '$.forkedFrom.threadId') = forks.thread_id
-      WHERE json_extract(fork.payload_json, '$.forkedFrom.type') = 'run'
-        AND COALESCE(json_extract(fork.payload_json, '$.lineage.sideChat'), 0) = 0
+      SELECT forks.root_id, fork.thread_id, fork.deleted
+      FROM fork_rows AS fork
+      JOIN forks ON fork.parent_id = forks.thread_id
     )
     SELECT
       thread.thread_id AS "threadId",
@@ -317,14 +320,19 @@ const make = Effect.gen(function* () {
 
   // Live forks that show this thread's rows, at any depth; a deleted fork still passes them on.
   const readForks = (threadId: ThreadId) => sql<{ readonly id: ThreadId }>`
-    WITH RECURSIVE forks(thread_id, deleted) AS (
-      SELECT ${threadId}, 0
-      UNION
-      SELECT fork.thread_id, fork.deleted_at IS NOT NULL
+    WITH RECURSIVE fork_rows(thread_id, parent_id, deleted) AS MATERIALIZED (
+      SELECT fork.thread_id, json_extract(fork.payload_json, '$.forkedFrom.threadId'),
+        fork.deleted_at IS NOT NULL
       FROM orchestration_v2_projection_threads AS fork
-      JOIN forks ON json_extract(fork.payload_json, '$.forkedFrom.threadId') = forks.thread_id
       WHERE json_extract(fork.payload_json, '$.forkedFrom.type') = 'run'
         AND COALESCE(json_extract(fork.payload_json, '$.lineage.sideChat'), 0) = 0
+    ),
+    forks(thread_id, deleted) AS (
+      SELECT ${threadId}, 0
+      UNION
+      SELECT fork.thread_id, fork.deleted
+      FROM fork_rows AS fork
+      JOIN forks ON fork.parent_id = forks.thread_id
     )
     SELECT thread_id AS id FROM forks WHERE thread_id <> ${threadId} AND deleted = 0
   `;
@@ -708,7 +716,11 @@ const make = Effect.gen(function* () {
     let estimatedBytes = 0;
     for (const listed of candidates) {
       // A long pass outlives its list: a thread used since is no longer one.
-      const current = yield* readCandidates({ idleBefore, now, threadId: listed.threadId });
+      const current = yield* readCandidates({
+        idleBefore,
+        now,
+        threadId: listed.threadId,
+      }).pipe(NodeSqliteClient.readOnly);
       const candidate = current[0];
       if (candidate === undefined) continue;
       const removed = yield* trimThread(candidate, rest).pipe(
