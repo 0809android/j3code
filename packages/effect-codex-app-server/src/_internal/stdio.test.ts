@@ -87,6 +87,43 @@ describe("Codex App Server child process termination", () => {
     }),
   );
 
+  it.effect("keeps reading after exit while stdout keeps delivering data", () =>
+    Effect.gen(function* () {
+      const { stdio, input } = yield* makeInMemoryStdio();
+      const terminated = yield* Deferred.make<CodexError.CodexAppServerError>();
+      const notifications = yield* Ref.make<ReadonlyArray<string>>([]);
+      const tail = yield* makeStderrTail(Stream.empty);
+      const exited = yield* Deferred.make<ChildProcessSpawner.ExitCode>();
+      const handle = {
+        stdout: stdio.stdin,
+        stdin: stdio.stdout(),
+        pid: ChildProcessSpawner.ProcessId(56),
+        exitCode: Deferred.await(exited),
+      };
+      yield* CodexProtocol.makeCodexAppServerPatchedProtocol({
+        stdio: makeChildStdio(handle, tail.awaitDrained),
+        terminationError: makeTerminationError(handle, tail.read),
+        onTermination: (error) => Deferred.succeed(terminated, error).pipe(Effect.asVoid),
+        onNotification: ({ method }) => Ref.update(notifications, (all) => [...all, method]),
+      });
+      const send = (method: string) =>
+        Queue.offer(input, new TextEncoder().encode(`${JSON.stringify({ method })}\n`));
+
+      yield* Deferred.succeed(exited, ChildProcessSpawner.ExitCode(0));
+      // Each gap is shorter than the idle grace, but the total exceeds it.
+      yield* TestClock.adjust("200 millis");
+      yield* send("item/completed");
+      yield* TestClock.adjust("200 millis");
+      yield* send("turn/completed");
+      yield* TestClock.adjust("200 millis");
+      assert.deepEqual(yield* Ref.get(notifications), ["item/completed", "turn/completed"]);
+
+      // Nothing more arrives while stdout stays open, so the stream is cut.
+      yield* TestClock.adjust("500 millis");
+      assert.isTrue(yield* Deferred.isDone(terminated));
+    }),
+  );
+
   it.effect("retains the process identifier and exact exit-status cause", () =>
     Effect.gen(function* () {
       const rootCause = new Error("private process diagnostics");
