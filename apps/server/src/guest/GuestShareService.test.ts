@@ -588,6 +588,24 @@ it.effect("sends a fork's guest a fresh snapshot when the source thread's histor
     const { orchestrator, guestShares } = yield* shareThread;
     const runId = yield* ownerRun;
     const eventSink = yield* EventSink.EventSinkV2;
+    const now = yield* DateTime.now;
+    const run = (yield* orchestrator.getThreadRecords(threadId, ["runs"])).runs.find(
+      (candidate) => candidate.id === runId,
+    )!;
+    // A run that is still preparing cannot be forked.
+    yield* eventSink.write({
+      events: [
+        {
+          id: EventId.make("event:trimmed-run-done"),
+          type: "run.updated",
+          threadId,
+          runId,
+          providerInstanceId: instanceId,
+          occurredAt: now,
+          payload: { ...run, status: "completed", completedAt: now },
+        },
+      ],
+    });
     const forkId = ThreadId.make("thread:guest-share-trimmed-fork");
     yield* orchestrator.dispatch({
       type: "thread.fork",
