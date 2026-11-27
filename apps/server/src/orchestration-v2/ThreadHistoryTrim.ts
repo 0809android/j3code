@@ -15,6 +15,7 @@ import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
@@ -148,6 +149,24 @@ function withoutParentsOfKept(
   }
   return removed;
 }
+
+const DUTY_REST_FACTOR = 9;
+const MAX_DUTY_REST_MS = 60_000;
+
+/**
+ * Rests nine times as long as the work since the last rest, so the work keeps to a 10% duty. Timed
+ * on the monotonic clock, since the wall clock jumps across sleep and clock changes, and capped so
+ * a long slice cannot hold the serial worker (and a requested trim behind it) for hours.
+ */
+export const makeDutyRest = Effect.gen(function* () {
+  let sliceStarted = yield* Clock.monotonicTimeNanos;
+  return Effect.gen(function* () {
+    const elapsedMs = Number((yield* Clock.monotonicTimeNanos) - sliceStarted) / 1_000_000;
+    if (elapsedMs <= 0) return;
+    yield* Effect.sleep(Math.min(MAX_DUTY_REST_MS, elapsedMs * DUTY_REST_FACTOR));
+    sliceStarted = yield* Clock.monotonicTimeNanos;
+  });
+});
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -590,6 +609,7 @@ const make = Effect.gen(function* () {
         });
         return events;
       }),
+      [threadId],
     );
     return { outcome, removed };
   });
@@ -622,9 +642,10 @@ const make = Effect.gen(function* () {
     );
   });
 
-  const trimThread = Effect.fn("ThreadHistoryTrim.trimThread")(function* (
+  const trimPages = Effect.fn("ThreadHistoryTrim.trimPages")(function* (
     candidate: Candidate,
     rest: Effect.Effect<void>,
+    progress: { removedAny: boolean },
   ) {
     const selection = yield* select(candidate).pipe(NodeSqliteClient.readOnly);
     const rows = [
@@ -633,18 +654,14 @@ const make = Effect.gen(function* () {
     ];
     let itemCount = 0;
     let bytes = 0;
-    let removedAny = false;
     for (let offset = 0; offset < rows.length; offset += DELETE_PAGE_SIZE) {
       const page = rows.slice(offset, offset + DELETE_PAGE_SIZE);
       const { outcome, removed } = yield* trimPage(candidate.threadId, {
         itemIds: page.flatMap((row) => (row.kind === "item" ? [row.id] : [])),
         nodeIds: page.flatMap((row) => (row.kind === "node" ? [row.id] : [])),
       });
-      removedAny ||= removed.itemIds.size > 0 || removed.nodeIds.size > 0;
-      if (outcome !== "trimmed") {
-        if (removedAny) yield* copyToForks(candidate.threadId);
-        return { outcome, itemCount, bytes };
-      }
+      progress.removedAny ||= removed.itemIds.size > 0 || removed.nodeIds.size > 0;
+      if (outcome !== "trimmed") return { outcome, itemCount, bytes };
       for (const row of page) {
         if (!(row.kind === "item" ? removed.itemIds : removed.nodeIds).has(row.id)) continue;
         if (row.kind === "item") itemCount += 1;
@@ -653,8 +670,32 @@ const make = Effect.gen(function* () {
       // Never hold the writer across a rest: foreground commits run between pages.
       yield* rest;
     }
-    if (removedAny) yield* copyToForks(candidate.threadId);
     return { outcome: "trimmed" as const, itemCount, bytes };
+  });
+
+  const trimThread = Effect.fn("ThreadHistoryTrim.trimThread")(function* (
+    candidate: Candidate,
+    rest: Effect.Effect<void>,
+  ) {
+    const progress = { removedAny: false };
+    return yield* trimPages(candidate, rest, progress).pipe(
+      // A later page can fail after earlier ones removed rows, and a fork's subscribers would
+      // keep those rows. The failure itself still reaches the caller; a failed copy only logs.
+      Effect.onExit((exit) =>
+        Effect.suspend(() =>
+          !progress.removedAny || (Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause))
+            ? Effect.void
+            : copyToForks(candidate.threadId).pipe(
+                Effect.catchCause((cause) =>
+                  Effect.logWarning("Copying a history trim to forks failed", {
+                    threadId: candidate.threadId,
+                    cause: Cause.pretty(cause),
+                  }),
+                ),
+              ),
+        ),
+      ),
+    );
   });
 
   const readLastPass = sql<{ readonly updated_at: string }>`
@@ -692,17 +733,8 @@ const make = Effect.gen(function* () {
       const last = yield* readLastPass;
       if (last !== null && Date.parse(now) - Date.parse(last) < PASS_INTERVAL_MS) return;
     }
-    let sliceStarted = yield* Clock.currentTimeMillis;
     // The sweep keeps to a 10% duty so a backlog never competes with a turn; a requested trim does not wait.
-    const rest =
-      mode === "manual"
-        ? Effect.yieldNow
-        : Effect.gen(function* () {
-            const elapsed = (yield* Clock.currentTimeMillis) - sliceStarted;
-            if (elapsed <= 0) return;
-            yield* Effect.sleep(elapsed * 9);
-            sliceStarted = yield* Clock.currentTimeMillis;
-          });
+    const rest = mode === "manual" ? Effect.yieldNow : yield* makeDutyRest;
     const candidates = yield* readCandidates({ idleBefore, now }).pipe(
       NodeSqliteClient.readOnly,
     );

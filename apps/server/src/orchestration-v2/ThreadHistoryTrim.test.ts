@@ -16,8 +16,10 @@ import {
   TurnItemId,
 } from "@t3tools/contracts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -1043,7 +1045,93 @@ it.layer(hookedFixture)("ThreadHistoryTrim during a pass", (it) => {
       assert.lengthOf(forkCopies, 1);
     }),
   );
+
+  it.effect("names the trimmed thread, so each page waits on its queued provider snapshots", () =>
+    Effect.gen(function* () {
+      yield* isolate;
+      const source = yield* seedThread("page-barrier", { extraReasoning: 250 });
+      yield* trim;
+      const waited = (yield* TrimHook).waitedOn;
+      assert.isNotEmpty(waited);
+      // Every page write appends to the source thread, which has no fork to copy to here.
+      assert.isTrue(waited.every((threadIds) => threadIds?.includes(source.threadId) === true));
+    }),
+  );
+
+  it.effect("copies the pages already trimmed to the forks when a later page fails", () =>
+    Effect.gen(function* () {
+      yield* isolate;
+      const source = yield* seedThread("fork-page-fails", { extraReasoning: 450 });
+      const fork = yield* seedThread("fork-of-page-fails", {
+        thread: {
+          pinnedAt: old,
+          lineage: {
+            parentThreadId: source.threadId,
+            relationshipToParent: "fork",
+            rootThreadId: source.threadId,
+          },
+          forkedFrom: { type: "run", threadId: source.threadId, runId: source.runId },
+        },
+      });
+      // The second page's write fails after the first page removed rows.
+      yield* arm(Effect.die("second page failed"), 2);
+      yield* trim;
+      const events = (threadId: ThreadId) =>
+        Effect.flatMap(EventStore.EventStoreV2, (store) =>
+          Stream.runCollect(store.read({ threadId, afterSequence: 0 })),
+        );
+      const sourceTrims = Array.from(yield* events(source.threadId)).filter(
+        (stored) => stored.event.type === "thread.history-trimmed",
+      );
+      assert.lengthOf(sourceTrims, 1);
+      const forkCopies = Array.from(yield* events(fork.threadId)).filter((stored) =>
+        invalidatesInheritedRows(stored.event, fork.threadId),
+      );
+      assert.lengthOf(forkCopies, 1);
+    }),
+  );
 });
+
+const clockWithWallJump = (monotonicStepNanos: bigint, pauses: Array<number>) =>
+  Effect.gen(function* () {
+    const clock = yield* Clock.Clock;
+    let monotonic = 0n;
+    let wall = 0;
+    return {
+      ...clock,
+      // Sleep or a clock change moves the wall clock by hours between two checks.
+      currentTimeMillis: Effect.sync(() => (wall += 8 * 3_600_000)),
+      monotonicTimeNanos: Effect.sync(() => (monotonic += monotonicStepNanos)),
+      sleep: (duration: Duration.Duration) =>
+        Effect.sync(() => {
+          pauses.push(Duration.toMillis(duration));
+        }),
+    };
+  });
+
+it.effect("rests nine times the monotonic slice, whatever the wall clock does", () =>
+  Effect.gen(function* () {
+    const pauses: Array<number> = [];
+    const clock = yield* clockWithWallJump(10_000_000n, pauses);
+    yield* Effect.gen(function* () {
+      const rest = yield* ThreadHistoryTrim.makeDutyRest;
+      yield* rest;
+    }).pipe(Effect.provideService(Clock.Clock, clock));
+    assert.deepEqual(pauses, [90]);
+  }),
+);
+
+it.effect("caps a rest, so a long slice cannot hold the worker for hours", () =>
+  Effect.gen(function* () {
+    const pauses: Array<number> = [];
+    const clock = yield* clockWithWallJump(8n * 3_600_000_000_000n, pauses);
+    yield* Effect.gen(function* () {
+      const rest = yield* ThreadHistoryTrim.makeDutyRest;
+      yield* rest;
+    }).pipe(Effect.provideService(Clock.Clock, clock));
+    assert.deepEqual(pauses, [60_000]);
+  }),
+);
 
 it.layer(layerTest(0))("ThreadHistoryTrim turned off", (it) => {
   it.effect("removes nothing", () =>
