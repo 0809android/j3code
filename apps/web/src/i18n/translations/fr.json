@@ -13076,5 +13076,6 @@
   "33f5fca0dae9cc80": "Pas encore nettoyé. Le premier passage s’exécute quelques minutes après le démarrage du serveur.",
   "18bb2dd8209b1919": "Dernier nettoyage : {last}. Le prochain passage est dû.",
   "e2f5de1dcb452026": "Dernier nettoyage : {last}. Prochain passage : {next}.",
-  "1516b350d03fab25": "stockage disque base de données espace historique sortie des outils raisonnement inactif inutilisé jours nettoyer maintenant supprimer"
+  "1516b350d03fab25": "stockage disque base de données espace historique sortie des outils raisonnement inactif inutilisé jours nettoyer maintenant supprimer",
+  "8151e2bc57d55dde": "Le téléchargement est bloqué. Redémarrez K3 Code, puis réessayez."
 }

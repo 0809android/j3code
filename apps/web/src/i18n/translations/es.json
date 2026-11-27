@@ -13071,5 +13071,6 @@
   "33f5fca0dae9cc80": "Aún no se ha limpiado. La primera pasada se ejecuta unos minutos después de iniciar el servidor.",
   "18bb2dd8209b1919": "Última limpieza: {last}. La próxima pasada ya toca.",
   "e2f5de1dcb452026": "Última limpieza: {last}. Próxima pasada: {next}.",
-  "1516b350d03fab25": "almacenamiento disco base de datos espacio historial salida de herramientas razonamiento inactivo sin usar días limpiar ahora eliminar"
+  "1516b350d03fab25": "almacenamiento disco base de datos espacio historial salida de herramientas razonamiento inactivo sin usar días limpiar ahora eliminar",
+  "8151e2bc57d55dde": "La descarga está atascada. Reinicia K3 Code y vuelve a intentarlo."
 }

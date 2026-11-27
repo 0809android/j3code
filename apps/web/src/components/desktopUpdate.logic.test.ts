@@ -8,6 +8,7 @@ import {
   getDesktopUpdateActionError,
   getDesktopUpdateReleaseUrl,
   installDesktopUpdate,
+  isDesktopUpdateButtonDisabled,
   resolveDesktopUpdateButtonAction,
 } from "./desktopUpdate.logic";
 
@@ -42,6 +43,22 @@ describe("desktop update button state", () => {
     };
     expect(resolveDesktopUpdateButtonAction(state)).toBe("download");
     expect(getDesktopUpdateButtonTooltip(state)).toContain("Click to retry");
+  });
+
+  it("asks for a restart and disables the button when the download cannot be retried", () => {
+    const state: DesktopUpdateState = {
+      ...baseState,
+      status: "available",
+      availableVersion: "1.1.0",
+      message: "The download is stuck. Restart K3 Code, then try again.",
+      errorContext: "download",
+      canRetry: false,
+    };
+    expect(isDesktopUpdateButtonDisabled(state)).toBe(true);
+    expect(getDesktopUpdateButtonTooltip(state)).toBe(
+      "The download is stuck. Restart K3 Code, then try again.",
+    );
+    expect(isDesktopUpdateButtonDisabled({ ...state, canRetry: true })).toBe(false);
   });
 
   it("shows the download failure after returning to available", () => {

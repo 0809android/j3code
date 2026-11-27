@@ -107,7 +107,17 @@ const checkForUpdatesFromMenu = Effect.gen(function* () {
       defaultId: 0,
       cancelId: 1,
     });
-    if (response === 0) yield* updates.download;
+    if (response === 0) {
+      const download = yield* updates.download;
+      if (download.state.errorContext === "download" && !download.state.canRetry) {
+        yield* electronDialog.showMessageBox({
+          type: "warning",
+          title: m(msg("Update download failed")),
+          message: m(msg("The download is stuck. Restart K3 Code, then try again.")),
+          buttons: [m(msg("OK"))],
+        });
+      }
+    }
   } else if (updateState.status === "downloading") {
     yield* electronDialog.showMessageBox({
       type: "info",

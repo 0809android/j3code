@@ -160,7 +160,7 @@ describe("ElectronUpdater download retry", () => {
     }).pipe(Effect.scoped, Effect.provide([ElectronUpdater.layer, TestClock.layer()])),
   );
 
-  it.effect("retries after the limit when the interrupted download never settles", () =>
+  it.effect("refuses to retry and asks for a restart when the old download never settles", () =>
     Effect.gen(function* () {
       const download = stubDownload();
       yield* Effect.addFinalizer(() => Effect.sync(() => download.spy.mockRestore()));
@@ -170,12 +170,17 @@ describe("ElectronUpdater download retry", () => {
       yield* Deferred.await(download.firstStarted);
       yield* Fiber.interrupt(first);
 
-      yield* electronUpdater.downloadUpdate.pipe(Effect.forkScoped);
+      const retry = yield* electronUpdater.downloadUpdate.pipe(Effect.flip, Effect.forkScoped);
       yield* TestClock.adjust(
         Duration.sum(ElectronUpdater.CANCELLED_DOWNLOAD_SETTLE_TIMEOUT, Duration.millis(1)),
       );
-      yield* Deferred.await(download.retryStarted);
-      assert.equal(download.started(), 2);
+      const error = yield* Fiber.join(retry);
+      assert.equal(error.restartRequired, true);
+      assert.equal(download.started(), 1, "electron-updater must not be asked to download again");
+
+      // Let the stub settle so the module-level pending download does not leak into other tests.
+      download.resolvers[0]?.();
+      yield* Effect.yieldNow;
     }).pipe(Effect.scoped, Effect.provide([ElectronUpdater.layer, TestClock.layer()])),
   );
 });

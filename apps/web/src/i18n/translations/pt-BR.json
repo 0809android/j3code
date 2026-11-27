@@ -13076,5 +13076,6 @@
   "33f5fca0dae9cc80": "Ainda não foi limpo. A primeira passagem roda alguns minutos depois que o servidor inicia.",
   "18bb2dd8209b1919": "Última limpeza: {last}. A próxima passagem já está pendente.",
   "e2f5de1dcb452026": "Última limpeza: {last}. Próxima passagem: {next}.",
-  "1516b350d03fab25": "armazenamento disco banco de dados espaço histórico saída de ferramentas raciocínio inativo sem uso dias limpar agora excluir"
+  "1516b350d03fab25": "armazenamento disco banco de dados espaço histórico saída de ferramentas raciocínio inativo sem uso dias limpar agora excluir",
+  "8151e2bc57d55dde": "O download travou. Reinicie o K3 Code e tente novamente."
 }

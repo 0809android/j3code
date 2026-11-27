@@ -168,6 +168,8 @@ export function reduceDesktopUpdateStateOnDownloadStart(
 export function reduceDesktopUpdateStateOnDownloadFailure(
   state: DesktopUpdateState,
   message: string,
+  // A stuck download blocks every retry until the app restarts.
+  options: { readonly restartRequired?: boolean } = {},
 ): DesktopUpdateState {
   return {
     ...withoutTrackMismatch(state),
@@ -175,7 +177,7 @@ export function reduceDesktopUpdateStateOnDownloadFailure(
     message,
     downloadPercent: null,
     errorContext: "download",
-    canRetry: getCanRetryAfterDownloadFailure(state),
+    canRetry: options.restartRequired === true ? false : getCanRetryAfterDownloadFailure(state),
   };
 }
 

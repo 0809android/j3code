@@ -13094,5 +13094,6 @@
   "33f5fca0dae9cc80": "Not trimmed yet. The first pass runs a few minutes after the server starts.",
   "18bb2dd8209b1919": "Last trimmed {last}. The next pass is due.",
   "e2f5de1dcb452026": "Last trimmed {last}. Next pass {next}.",
-  "1516b350d03fab25": "storage disk database space history tool output reasoning idle unused days trim now delete"
+  "1516b350d03fab25": "storage disk database space history tool output reasoning idle unused days trim now delete",
+  "8151e2bc57d55dde": "The download is stuck. Restart K3 Code, then try again."
 }

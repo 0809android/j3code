@@ -13083,5 +13083,6 @@
   "33f5fca0dae9cc80": "Inte rensat ännu. Den första körningen sker några minuter efter att servern startat.",
   "18bb2dd8209b1919": "Senast rensat: {last}. Nästa körning är försenad.",
   "e2f5de1dcb452026": "Senast rensat: {last}. Nästa körning: {next}.",
-  "1516b350d03fab25": "lagring disk databas utrymme historik verktygsutdata resonemang inaktiv oanvänd dagar rensa nu ta bort"
+  "1516b350d03fab25": "lagring disk databas utrymme historik verktygsutdata resonemang inaktiv oanvänd dagar rensa nu ta bort",
+  "8151e2bc57d55dde": "Nedladdningen har fastnat. Starta om K3 Code och försök igen."
 }

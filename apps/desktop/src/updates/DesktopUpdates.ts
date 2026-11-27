@@ -36,6 +36,7 @@ import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopState from "../app/DesktopState.ts";
 import * as ElectronUpdater from "../electron/ElectronUpdater.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
+import { m } from "../i18n/messages.ts";
 import * as IpcChannels from "../ipc/channels.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopSshEnvironment from "../ssh/DesktopSshEnvironment.ts";
@@ -45,6 +46,7 @@ import {
   releaseNotesOfOfferedVersion,
 } from "./releaseNotes.ts";
 import { desktopUpdateChannelOf } from "@t3tools/shared/cliRelease";
+import { msg } from "gt-i18n";
 import { compareSemverVersions } from "@t3tools/shared/semver";
 import {
   createInitialDesktopUpdateState,
@@ -746,8 +748,15 @@ export const make = Effect.gen(function* () {
         ElectronUpdaterDownloadUpdateError: Effect.fn("desktop.updates.handleDownloadFailure")(
           function* (error) {
             const cause = describeUpdateErrorCause(error.cause);
+            const restartRequired = error.restartRequired === true;
             yield* updateState((current) =>
-              reduceDesktopUpdateStateOnDownloadFailure(current, `${error.message} ${cause}`),
+              reduceDesktopUpdateStateOnDownloadFailure(
+                current,
+                restartRequired
+                  ? m(msg("The download is stuck. Restart K3 Code, then try again."))
+                  : `${error.message} ${cause}`,
+                { restartRequired },
+              ),
             );
             yield* logUpdaterError(error.message, {
               errorTag: error._tag,

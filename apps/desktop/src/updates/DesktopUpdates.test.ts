@@ -512,6 +512,7 @@ describe("DesktopUpdates", () => {
     let downloads = 0;
     let stalledDownloadCancelled = false;
     const harness = makeHarness({
+      interruptedDownloadSettles: true,
       downloadUpdate: Effect.suspend(() => {
         downloads += 1;
         return downloads === 1
@@ -558,6 +559,7 @@ describe("DesktopUpdates", () => {
   it.effect("retries a stalled download without the differential download", () => {
     let downloads = 0;
     const harness = makeHarness({
+      interruptedDownloadSettles: true,
       downloadUpdate: Effect.suspend(() => {
         downloads += 1;
         return downloads === 1
@@ -580,6 +582,32 @@ describe("DesktopUpdates", () => {
         assert.isTrue((yield* updates.download).completed);
 
         assert.deepEqual(harness.differentialDownloadDisabled.slice(configured), [false, true]);
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
+  it.effect("asks for a restart instead of retrying while the stalled download is unsettled", () => {
+    const harness = makeHarness({ downloadUpdate: Effect.never });
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+        harness.emit("update-available", { version: "1.2.4" });
+        yield* flushCallbacks;
+
+        const download = yield* updates.download.pipe(Effect.forkScoped);
+        yield* TestClock.adjust(Duration.minutes(5));
+        assert.isFalse((yield* Fiber.join(download)).completed);
+        assert.isTrue((yield* updates.getState).canRetry);
+
+        assert.isFalse((yield* updates.download).completed);
+        const refused = yield* updates.getState;
+        assert.equal(harness.downloadCount(), 1, "the stuck download must not be joined again");
+        assert.equal(refused.status, "available");
+        assert.equal(refused.errorContext, "download");
+        assert.isFalse(refused.canRetry);
+        assert.equal(refused.message, "The download is stuck. Restart K3 Code, then try again.");
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
