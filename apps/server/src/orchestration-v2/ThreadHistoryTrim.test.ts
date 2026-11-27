@@ -658,6 +658,62 @@ it.layer(layerTest(30))("ThreadHistoryTrim", (it) => {
   );
 });
 
+// Records the text of every statement the trim builds, to count how often it reads the fork table.
+const statements: Array<string> = [];
+const countedSql = Layer.effect(
+  SqlClient.SqlClient,
+  Effect.map(
+    SqlClient.SqlClient,
+    (client) =>
+      new Proxy(client, {
+        apply: (target, thisArg, args) => {
+          const text: unknown = args[0];
+          statements.push(Array.isArray(text) ? text.join("?") : String(text));
+          return Reflect.apply(target, thisArg, args);
+        },
+      }),
+  ),
+);
+const countedFixture = Layer.mergeAll(
+  ThreadHistoryTrim.layer.pipe(Layer.provide(countedSql)),
+  Layer.effectDiscard(createProject),
+).pipe(Layer.provideMerge(dependencies(30)));
+const forkTableReads = () =>
+  statements.filter((text) => text.includes("$.forkedFrom.type")).length;
+
+it.layer(countedFixture)("ThreadHistoryTrim fork table", (it) => {
+  it.effect("reads the fork table once per pass, however many threads it trims", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(DateTime.toEpochMillis(now));
+      const sources = [
+        yield* seedThread("counted-a"),
+        yield* seedThread("counted-b"),
+        yield* seedThread("counted-c"),
+      ];
+      for (const source of sources) {
+        // Pinned, so the fork is not in use and not a candidate itself.
+        yield* seedThread(`${source.threadId}-fork`, {
+          thread: {
+            pinnedAt: old,
+            lineage: {
+              parentThreadId: source.threadId,
+              relationshipToParent: "fork",
+              rootThreadId: source.threadId,
+            },
+            forkedFrom: { type: "run", threadId: source.threadId, runId: source.runId },
+          },
+        });
+      }
+      statements.length = 0;
+      yield* trim;
+      for (const source of sources) {
+        assert.deepEqual(yield* itemTitles(source.threadId), trimmedItems);
+      }
+      assert.equal(forkTableReads(), 1);
+    }),
+  );
+});
+
 type Hook = Effect.Effect<
   void,
   EventSink.EventSinkV2Error | ProjectionStore.ProjectionStoreV2Error | ServerSettingsError,
@@ -931,7 +987,7 @@ it.layer(hookedFixture)("ThreadHistoryTrim during a pass", (it) => {
     }),
   );
 
-  it.effect("checks forks before the pages, not in each page's write, and still copies to them", () =>
+  it.effect("checks forks before the pages, not in each page's write, and leaves a fork made since to the next pass", () =>
     Effect.gen(function* () {
       yield* isolate;
       const source = yield* seedThread("fork-used-between");
@@ -948,12 +1004,13 @@ it.layer(hookedFixture)("ThreadHistoryTrim during a pass", (it) => {
         },
       }).pipe(Effect.asVoid);
       // The write that removes a page checks the thread's own rows only, so a fork used after the
-      // pass's check does not stop this pass (the next one sees it); the fork is still told.
+      // pass's check does not stop this pass (the next one sees it). The pass read its fork table
+      // before that fork existed, so it is not copied to in this pass either.
       yield* arm(forkUsed);
       yield* trim;
       assert.deepEqual(yield* itemTitles(source.threadId), trimmedItems);
       const waited = (yield* TrimHook).waitedOn;
-      assert.isTrue(
+      assert.isFalse(
         waited.some((threadIds) =>
           threadIds?.includes(ThreadId.make("thread:trim:fork-used-between-fork")) === true,
         ),
