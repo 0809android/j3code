@@ -457,4 +457,35 @@ describe("default project selection", () => {
       ),
     ).toEqual({ environmentId: "last-used", projectId: "project" });
   });
+
+  it("uses the default machine's project only while that machine is connected", () => {
+    const projects = [
+      { id: "project", environmentId: "first", workspaceRoot: "/first" },
+      { id: "project", environmentId: "last-used", workspaceRoot: "/last-used" },
+    ].map((project) => ({
+      ...project,
+      id: project.id as ProjectId,
+      environmentId: project.environmentId as EnvironmentId,
+      title: project.environmentId,
+      defaultModelSelection: null,
+      scripts: [],
+      createdAt: "2026-11-09T00:00:00.000Z",
+      updatedAt: "2026-11-09T00:00:00.000Z",
+    }));
+    const resolve = (connected: ReadonlyArray<string>) =>
+      resolveDefaultProjectRef(
+        projects,
+        [],
+        "last-used:project",
+        true,
+        undefined,
+        "first" as EnvironmentId,
+        connected as ReadonlyArray<EnvironmentId>,
+      );
+    expect(resolve(["first", "last-used"])).toEqual({
+      environmentId: "first",
+      projectId: "project",
+    });
+    expect(resolve(["last-used"])).toEqual({ environmentId: "last-used", projectId: "project" });
+  });
 });
