@@ -15,6 +15,8 @@ const state = vi.hoisted(() => ({
   report: null as StorageCleanupReport | null,
   selected: null as string[] | null,
   threadHistoryTrim: false,
+  /** When set, only these machines report the capability. */
+  threadHistoryTrimOn: null as string[] | null,
   offline: [] as string[],
   maintainDenied: false,
 }));
@@ -64,7 +66,9 @@ vi.mock(import("./SettingsScopeContext"), async (original) => ({
             storageCleanup: true,
             storageCleanupRun: true,
             settledWorktreeCleanup: true,
-            threadHistoryTrim: state.threadHistoryTrim,
+            threadHistoryTrim:
+              state.threadHistoryTrim &&
+              (state.threadHistoryTrimOn?.includes(environmentId) ?? true),
           },
         },
       },
@@ -139,6 +143,7 @@ function setup() {
   state.report = null;
   state.selected = null;
   state.threadHistoryTrim = false;
+  state.threadHistoryTrimOn = null;
   state.offline = [];
   state.maintainDenied = false;
   state.run.mockReset();
@@ -440,4 +445,13 @@ it("lets someone without maintenance access turn thread history trimming off, no
   await expect.element(screen.getByLabelText("Trim old threads in days")).toBeDisabled();
   await userEvent.click(trimSwitch);
   expect(saves()).toEqual([{ threadHistoryAfterDays: null }]);
+});
+
+it("shows thread history when only some selected machines support it", async () => {
+  setup();
+  state.threadHistoryTrim = true;
+  state.threadHistoryTrimOn = ["env-a"];
+  await using screen = await render(panel());
+
+  await expect.element(screen.getByRole("switch", { name: "Trim old threads" })).toBeVisible();
 });

@@ -1209,14 +1209,14 @@ export function StorageCleanupSections() {
       )}
     />
   );
-  const threadHistory =
-    connectedEnvironments.length > 0 &&
-    connectedEnvironments.every(
-      (environment) =>
-        environment.serverConfig?.environment.capabilities.threadHistoryTrim === true,
-    ) ? (
-      <ThreadHistorySection />
-    ) : null;
+  const targetEnvironmentIds = new Set(targets.map((target) => target.environmentId));
+  const threadHistory = connectedEnvironments.some(
+    (environment) =>
+      targetEnvironmentIds.has(environment.environmentId) &&
+      environment.serverConfig?.environment.capabilities.threadHistoryTrim === true,
+  ) ? (
+    <ThreadHistorySection />
+  ) : null;
   if (!supportsStorageCleanup(connectedEnvironments)) {
     return (
       <>
