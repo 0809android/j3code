@@ -448,6 +448,8 @@ const config: ExpoConfig = {
       {
         android: {
           minSdkVersion: 24,
+          // ML Kit genai-speech-recognition alpha2 needs kotlin-stdlib 2.4 metadata, which Kotlin 2.3 reads.
+          kotlinVersion: "2.3.21",
           // SDK 58 lacks Kotlin 2.3's runtime-inert annotation. R8 needs explicit InputMerger constructors for widgets.
           extraProguardRules: [
             "-dontwarn kotlin.MustUseReturnValues",
