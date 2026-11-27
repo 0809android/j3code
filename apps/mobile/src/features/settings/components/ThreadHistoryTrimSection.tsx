@@ -46,11 +46,8 @@ function daysOf(target: SettingsTarget) {
   return target.serverConfig.settings.storageCleanup.threadHistoryAfterDays;
 }
 
-/**
- * Turns thread history trimming on and off, and trims now after showing what qualifies. The
- * server only offers it from versions that trim, and only the maintainers of an environment
- * change it.
- */
+// Turns thread history trimming on and off, and trims now after showing what qualifies.
+// The server only offers it from versions that trim; only an environment's maintainers change it.
 export function ThreadHistoryTrimSection({
   targets,
 }: {

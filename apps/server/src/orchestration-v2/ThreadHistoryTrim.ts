@@ -206,11 +206,8 @@ function liveForksOf(table: ForkTable, threadId: ThreadId): ReadonlyArray<Thread
 const DUTY_REST_FACTOR = 9;
 const MAX_DUTY_REST_MS = 60_000;
 
-/**
- * Rests nine times as long as the work since the last rest, so the work keeps to a 10% duty. Timed
- * on the monotonic clock, since the wall clock jumps across sleep and clock changes, and capped so
- * a long slice cannot hold the serial worker (and a requested trim behind it) for hours.
- */
+// Rests nine times as long as the work since the last rest (a 10% duty), timed on the monotonic
+// clock since the wall clock jumps. Capped so a long slice cannot hold the serial worker for hours.
 export const makeDutyRest = Effect.gen(function* () {
   let sliceStarted = yield* Clock.monotonicTimeNanos;
   return Effect.gen(function* () {
@@ -227,12 +224,10 @@ const make = Effect.gen(function* () {
   const ids = yield* IdAllocator.IdAllocatorV2;
   const settingsService = yield* ServerSettingsModule.ServerSettingsService;
 
-  // Every run-fork in the thread table, read once per pass (the table has no index on the
-  // parent a fork hangs off, so each read is a full scan). Deleted forks stay in so they pass the
-  // link on to their own forks. A fork made after this read is left to the next pass.
-  // The thread table's primary key is text, so it keeps an implicit rowid that grows with each new
-  // thread, and its maximum is one b-tree seek (there is no index on created_at to use instead).
-  // Read before the rows, so a thread made between the two reads counts as new, not as missed.
+  // Every run-fork in the thread table, read once per pass (no index on a fork's parent, so each
+  // read is a full scan). Deleted forks stay in to pass the link on. A later fork waits a pass.
+  // The max rowid stands in for "newest thread" (one b-tree seek; created_at has no index). Read
+  // before the rows, so a thread made between the two reads counts as new, not as missed.
   const readMaxThreadRowid = sql<{ readonly maxRowid: number | null }>`
     SELECT MAX(rowid) AS "maxRowid" FROM orchestration_v2_projection_threads
   `.pipe(
@@ -286,11 +281,10 @@ const make = Effect.gen(function* () {
       JOIN forks ON fork.parent_id = forks.thread_id
     )`;
 
-  // A subagent has no user of its own, so it ages with the thread that started it.
-  // With a `threadId` and `ignoreForks` this is the cheap re-check made inside a write: it reads
-  // only that thread and its anchor, through their own tables' indexes. The forks' use has no
-  // index to seek (it hangs off a JSON field of the thread table), so it is checked outside the
-  // write, once before a thread's pages, by the call that is given the pass's fork table.
+  // A subagent has no user of its own, so it ages with the thread that started it. With a
+  // `threadId` and `ignoreForks` this is the cheap re-check inside a write: it reads only that
+  // thread and its anchor. The forks' use (a JSON field, no index) is checked outside the write,
+  // once before a thread's pages, by the call given the pass's fork table.
   const readCandidates = (
     input: {
       readonly idleBefore: string;
@@ -571,12 +565,9 @@ const make = Effect.gen(function* () {
     } satisfies OrchestrationV2DomainEvent;
   });
 
-  /**
-   * Removes one page in a transaction that first confirms the thread itself is still idle and
-   * trimming on. A fork's use is not read here: `pass` checked it just before the first page, and
-   * one that starts in the gap is caught by the next pass's check. The copy to the forks still
-   * waits on their queued snapshots.
-   */
+  // Removes one page in a transaction that first confirms the thread itself is idle and trimming
+  // on. A fork's use is not read here: `pass` checked it before the first page, and a later start
+  // is caught by the next pass. The copy to forks still waits on their queued snapshots.
   const trimPage = Effect.fn("ThreadHistoryTrim.trimPage")(function* (
     threadId: ThreadId,
     page: { readonly itemIds: ReadonlyArray<string>; readonly nodeIds: ReadonlyArray<string> },

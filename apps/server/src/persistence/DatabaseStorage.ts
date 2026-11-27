@@ -285,12 +285,10 @@ export type ReclaimResult = {
   failed: boolean;
 };
 
-/**
- * A pass that freed pages and left more behind has a backlog, as a history trim does: it repeats
- * after resting nine times as long as the pass took (at least five seconds), which keeps the WAL
- * writes at 10% duty. A pass that freed nothing (including a failed `incremental_vacuum`) would
- * otherwise repeat forever, so it waits the usual minute, as does a failed or finished one.
- */
+// A pass that freed pages and left more behind repeats after resting nine times as long as the
+// pass took (at least five seconds), a 10% duty on WAL writes. A pass that freed nothing (even
+// by a failed `incremental_vacuum`) would repeat forever, so it waits the usual minute, as do
+// failed and finished ones.
 export const reclaimDelay = (result: ReclaimResult, elapsedNanos: bigint) =>
   !result.failed && result.freedPages > 0 && result.remainingPages > 0
     ? Duration.millis(
