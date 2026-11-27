@@ -568,6 +568,132 @@ it.layer(layerTest(30))("ThreadHistoryTrim", (it) => {
     }),
   );
 
+  it.effect("keeps a thread linked to a pull request whose snapshot has not been read", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(DateTime.toEpochMillis(now));
+      const { threadId } = yield* seedThread("unsynced-pr", {
+        thread: { pullRequests: [{ ...openPullRequest, snapshot: null }] },
+      });
+      const previewed = yield* (yield* ThreadHistoryTrim.ThreadHistoryTrim).preview;
+      yield* trim;
+      assert.equal(previewed.threadCount, 0);
+      assert.deepEqual(yield* itemTitles(threadId), everyItem);
+    }),
+  );
+
+  const noticeRows = Effect.fn(function* (threadId: ThreadId) {
+    const sql = yield* SqlClient.SqlClient;
+    return yield* sql<{
+      readonly id: string;
+      readonly run: string | null;
+      readonly days: number | null;
+    }>`
+      SELECT turn_item_id AS id, json_extract(payload_json, '$.runId') AS run,
+        json_extract(payload_json, '$.historyTrim.afterDays') AS days
+      FROM orchestration_v2_projection_turn_items
+      WHERE thread_id = ${threadId} AND type = 'system_notice'
+    `;
+  });
+
+  const trimWithDays = Effect.fn(function* (days: number) {
+    const settings = yield* ServerSettings.ServerSettingsService;
+    yield* settings.updateSettings({ storageCleanup: { threadHistoryAfterDays: days } });
+    yield* trim;
+  });
+
+  const reasoningEvent = (threadId: ThreadId, runId: RunId, name: string, key: string) =>
+    ({
+      id: EventId.make(`event:${name}:${key}`),
+      type: "turn-item.updated",
+      threadId,
+      runId,
+      occurredAt: old,
+      payload: {
+        id: TurnItemId.make(`item:${name}:${key}`),
+        threadId,
+        runId,
+        nodeId: null,
+        providerThreadId: null,
+        providerTurnId: null,
+        nativeItemRef: null,
+        parentItemId: null,
+        ordinal: 0,
+        status: "completed",
+        title: key,
+        startedAt: old,
+        completedAt: old,
+        updatedAt: old,
+        type: "reasoning",
+        text: "more thinking",
+        streaming: false,
+      },
+    }) as OrchestrationV2DomainEvent;
+
+  // A newer run with reasoning in it, so a later pass has something to remove and a new notice run.
+  const addOldRun = Effect.fn(function* (threadId: ThreadId, name: string) {
+    const runId = RunId.make(`run:${threadId}:2`);
+    yield* (yield* EventSink.EventSinkV2).write({
+      events: [
+        {
+          id: EventId.make(`event:${name}:run-2`),
+          type: "run.created",
+          threadId,
+          runId,
+          occurredAt: old,
+          payload: {
+            id: runId,
+            threadId,
+            ordinal: 2,
+            providerInstanceId,
+            modelSelection,
+            providerThreadId: null,
+            userMessageId: MessageId.make(`message:${name}:user`),
+            rootNodeId: NodeId.make(`node:${name}:root`),
+            activeAttemptId: null,
+            status: "completed",
+            requestedAt: old,
+            startedAt: old,
+            completedAt: old,
+            checkpointId: null,
+            contextHandoffId: null,
+          },
+        } as OrchestrationV2DomainEvent,
+        reasoningEvent(threadId, runId, name, "run-2-reasoning"),
+      ],
+    });
+  });
+
+  it.effect("rewrites the notice's day count when a later pass uses another window", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(DateTime.toEpochMillis(now));
+      const { threadId, runId } = yield* seedThread("notice-days");
+      yield* trimWithDays(30);
+      assert.deepEqual((yield* noticeRows(threadId)).map((row) => row.days), [30]);
+
+      yield* (yield* EventSink.EventSinkV2).write({
+        events: [reasoningEvent(threadId, runId, "notice-days", "later-reasoning")],
+      });
+      yield* trimWithDays(20);
+      assert.deepEqual((yield* noticeRows(threadId)).map((row) => row.days), [20]);
+      yield* trimWithDays(30);
+    }),
+  );
+
+  it.effect("leaves one notice when a newer run is trimmed after the first pass", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(DateTime.toEpochMillis(now));
+      const { threadId } = yield* seedThread("notice-newer-run");
+      yield* trim;
+      assert.equal((yield* noticeRows(threadId)).length, 1);
+
+      yield* addOldRun(threadId, "notice-newer-run");
+      yield* trim;
+      const notices = yield* noticeRows(threadId);
+      assert.equal(notices.length, 1);
+      assert.equal(notices[0]?.run, `run:${threadId}:2`);
+    }),
+  );
+
   it.effect("keeps a thread whose live fork is in use, and trims it when the fork is idle", () =>
     Effect.gen(function* () {
       yield* TestClock.setTime(DateTime.toEpochMillis(now));

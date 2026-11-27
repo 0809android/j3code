@@ -326,8 +326,8 @@ const make = Effect.gen(function* () {
       AND COALESCE(json_extract(anchor.payload_json, '$.snoozedUntil'), '') <= ${input.now}
       AND NOT EXISTS (
         SELECT 1 FROM json_each(anchor.payload_json, '$.pullRequests') AS link
-        WHERE json_extract(link.value, '$.snapshot.state') = 'open'
-          AND json_extract(link.value, '$.source') <> 'stack-dismissed'
+        WHERE COALESCE(json_extract(link.value, '$.snapshot.state'), 'open') = 'open'
+          AND COALESCE(json_extract(link.value, '$.source'), '') <> 'stack-dismissed'
       )
       AND NOT EXISTS (
         SELECT 1 FROM orchestration_v2_projection_messages AS message
@@ -667,11 +667,18 @@ const make = Effect.gen(function* () {
         if (items.size === 0 && nodes.size === 0) return [];
         removed = { itemIds: items, nodeIds: nodes };
         const noticeId = noticeItemId(current);
-        const noticed = yield* sql`
-          SELECT 1 FROM orchestration_v2_projection_turn_items WHERE turn_item_id = ${noticeId}
+        // The notice follows the newest visible run, so one made under an earlier run is replaced.
+        const notices = yield* sql<{ readonly id: TurnItemId; readonly days: number | null }>`
+          SELECT turn_item_id AS id, json_extract(payload_json, '$.historyTrim.afterDays') AS days
+          FROM orchestration_v2_projection_turn_items
+          WHERE thread_id = ${threadId} AND type = 'system_notice'
+            AND json_extract(payload_json, '$.historyTrim') IS NOT NULL
         `;
-        const events: Array<OrchestrationV2DomainEvent> =
-          noticed.length === 0 ? [yield* noticeEvent(current, afterDays)] : [];
+        const staleNoticeIds = notices.flatMap((row) => (row.id === noticeId ? [] : [row.id]));
+        const noticed = notices.some((row) => row.id === noticeId && row.days === afterDays);
+        const events: Array<OrchestrationV2DomainEvent> = noticed
+          ? []
+          : [yield* noticeEvent(current, afterDays)];
         const occurredAt = yield* DateTime.now;
         events.push({
           id: yield* ids.allocate.event({ threadId }),
@@ -680,7 +687,10 @@ const make = Effect.gen(function* () {
           occurredAt,
           payload: {
             sourceThreadId: threadId,
-            turnItemIds: itemIds.flatMap((row) => (items.has(row.id) ? [row.id] : [])),
+            turnItemIds: [
+              ...itemIds.flatMap((row) => (items.has(row.id) ? [row.id] : [])),
+              ...staleNoticeIds,
+            ],
             nodeIds: nodeIds.flatMap((row) => (nodes.has(row.id) ? [row.id] : [])),
           },
         });
