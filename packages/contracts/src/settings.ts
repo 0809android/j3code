@@ -2,6 +2,7 @@ import { EasDeviceHostConfigs, SimlockDeviceHostConfigs, SshDeviceHostConfigs } 
 import {
   AuthOrchestrationOperateScope,
   AuthAccessWriteScope,
+  AuthEnvironmentMaintainScope,
   AuthRelayConfigureScope,
   AuthSettingsWriteScope,
   AuthProvidersManageScope,
@@ -2088,6 +2089,9 @@ export function requiredScopesForServerSettingsPatch(
   let changesSettings = false;
   let changesAccess = false;
   let changesRelay = false;
+  // The next trim pass deletes history without waiting out the 30 days, so a settings write alone
+  // must not be able to start one.
+  const changesThreadHistoryTrim = patch.storageCleanup?.threadHistoryAfterDays !== undefined;
   for (const [key, value] of Object.entries(patch)) {
     if (value === undefined) continue;
     if (key === "relay") {
@@ -2120,6 +2124,7 @@ export function requiredScopesForServerSettingsPatch(
       : []),
     ...(changesProviders ? [AuthProvidersManageScope] : []),
     ...(changesAccess ? [AuthAccessWriteScope] : []),
+    ...(changesThreadHistoryTrim ? [AuthEnvironmentMaintainScope] : []),
     // The relay opens this host to devices elsewhere, as linking T3 Connect does.
     ...(changesRelay ? [AuthRelayConfigureScope] : []),
   ];

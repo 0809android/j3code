@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import * as Schema from "effect/Schema";
 
+import { AuthEnvironmentMaintainScope, AuthSettingsWriteScope } from "./auth.ts";
 import { type CommandId, ProjectId } from "./baseSchemas.ts";
 import {
   ProviderDriverKind,
@@ -17,6 +18,7 @@ import {
   idleCompactionPatch,
   PROJECT_SCOPED_SERVER_SETTING_KEYS,
   requiredScopesForProjectMutation,
+  requiredScopesForServerSettingsPatch,
   resolveIdleCompaction,
   resolveProjectProviderInstanceEnabled,
   resolveProviderInstanceEnabled,
@@ -570,5 +572,22 @@ describe("server model preferences", () => {
     const input = { favorites: [], providerModelPreferences: {} };
     expect(encodeServerSettings(decodeServerSettings(input))).toMatchObject(input);
     expect(decodeServerSettingsPatch(input)).toEqual(input);
+  });
+});
+
+describe("thread history trim settings authorization", () => {
+  it("asks for maintain authority when the patch sets threadHistoryAfterDays", () => {
+    expect(
+      requiredScopesForServerSettingsPatch({ storageCleanup: { threadHistoryAfterDays: 30 } }),
+    ).toEqual([AuthSettingsWriteScope, AuthEnvironmentMaintainScope]);
+    expect(
+      requiredScopesForServerSettingsPatch({ storageCleanup: { threadHistoryAfterDays: null } }),
+    ).toContain(AuthEnvironmentMaintainScope);
+  });
+
+  it("keeps other storage cleanup settings on settings write", () => {
+    expect(
+      requiredScopesForServerSettingsPatch({ storageCleanup: { logsAfterDays: 7 } }),
+    ).toEqual([AuthSettingsWriteScope]);
   });
 });
