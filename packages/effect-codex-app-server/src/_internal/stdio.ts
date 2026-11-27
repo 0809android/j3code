@@ -21,11 +21,19 @@ export const makeChildStdio = (
 ) =>
   Stdio.make({
     args: Effect.succeed([]),
-    stdin: handle.stdout.pipe(
-      // Descendants can retain stdout after the owner exits; drain its final frames for a bounded time.
-      Stream.interruptWhen(
-        handle.exitCode.pipe(Effect.ignore, Effect.andThen(Effect.sleep(PROCESS_EXIT_DRAIN_GRACE))),
-      ),
+    stdin: Stream.unwrap(
+      Effect.gen(function* () {
+        const pull = yield* Stream.toPull(handle.stdout);
+        // Descendants can retain stdout after the owner exits. After exit, keep reading while
+        // data arrives and stop once a read waits PROCESS_EXIT_DRAIN_GRACE with nothing new.
+        const idleAfterExit = handle.exitCode.pipe(
+          Effect.ignore,
+          Effect.andThen(Effect.sleep(PROCESS_EXIT_DRAIN_GRACE)),
+          Effect.andThen(Cause.done()),
+        );
+        return Stream.fromPull(Effect.succeed(Effect.raceFirst(pull, idleAfterExit)));
+      }),
+    ).pipe(
       // Finish stderr separately from the protocol's exit-status deadline.
       Stream.onEnd(stderrDrained),
     ),

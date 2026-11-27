@@ -564,3 +564,21 @@ it.effect.each([
       }).pipe(Effect.provide(layerServices));
     }).pipe(Effect.provide(layerDatabase)),
 );
+
+it.effect("sweeps orphaned overrides before the sweep layer is ready, so it cannot race later project changes", () =>
+  Effect.gen(function* () {
+    const missingProjectId = ProjectId.make("project:swept-at-startup");
+    yield* Effect.gen(function* () {
+      const serverSettings = yield* ServerSettings.ServerSettingsService;
+      yield* serverSettings.updateSettings({
+        projectSettingsOverrides: { [missingProjectId]: { worktreeCleanup: { mode: "off" } } },
+      });
+
+      yield* Layer.build(Layer.effectDiscard(ProjectSettingsOverrideSweep.sweep));
+
+      assert.isUndefined(
+        (yield* serverSettings.getSettings).projectSettingsOverrides[missingProjectId],
+      );
+    }).pipe(Effect.provide(layerServices));
+  }).pipe(Effect.provide(layerDatabase), Effect.scoped),
+);
