@@ -278,13 +278,25 @@ describe("ThreadHistoryTrimSection", () => {
     );
   });
 
-  it("is read-only without maintenance access", () => {
+  it("can only turn trimming off without maintenance access", () => {
     mocks.withoutMaintain = true;
     render(target({ days: 30 }));
 
-    expect(button("Trim old threads").disabled).toBe(true);
+    expect(button("Trim old threads").disabled).toBe(false);
     expect(button("Days without use").disabled).toBe(true);
     expect(button("Trim now").disabled).toBe(true);
     expect(container.textContent).toContain("needs maintenance access");
+
+    act(() => button("Trim old threads").click());
+    expect(mocks.writeSettings).toHaveBeenLastCalledWith(expect.anything(), [
+      { environmentId: "local", patch: { storageCleanup: { threadHistoryAfterDays: null } } },
+    ]);
+  });
+
+  it("cannot turn trimming on without maintenance access", () => {
+    mocks.withoutMaintain = true;
+    render(target({ days: null }));
+
+    expect(button("Trim old threads").disabled).toBe(true);
   });
 });

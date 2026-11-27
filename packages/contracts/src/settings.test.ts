@@ -576,13 +576,16 @@ describe("server model preferences", () => {
 });
 
 describe("thread history trim settings authorization", () => {
-  it("asks for maintain authority when the patch sets threadHistoryAfterDays", () => {
+  it("asks for maintain authority when the patch turns threadHistoryAfterDays on", () => {
     expect(
       requiredScopesForServerSettingsPatch({ storageCleanup: { threadHistoryAfterDays: 30 } }),
     ).toEqual([AuthSettingsWriteScope, AuthEnvironmentMaintainScope]);
+  });
+
+  it("lets settings write alone turn threadHistoryAfterDays off", () => {
     expect(
       requiredScopesForServerSettingsPatch({ storageCleanup: { threadHistoryAfterDays: null } }),
-    ).toContain(AuthEnvironmentMaintainScope);
+    ).toEqual([AuthSettingsWriteScope]);
   });
 
   it("keeps other storage cleanup settings on settings write", () => {

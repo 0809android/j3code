@@ -2089,9 +2089,10 @@ export function requiredScopesForServerSettingsPatch(
   let changesSettings = false;
   let changesAccess = false;
   let changesRelay = false;
-  // The next trim pass deletes history without waiting out the 30 days, so a settings write alone
-  // must not be able to start one.
-  const changesThreadHistoryTrim = patch.storageCleanup?.threadHistoryAfterDays !== undefined;
+  // Turning the trim on starts deleting history without waiting out the 30 days, so a settings
+  // write alone must not be able to do it. Turning it off deletes nothing.
+  const threadHistoryAfterDays = patch.storageCleanup?.threadHistoryAfterDays;
+  const changesThreadHistoryTrim = threadHistoryAfterDays != null;
   for (const [key, value] of Object.entries(patch)) {
     if (value === undefined) continue;
     if (key === "relay") {

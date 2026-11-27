@@ -15,6 +15,7 @@ const state = vi.hoisted(() => ({
   report: null as StorageCleanupReport | null,
   selected: null as string[] | null,
   threadHistoryTrim: false,
+  maintainDenied: false,
 }));
 
 vi.mock(import("../../state/server"), async (original) => {
@@ -22,6 +23,7 @@ vi.mock(import("../../state/server"), async (original) => {
   const { Atom } = await import("effect/reactivity");
   const report = Atom.make(() => ({ _tag: "Success", value: state.report, waiting: false }));
   const allowed = Atom.make(true);
+  const denied = Atom.make(false);
   const trimStatus = Atom.make(() => ({
     _tag: "Success",
     value: { lastTrimmedAt: null, nextTrimAt: null },
@@ -38,7 +40,7 @@ vi.mock(import("../../state/server"), async (original) => {
       },
       trimThreadHistory: {
         ...actual.serverEnvironment.trimThreadHistory,
-        permissionAtom: () => allowed,
+        permissionAtom: () => (state.maintainDenied ? denied : allowed),
       },
       threadHistoryTrim: (() => trimStatus) as never,
     },
@@ -134,6 +136,7 @@ function setup() {
   state.report = null;
   state.selected = null;
   state.threadHistoryTrim = false;
+  state.maintainDenied = false;
   state.run.mockReset();
   state.update.mockReset();
 }
@@ -401,4 +404,25 @@ it("trims thread history only on the machines picked in the settings scope", asy
   await act(async () => trimNow.click());
 
   expect(state.run.mock.calls.map(([input]) => input.environmentId)).toEqual(["env-a"]);
+});
+
+it("lets someone without maintenance access turn thread history trimming off, not on", async () => {
+  setup();
+  state.threadHistoryTrim = true;
+  state.maintainDenied = true;
+  state.settings = {
+    ...state.settings,
+    storageCleanup: { ...state.settings.storageCleanup, threadHistoryAfterDays: 30 },
+  };
+  state.targets = ["env-a", "env-b"].map((environmentId) => ({
+    environmentId,
+    settings: state.settings,
+  }));
+  await using screen = await render(panel());
+  const trimSwitch = screen.getByRole("switch", { name: "Trim old threads" });
+
+  await expect.element(trimSwitch).not.toBeDisabled();
+  await expect.element(screen.getByLabelText("Trim old threads in days")).toBeDisabled();
+  await userEvent.click(trimSwitch);
+  expect(saves()).toEqual([{ threadHistoryAfterDays: null }]);
 });

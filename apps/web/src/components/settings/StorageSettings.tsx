@@ -138,6 +138,7 @@ function RetentionControl({
   minimum = 1,
   defaultDays = 8,
   disabled = false,
+  allowSwitchOff = false,
 }: {
   label: string;
   value: number | null;
@@ -145,6 +146,8 @@ function RetentionControl({
   minimum?: number;
   defaultDays?: number;
   disabled?: boolean;
+  /** Keeps the switch usable for turning a rule that is on off, while the age stays locked. */
+  allowSwitchOff?: boolean;
 }) {
   const gt = useGT();
   const [draft, setDraft] = useState(value);
@@ -274,7 +277,7 @@ function RetentionControl({
       <Switch
         aria-label={label}
         checked={on}
-        disabled={disabled}
+        disabled={disabled && !(allowSwitchOff && on)}
         // Keeps focus in the age field, so switching off never commits an edited age first.
         onMouseDown={(event) => event.preventDefault()}
         onCheckedChange={(enabled) => {
@@ -762,6 +765,7 @@ function ThreadHistorySection() {
               value={settings.threadHistoryAfterDays}
               defaultDays={SUGGESTED_THREAD_HISTORY_AFTER_DAYS}
               disabled={!canMaintain}
+              allowSwitchOff
               onChange={(threadHistoryAfterDays, onFailed) =>
                 update({ threadHistoryAfterDays }, { onFailed })
               }

@@ -93,10 +93,14 @@ export function ThreadHistoryTrimSection({
 
   const scoped = resolveMobileSettingsTargets(supported, null);
   const canMaintain = supported.every((target) => maintainers.has(target.environmentId));
-  const canWrite = canMaintain && supported.every((target) => writers.has(target.environmentId));
+  const canWrite = supported.every((target) => writers.has(target.environmentId));
   const managed = managedSettingReason(scoped, ["storageCleanup.threadHistoryAfterDays"]);
   const days = uniformThreadHistoryAfterDays(supported.map(daysOf));
   const editable = canWrite && managed === undefined && pending === null;
+  // Turning trimming off deletes nothing, so settings write is enough; turning it on or changing
+  // the days needs maintenance access.
+  const canTurnOff = editable && days !== null;
+  const canChange = editable && canMaintain;
   const runnable = supported.filter(
     (target) => maintainers.has(target.environmentId) && daysOf(target) !== null,
   );
@@ -215,8 +219,11 @@ export function ThreadHistoryTrimSection({
           "After this many days without use, a thread's finished tool output and reasoning are deleted to save space. Messages, plans, file changes and attachments stay, and you can still search and continue the thread. Running, pinned and snoozed threads and threads with an open pull request are skipped.",
         )}
         value={days === "mixed" ? null : days !== null}
-        disabled={!editable}
-        onValueChange={(on) => saveDays(on ? SUGGESTED_THREAD_HISTORY_AFTER_DAYS : null)}
+        disabled={!canChange && !canTurnOff}
+        onValueChange={(on) => {
+          if (!on) saveDays(null);
+          else if (canChange) saveDays(SUGGESTED_THREAD_HISTORY_AFTER_DAYS);
+        }}
       />
       {typeof days === "number" ? (
         <View className="flex-row items-center gap-4 border-t border-border-subtle px-4 py-4 android:min-h-14 android:py-3">
@@ -228,7 +235,7 @@ export function ThreadHistoryTrimSection({
             value={days}
             min={MIN_DAYS}
             max={MAX_DAYS}
-            disabled={!editable}
+            disabled={!canChange}
             label={gt("Days without use")}
             formatValue={(value) =>
               gt("{count, plural, one {{count} day} other {{count} days}}", { count: value })
