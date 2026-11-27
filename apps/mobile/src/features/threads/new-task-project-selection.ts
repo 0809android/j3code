@@ -173,6 +173,8 @@ export function resolveDraftProjectSelection(
     readonly pickerClosed: boolean;
     readonly useLastProject?: boolean | undefined;
     readonly lastProject?: ProjectRef | undefined;
+    /** The machine chosen in settings, already resolved to null unless it is connected. */
+    readonly defaultEnvironmentId?: EnvironmentId | null | undefined;
   },
 ): DraftProjectSelectionResolution {
   const hasExplicitProjectSelection =
@@ -191,19 +193,24 @@ export function resolveDraftProjectSelection(
   if (draft.incomingShareId === undefined) {
     return { kind: "pick" };
   }
-  const last =
+  const openScopes = pickableProjectGroups(projectScopes);
+  const start =
     draft.useLastProject === false
       ? undefined
-      : projects.find(
-          (project) =>
-            project.environmentId === draft.lastProject?.environmentId &&
-            project.id === draft.lastProject.projectId &&
-            project.archivedAt == null,
-        );
-  if (last) {
-    return { kind: "select", project: last };
+      : resolveNewTaskStartProject({
+          projects,
+          defaultEnvironmentId: draft.defaultEnvironmentId ?? null,
+          projectGroups: projectScopes.map((scope) => ({
+            memberProjectRefs: scope.projectRefs,
+            pinned: scope.pinned,
+            archived: scope.archived,
+          })),
+          lastProject: draft.lastProject,
+        });
+  if (start) {
+    return { kind: "select", project: start };
   }
-  const onlyScope = projectScopes.length === 1 ? projectScopes[0] : null;
+  const onlyScope = openScopes.length === 1 ? openScopes[0] : null;
   return onlyScope ? { kind: "select", project: onlyScope.representative } : { kind: "pick" };
 }
 
