@@ -18,7 +18,6 @@ import type {
   ProjectionRuntimeRecoveryState,
 } from "./ProjectionStore.ts";
 
-import packageJson from "../../package.json" with { type: "json" };
 import * as ServerSettings from "../serverSettings.ts";
 import { isNativeMaintenanceCommand } from "./CommandPolicy.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
@@ -39,9 +38,6 @@ import {
 
 const CONTINUE_PROMPT =
   "Continue where you left off. Your last turn was cut short, so a command or other action it started may have finished or may still be running. Before you repeat one that changes state, confirm it did not take effect and is not still running; if you cannot tell, say so instead of repeating it.";
-
-const UPDATED_PREFIX = "K3 Code paused this turn to install an update and has restarted.";
-const NOT_UPDATED_PREFIX = "K3 Code paused this turn for an update that didn't install.";
 
 const MAX_CONTINUATION_CHAIN = 3;
 const CONTINUATION_LOOP_WINDOW_MS = 5 * 60 * 1_000;
@@ -244,9 +240,6 @@ export const continueRestartedRun = Effect.fn("RestartContinuation.continueResta
     readonly sourceRunId: RunId;
     readonly processLossCount?: number;
     readonly cause?: BackgroundWorkLossCause;
-    readonly reason?: "update";
-    /** A server still on this version never installed the update it paused for. */
-    readonly pausedOnVersion?: string;
   }) {
     const settings = yield* ServerSettings.ServerSettingsService;
     const enabled = yield* settings.getSettings.pipe(Effect.orElseSucceed(() => null));
@@ -329,18 +322,12 @@ export const continueRestartedRun = Effect.fn("RestartContinuation.continueResta
       note.work.length === 0
         ? undefined
         : restartCancelledBackgroundWorkNote(note.work, input.cause);
-    const updated =
-      input.reason === "update" ? input.pausedOnVersion !== packageJson.version : undefined;
-    const continuePrompt =
-      updated === undefined
-        ? CONTINUE_PROMPT
-        : `${updated ? UPDATED_PREFIX : NOT_UPDATED_PREFIX} ${CONTINUE_PROMPT}`;
     const text =
       noteText === undefined
-        ? continuePrompt
+        ? CONTINUE_PROMPT
         : note.settled
           ? noteText
-          : `${noteText}\n\n${continuePrompt}`;
+          : `${noteText}\n\n${CONTINUE_PROMPT}`;
     yield* threads
       .dispatch({
         type: "message.dispatch",
@@ -356,11 +343,7 @@ export const continueRestartedRun = Effect.fn("RestartContinuation.continueResta
               ? "The agent runtime exited and stopped background work"
               : note.settled
                 ? "K3 Code restarted and stopped background work"
-                : updated === true
-                  ? "K3 Code updated and resumed this turn"
-                  : updated === false
-                    ? "Update didn't install; resumed"
-                    : "K3 Code restarted and resumed this turn",
+                : "K3 Code restarted and resumed this turn",
           detail: text,
         },
         attachments: [],

@@ -203,13 +203,13 @@ export function getDesktopUpdateInstallConfirmationMessage(
   return version
     ? resolve(
         msg(
-          "Install update {version} and restart K3 Code?\n\nIf “Continue threads after restarts” is on, running turns pause first and resume after the restart.",
+          "Install update {version} and restart K3 Code?\n\nAny running tasks will be interrupted. Make sure you're ready before continuing.",
           { version },
         ),
       )
     : resolve(
         msg(
-          "Install update and restart K3 Code?\n\nIf “Continue threads after restarts” is on, running turns pause first and resume after the restart.",
+          "Install update and restart K3 Code?\n\nAny running tasks will be interrupted. Make sure you're ready before continuing.",
         ),
       );
 }

@@ -3,10 +3,7 @@ import {
   CommandId,
   isProviderNativeSubagentThread,
   type OrchestrationV2DomainEvent,
-  type OrchestrationV2ProviderThread,
-  type ProviderSessionId,
   type ProviderThreadId,
-  type ProviderTurnId,
   type RunAttemptId,
   type OrchestrationV2RestartCancelledBackgroundWork,
   type OrchestrationV2Subagent,
@@ -22,7 +19,6 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
-import packageJson from "../../package.json" with { type: "json" };
 import * as EffectOutbox from "./EffectOutbox.ts";
 import * as EventSink from "./EventSink.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
@@ -81,28 +77,13 @@ export interface ProviderRuntimeReconciliationSummary {
   readonly requeuedEffects: number;
 }
 
-/** Paused for an update that is installing, or that a still-running server gave up on. */
-export type UpdateOutcome = "paused" | "not-installed";
-
-export interface RunningProviderTurn {
-  readonly providerSessionId: ProviderSessionId;
-  readonly providerThread: OrchestrationV2ProviderThread;
-  readonly providerTurnId: ProviderTurnId;
-}
-
 export class ProviderRuntimeRecoveryService extends Context.Service<
   ProviderRuntimeRecoveryService,
   {
     readonly reconcile: (
       trigger: "startup" | "shutdown",
-      options?: { readonly update?: UpdateOutcome },
     ) => Effect.Effect<ProviderRuntimeReconciliationSummary, ProviderRuntimeRecoveryError>;
     readonly prepareForShutdown: Effect.Effect<void, ProviderRuntimeRecoveryError>;
-    /** Records update continuations and returns every running turn for the caller to interrupt. */
-    readonly prepareForUpdate: Effect.Effect<
-      ReadonlyArray<RunningProviderTurn>,
-      ProviderRuntimeRecoveryError
-    >;
     readonly recover: Effect.Effect<ProviderRuntimeRecoverySummary, ProviderRuntimeRecoveryError>;
   }
 >()("t3/orchestration-v2/ProviderRuntimeRecoveryService") {}
@@ -277,7 +258,6 @@ export const make = Effect.gen(function* () {
       trigger: "startup" | "shutdown",
       continueAfterRestart: boolean,
       stoppedThisPass: ReadonlyMap<string, RecoverySession> = new Map(),
-      update?: UpdateOutcome,
     ) {
       const now = yield* DateTime.now;
       const projection = yield* rewindUnacceptedRuns(stored);
@@ -345,12 +325,7 @@ export const make = Effect.gen(function* () {
           item.type === "subagent" && isAppOwnedDelegation(item) ? [item.subagentId] : [],
         ),
       ]);
-      const detail =
-        update === "not-installed"
-          ? `The update didn't install, so K3 Code stopped waiting for it. ${continueAfterRestart ? "This turn continues now." : "Send a message to continue."}`
-          : update === "paused"
-            ? `Paused so K3 Code could install an update. ${continueAfterRestart ? "It continues after the restart." : "Send a message to continue after the restart."}`
-            : `Cancelled because the server ${trigger === "startup" ? "restarted" : "shut down"} before the provider work completed.`;
+      const detail = `Cancelled because the server ${trigger === "startup" ? "restarted" : "shut down"} before the provider work completed.`;
       const commandId = CommandId.make(
         `command:runtime-reconcile:${trigger}:${projection.thread.id}:${DateTime.formatIso(now)}`,
       );
@@ -836,14 +811,7 @@ export const make = Effect.gen(function* () {
             // EventSink allocates the real position, after the run's existing items.
             ordinal: 0,
             status: "completed",
-            title:
-              update === "not-installed"
-                ? "Update didn't install"
-                : update === "paused"
-                  ? "Paused for update"
-                  : trigger === "startup"
-                    ? "Server restarted"
-                    : "Server shut down",
+            title: trigger === "startup" ? "Server restarted" : "Server shut down",
             startedAt: now,
             completedAt: now,
             updatedAt: now,
@@ -1125,7 +1093,6 @@ export const make = Effect.gen(function* () {
 
   const reconcile = Effect.fn("ProviderRuntimeRecoveryService.reconcile")(function* (
     trigger: "startup" | "shutdown",
-    options?: { readonly update?: UpdateOutcome },
   ) {
     const continueAfterRestart = yield* settings.getSettings.pipe(Effect.orElseSucceed(() => null));
     const threadIds = yield* projections
@@ -1162,13 +1129,7 @@ export const make = Effect.gen(function* () {
             continueAfterRestart !== null &&
             resolveProjectSettings(continueAfterRestart, projection.thread.projectId).settings
               .continueThreadsAfterServerUpdate;
-          const result = yield* reconcileProjection(
-            projection,
-            trigger,
-            enabled,
-            stoppedThisPass,
-            options?.update,
-          );
+          const result = yield* reconcileProjection(projection, trigger, enabled, stoppedThisPass);
           for (const session of projection.providerSessions) {
             if (session.status !== "stopped" && session.status !== "error") {
               stoppedThisPass.set(session.id, session);
@@ -1217,38 +1178,6 @@ export const make = Effect.gen(function* () {
     } satisfies ProviderRuntimeReconciliationSummary;
   });
 
-  const writeContinuation = Effect.fn("ProviderRuntimeRecoveryService.writeContinuation")(
-    function* (
-      threadId: ThreadId,
-      projection: ProjectionStore.ProjectionRuntimeRecoveryState,
-      reason?: "update",
-    ) {
-      const run = restartContinuationRun(
-        yield* rewindUnacceptedRuns(projection),
-        yield* DateTime.now,
-      );
-      if (!run) return;
-      const commandId = CommandId.make(`command:restart-prepare:${run.id}`);
-      yield* eventSink.writeWithEffects({
-        commandId,
-        events: [],
-        effects: [
-          {
-            id: `effect:restart-continuation:${run.id}`,
-            commandId,
-            threadId,
-            request: {
-              type: "provider-runtime.continue",
-              sourceRunId: run.id,
-              processLossCount: 0,
-              ...(reason === undefined ? {} : { reason, pausedOnVersion: packageJson.version }),
-            },
-          },
-        ],
-      });
-    },
-  );
-
   const prepareForShutdown = Effect.gen(function* () {
     const enabled = yield* settings.getSettings.pipe(Effect.orElseSucceed(() => null));
     if (!enabled) return;
@@ -1275,7 +1204,28 @@ export const make = Effect.gen(function* () {
               .continueThreadsAfterServerUpdate
           )
             return;
-          yield* writeContinuation(threadId, projection);
+          const run = restartContinuationRun(
+            yield* rewindUnacceptedRuns(projection),
+            yield* DateTime.now,
+          );
+          if (!run) return;
+          const commandId = CommandId.make(`command:restart-prepare:${run.id}`);
+          yield* eventSink.writeWithEffects({
+            commandId,
+            events: [],
+            effects: [
+              {
+                id: `effect:restart-continuation:${run.id}`,
+                commandId,
+                threadId,
+                request: {
+                  type: "provider-runtime.continue",
+                  sourceRunId: run.id,
+                  processLossCount: 0,
+                },
+              },
+            ],
+          });
         }).pipe(
           Effect.catchCauseIf(
             (cause) => !Cause.hasInterruptsOnly(cause),
@@ -1291,63 +1241,11 @@ export const make = Effect.gen(function* () {
     Effect.mapError((cause) => new ProviderRuntimeRecoveryError({ operation: "reconcile", cause })),
   );
 
-  const prepareForUpdate = Effect.gen(function* () {
-    const enabled = yield* settings.getSettings.pipe(Effect.orElseSucceed(() => null));
-    const threadIds = yield* projections.getRecoveryThreadIds("runtime");
-    const turns = yield* Effect.forEach(
-      threadIds,
-      (threadId) =>
-        Effect.gen(function* () {
-          const projection = yield* projections.getRuntimeRecoveryProjection(threadId);
-          const running = projection.providerTurns.flatMap((turn) => {
-            const providerThread = projection.providerThreads.find(
-              (candidate) => candidate.id === turn.providerThreadId,
-            );
-            return turn.status === "running" && providerThread?.providerSessionId != null
-              ? [
-                  {
-                    providerSessionId: providerThread.providerSessionId,
-                    providerThread,
-                    providerTurnId: turn.id,
-                  },
-                ]
-              : [];
-          });
-          if (
-            enabled !== null &&
-            resolveProjectSettings(enabled, projection.thread.projectId).settings
-              .continueThreadsAfterServerUpdate
-          )
-            yield* writeContinuation(threadId, projection, "update");
-          return running;
-        }).pipe(
-          Effect.catchCauseIf(
-            (cause) => !Cause.hasInterruptsOnly(cause),
-            (cause) =>
-              Effect.logWarning("Failed to prepare a thread for an update", {
-                threadId,
-                cause,
-              }).pipe(Effect.as([])),
-          ),
-        ),
-      { concurrency: 2 },
-    );
-    return turns.flat();
-  }).pipe(
-    Effect.withSpan("ProviderRuntimeRecoveryService.prepareForUpdate"),
-    Effect.mapError((cause) => new ProviderRuntimeRecoveryError({ operation: "reconcile", cause })),
-  );
-
   const recover = Effect.gen(function* () {
     return (yield* reconcile("startup")) satisfies ProviderRuntimeRecoverySummary;
   });
 
-  return ProviderRuntimeRecoveryService.of({
-    reconcile,
-    prepareForShutdown,
-    prepareForUpdate,
-    recover,
-  });
+  return ProviderRuntimeRecoveryService.of({ reconcile, prepareForShutdown, recover });
 });
 
 export const layer = Layer.effect(ProviderRuntimeRecoveryService, make);

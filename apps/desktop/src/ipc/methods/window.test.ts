@@ -83,7 +83,6 @@ const defaultWslInstance: DesktopBackendManager.DesktopBackendInstance = {
     restartScheduled: false,
   }),
   waitForReady: () => Effect.succeed(true),
-  pauseRunsForUpdate: Effect.succeedNone,
 };
 
 const backendConfigurationLayer = Layer.succeed(

@@ -26,7 +26,6 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
-import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
@@ -208,12 +207,6 @@ export class DesktopTelemetryReceiver extends Context.Service<
       never,
       Scope.Scope
     >;
-    /** Request ids from the desktop asking to pause running turns before it installs an update. */
-    readonly pauseRequests: Stream.Stream<string>;
-    readonly reportRunsPaused: (
-      requestId: string,
-      pausedRuns: number,
-    ) => Effect.Effect<void, DesktopTelemetryControlError>;
   }
 >()("t3/resourceTelemetry/DesktopTelemetryReceiver") {}
 
@@ -429,7 +422,6 @@ export const make = Effect.fn("resourceTelemetry.desktopTelemetryReceiver.make")
   const healthChanges = yield* PubSub.sliding<DesktopTelemetryReceiverHealth>(4);
   const latestUpdateReport = yield* Ref.make(Option.none<DesktopUpdateStatusReport>());
   const updateReportChanges = yield* PubSub.sliding<DesktopUpdateStatusReport>(16);
-  const pauseRequests = yield* Queue.unbounded<string>();
   const controlMutex = yield* Semaphore.make(1);
   const snapshotMutex = yield* Semaphore.make(1);
   const health = yield* Ref.make<DesktopTelemetryReceiverHealth>({
@@ -618,13 +610,6 @@ export const make = Effect.fn("resourceTelemetry.desktopTelemetryReceiver.make")
           );
         }
 
-        if (message.type === "pauseRunsForUpdate") {
-          return recordContact.pipe(
-            Effect.andThen(Queue.offer(pauseRequests, message.requestId)),
-            Effect.asVoid,
-          );
-        }
-
         const sampledAt = DateTime.makeUnsafe(message.sampledAtUnixMs);
         return snapshotMutex.withPermits(1)(
           recordContact.pipe(
@@ -765,17 +750,6 @@ export const make = Effect.fn("resourceTelemetry.desktopTelemetryReceiver.make")
         changes: Stream.fromSubscription(subscription),
       };
     }),
-    pauseRequests: Stream.fromQueue(pauseRequests),
-    reportRunsPaused: Effect.fn("DesktopTelemetryReceiver.reportRunsPaused")(
-      function (requestId, pausedRuns) {
-        return sendControlMessage({
-          version: 1,
-          type: "runsPausedForUpdate",
-          requestId,
-          pausedRuns,
-        });
-      },
-    ),
   });
 });
 
@@ -834,10 +808,6 @@ export const layerTest = (
           latest: Option.none<DesktopUpdateStatusReport>(),
           changes: Stream.empty,
         }),
-      pauseRequests: Stream.empty,
-      reportRunsPaused: Effect.fn("DesktopTelemetryReceiver.reportRunsPaused")(function () {
-        return Effect.void;
-      }),
       ...overrides,
     }),
   );
