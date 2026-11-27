@@ -583,6 +583,54 @@ it.effect("gives a fork's guest the commands the fork shows from its source thre
   }).pipe(Effect.provide(layerTest)),
 );
 
+it.effect("sends a fork's guest a fresh snapshot when the source thread's history is trimmed", () =>
+  Effect.gen(function* () {
+    const { orchestrator, guestShares } = yield* shareThread;
+    const runId = yield* ownerRun;
+    const eventSink = yield* EventSink.EventSinkV2;
+    const forkId = ThreadId.make("thread:guest-share-trimmed-fork");
+    yield* orchestrator.dispatch({
+      type: "thread.fork",
+      commandId: CommandId.make("fork-trimmed"),
+      sourceThreadId: threadId,
+      targetThreadId: forkId,
+      sourcePoint: { type: "run", runId },
+      createdBy: "user",
+      creationSource: "web",
+    });
+    const { url } = yield* guestShares.create({ threadId: forkId });
+    const { token: session } = yield* guestShares.redeem({
+      credential: url.slice(url.indexOf("#") + 1),
+      name: "Sam",
+    });
+    const events = yield* guestShares.stream(session);
+    yield* eventSink.write({
+      events: [
+        {
+          id: EventId.make("event:fork-trimmed"),
+          type: "thread.history-trimmed",
+          threadId: forkId,
+          occurredAt: yield* DateTime.now,
+          payload: { sourceThreadId: threadId, turnItemIds: [], nodeIds: [] },
+        },
+      ],
+    });
+    yield* orchestrator.dispatch({
+      type: "thread.guest-share.close",
+      commandId: CommandId.make("close-trimmed-fork"),
+      threadId: forkId,
+    });
+    const items = Array.from(yield* Stream.runCollect(events)).flatMap((event) =>
+      event.type === "thread" ? [event.item] : [],
+    );
+    // The opening snapshot, then the one that replaces the copy; the copy itself is never sent.
+    assert.deepEqual(
+      items.map((item) => item.kind),
+      ["snapshot", "snapshot"],
+    );
+  }).pipe(Effect.provide(layerTest)),
+);
+
 it.effect("pages the guest back through turns older than the stream's snapshot", () =>
   Effect.gen(function* () {
     const { guestShares, credential } = yield* shareThread;
