@@ -1,14 +1,10 @@
 import * as Context from "effect/Context";
-import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 
-import { AppImageUpdater, autoUpdater, CancellationToken } from "electron-updater";
-
-// How long a retry waits for an interrupted download to wind down before giving up on it.
-export const CANCELLED_DOWNLOAD_SETTLE_TIMEOUT = Duration.seconds(10);
+import { AppImageUpdater, autoUpdater } from "electron-updater";
 
 type AutoUpdater = typeof autoUpdater;
 type SpawnLog = (cmd: string, args?: Array<string>, ...rest: Array<unknown>) => Promise<boolean>;
@@ -51,8 +47,6 @@ export class ElectronUpdaterDownloadUpdateError extends Schema.TaggedError<Elect
   {
     channel: Schema.NullOr(Schema.String),
     cause: Schema.Defect(),
-    // The previous download never settled, so electron-updater would hand it out again.
-    restartRequired: Schema.optionalKey(Schema.Boolean),
   },
 ) {
   override get message(): string {
@@ -105,9 +99,6 @@ export class ElectronUpdater extends Context.Service<
     ) => Effect.Effect<void, never, Scope.Scope>;
   }
 >()("@t3tools/desktop/electron/ElectronUpdater") {}
-
-let pendingDownload: Promise<unknown> | null = null;
-const noop = () => undefined;
 
 /** @public */
 export const make = ElectronUpdater.of({
@@ -171,47 +162,10 @@ export const make = ElectronUpdater.of({
   }),
   downloadUpdate: Effect.suspend(() => {
     const channel = autoUpdater.channel;
-    // Interrupting only stops waiting: electron-updater keeps handing out its old promise (and
-    // ignores a new token) until that promise settles. A stuck one never does, so a retry waits up
-    // to a limit and then refuses; only a restart clears electron-updater's state.
-    const previous = pendingDownload;
-    const settlePrevious =
-      previous === null
-        ? Effect.void
-        : Effect.promise(() => previous.then(noop, noop)).pipe(
-            Effect.timeoutOption(CANCELLED_DOWNLOAD_SETTLE_TIMEOUT),
-            Effect.asVoid,
-          );
-    return settlePrevious.pipe(
-      Effect.andThen(
-        Effect.suspend(() =>
-          pendingDownload !== null
-            ? Effect.fail(
-                new ElectronUpdaterDownloadUpdateError({
-                  channel,
-                  cause: new Error("The previous download has not settled."),
-                  restartRequired: true,
-                }),
-              )
-            : Effect.tryPromise({
-                // Interrupting cancels the download, which also frees electron-updater for the next one.
-                try: (signal) => {
-                  const cancellation = new CancellationToken();
-                  signal.addEventListener("abort", () => cancellation.cancel(), { once: true });
-                  const download = autoUpdater.downloadUpdate(cancellation);
-                  pendingDownload = download;
-                  const clear = () => {
-                    if (pendingDownload === download) pendingDownload = null;
-                  };
-                  download.then(clear, clear);
-                  return download;
-                },
-                catch: (cause) => new ElectronUpdaterDownloadUpdateError({ channel, cause }),
-              }),
-        ),
-      ),
-      Effect.asVoid,
-    );
+    return Effect.tryPromise({
+      try: () => autoUpdater.downloadUpdate(),
+      catch: (cause) => new ElectronUpdaterDownloadUpdateError({ channel, cause }),
+    }).pipe(Effect.asVoid);
   }),
   quitAndInstall: Effect.fn("ElectronUpdater.quitAndInstall")(function ({
     isSilent,

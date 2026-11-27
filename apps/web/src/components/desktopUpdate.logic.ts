@@ -77,19 +77,8 @@ export function shouldShowArm64IntelBuildWarning(state: DesktopUpdateState | nul
   return state?.hostArch === "arm64" && state.appArch === "x64";
 }
 
-/** A stuck download cannot be retried; only restarting the app lets the desktop download again. */
-function isDownloadRestartRequired(state: DesktopUpdateState | null): boolean {
-  return (
-    state !== null &&
-    (state.status === "available" || state.status === "error") &&
-    state.errorContext === "download" &&
-    !state.canRetry &&
-    state.availableVersion !== null
-  );
-}
-
 export function isDesktopUpdateButtonDisabled(state: DesktopUpdateState | null): boolean {
-  return state?.status === "downloading" || isDownloadRestartRequired(state);
+  return state?.status === "downloading";
 }
 
 export function getArm64IntelBuildWarningDescription(
@@ -134,9 +123,6 @@ export function getDesktopUpdateButtonTooltip(
     return resolve(
       msg("Update {version} did not apply. Click to retry.", { version: state.notAppliedVersion }),
     );
-  }
-  if (isDownloadRestartRequired(state)) {
-    return resolve(msg("The download is stuck. Restart K3 Code, then try again."));
   }
   if (
     (state.status === "available" || state.status === "error") &&

@@ -2,7 +2,6 @@ import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import type { DesktopUpdateState } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
-import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as PlatformError from "effect/PlatformError";
 import * as Layer from "effect/Layer";
@@ -30,12 +29,6 @@ export interface UpdatesHarnessOptions {
   readonly setUpdateChannelError?: DesktopAppSettings.DesktopSettingsWriteError;
   readonly setDisableDifferentialDownload?: Effect.Effect<void>;
   readonly downloadUpdate?: Effect.Effect<void, ElectronUpdater.ElectronUpdaterDownloadUpdateError>;
-  /**
-   * electron-updater cannot cancel a stalled download, and keeps handing out its promise until it
-   * settles. By default an interrupted download stays unsettled, so a retry is refused with
-   * `restartRequired`; set this to model a download that winds down when it is interrupted.
-   */
-  readonly interruptedDownloadSettles?: boolean;
   readonly quitAndInstall?: Effect.Effect<void, ElectronUpdater.ElectronUpdaterQuitAndInstallError>;
   readonly stopBackend?: Effect.Effect<void>;
   readonly startBackend?: Effect.Effect<void>;
@@ -57,10 +50,8 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
   let checkCount = 0;
   let quitAndInstallCount = 0;
   let downloadCount = 0;
-  let downloadUnsettled = false;
   let allowDowngrade = false;
   const checkAllowedDowngrade: boolean[] = [];
-  const differentialDownloadDisabled: boolean[] = [];
   let fullChangelog = false;
   const feedUrls: ElectronUpdater.ElectronUpdaterFeedUrl[] = [];
   const listeners = new Map<string, Set<(...args: readonly unknown[]) => void>>();
@@ -102,34 +93,14 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
       Effect.sync(() => {
         fullChangelog = value;
       }),
-    setDisableDifferentialDownload: (value) =>
-      Effect.sync(() => {
-        differentialDownloadDisabled.push(value);
-      }).pipe(Effect.andThen(options.setDisableDifferentialDownload ?? Effect.void)),
+    setDisableDifferentialDownload: () => options.setDisableDifferentialDownload ?? Effect.void,
     checkForUpdates: Effect.sync(() => {
       checkCount += 1;
       checkAllowedDowngrade.push(allowDowngrade);
     }).pipe(Effect.andThen(options.checkForUpdates ?? Effect.void)),
-    downloadUpdate: Effect.suspend(() => {
-      if (downloadUnsettled) {
-        return Effect.fail(
-          new ElectronUpdater.ElectronUpdaterDownloadUpdateError({
-            channel: null,
-            cause: new Error("The previous download has not settled."),
-            restartRequired: true,
-          }),
-        );
-      }
+    downloadUpdate: Effect.sync(() => {
       downloadCount += 1;
-      downloadUnsettled = true;
-      return (options.downloadUpdate ?? Effect.void).pipe(
-        Effect.onExit((exit) =>
-          Effect.sync(() => {
-            downloadUnsettled = Exit.hasInterrupts(exit) && !options.interruptedDownloadSettles;
-          }),
-        ),
-      );
-    }),
+    }).pipe(Effect.andThen(options.downloadUpdate ?? Effect.void)),
     quitAndInstall: () =>
       Effect.sync(() => {
         quitAndInstallCount += 1;
@@ -355,7 +326,6 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
     fullChangelog: () => fullChangelog,
     /** Whether each feed check could offer an older release, and the flag now. */
     checkAllowedDowngrade,
-    differentialDownloadDisabled,
     allowDowngrade: () => allowDowngrade,
     listenerCount: () =>
       Array.from(listeners.values()).reduce(
