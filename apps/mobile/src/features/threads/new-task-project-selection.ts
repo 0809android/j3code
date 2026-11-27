@@ -3,6 +3,7 @@ import { availableScratchWorkspaceRoot } from "@t3tools/client-runtime/operation
 import {
   isPickableProjectMember,
   isRepositoryRootProject,
+  pickableProjectGroups,
   selectGroupDefaultProject,
   sortProjectsByGroupOrder,
 } from "@t3tools/client-runtime/state/project-grouping";
@@ -222,6 +223,64 @@ export function newTaskFilteredProject(
   return project && { environmentId: project.environmentId, projectId: project.id };
 }
 
+type ProjectGroupsForOrder = Parameters<typeof sortProjectsByGroupOrder>[1];
+
+/**
+ * Where a new task starts when nothing narrows it: the default machine's first open project (its
+ * remembered one first), else the remembered project. Archived groups are never picked.
+ */
+function resolveNewTaskStartProject(options: {
+  readonly projects: ReadonlyArray<EnvironmentProject>;
+  readonly defaultEnvironmentId: EnvironmentId | null;
+  readonly projectGroups: ProjectGroupsForOrder | undefined;
+  readonly lastProject: ProjectRef | undefined;
+}): EnvironmentProject | undefined {
+  const { defaultEnvironmentId } = options;
+  const groups = options.projectGroups ?? [];
+  const last =
+    options.lastProject &&
+    options.projects.find(
+      (project) =>
+        project.environmentId === options.lastProject?.environmentId &&
+        project.id === options.lastProject.projectId,
+    );
+  const inGroup = (
+    group: ProjectGroupsForOrder[number],
+    project: Pick<EnvironmentProject, "environmentId" | "id">,
+  ) =>
+    group.memberProjectRefs.some(
+      (ref) => ref.environmentId === project.environmentId && ref.projectId === project.id,
+    );
+  const openGroups = pickableProjectGroups(groups);
+  const onDefaultEnvironment = defaultEnvironmentId
+    ? sortProjectsByGroupOrder(
+        options.projects.filter(
+          (candidate) =>
+            candidate.environmentId === defaultEnvironmentId &&
+            candidate.archivedAt == null &&
+            !groups.some((group) => group.archived && inGroup(group, candidate)),
+        ),
+        groups,
+      )
+    : [];
+  const lastOnDefaultEnvironment = onDefaultEnvironment.find((candidate) => candidate === last);
+  // Members of one group rank alike, so the first of them may be a subfolder: take the group's root.
+  const firstProject = onDefaultEnvironment[0];
+  const firstGroup = firstProject
+    ? openGroups.find((group) => inGroup(group, firstProject))
+    : undefined;
+  const firstOnDefaultEnvironment = firstGroup
+    ? selectGroupDefaultProject(
+        onDefaultEnvironment.filter((candidate) => inGroup(firstGroup, candidate)),
+      )
+    : firstProject;
+  return (
+    lastOnDefaultEnvironment ??
+    firstOnDefaultEnvironment ??
+    (last?.archivedAt == null ? last : undefined)
+  );
+}
+
 export function newTaskDestination(options: {
   readonly projects: ReadonlyArray<EnvironmentProject>;
   readonly requestId: string;
@@ -241,49 +300,20 @@ export function newTaskDestination(options: {
     options.projects.find(
       (project) => project.environmentId === ref.environmentId && project.id === ref.projectId,
     );
-  // A remembered project that was archived since opens the picker; the current one still wins.
-  const last = find(options.lastProject);
   const { defaultEnvironmentId: savedDefault, connectedEnvironmentIds } = options;
   const defaultEnvironmentId =
     savedDefault && connectedEnvironmentIds.has(savedDefault) ? savedDefault : null;
-  const onDefaultEnvironment = defaultEnvironmentId
-    ? sortProjectsByGroupOrder(
-        options.projects.filter(
-          (candidate) =>
-            candidate.environmentId === defaultEnvironmentId && candidate.archivedAt == null,
-        ),
-        options.projectGroups ?? [],
-      )
-    : [];
-  const lastOnDefaultEnvironment = onDefaultEnvironment.find((candidate) => candidate === last);
-  // Members of one group rank alike, so the first of them may be a subfolder: take the group's root.
-  const firstProject = onDefaultEnvironment[0];
-  const firstGroup = firstProject
-    ? options.projectGroups?.find((group) =>
-        group.memberProjectRefs.some(
-          (ref) =>
-            ref.environmentId === firstProject.environmentId && ref.projectId === firstProject.id,
-        ),
-      )
-    : undefined;
-  const firstOnDefaultEnvironment = firstGroup
-    ? selectGroupDefaultProject(
-        onDefaultEnvironment.filter((candidate) =>
-          firstGroup.memberProjectRefs.some(
-            (ref) =>
-              ref.environmentId === candidate.environmentId && ref.projectId === candidate.id,
-          ),
-        ),
-      )
-    : firstProject;
   const project =
     options.useLastProject === false
       ? undefined
       : (find(options.currentProject) ??
         find(options.filteredProject) ??
-        lastOnDefaultEnvironment ??
-        firstOnDefaultEnvironment ??
-        (last?.archivedAt == null ? last : undefined));
+        resolveNewTaskStartProject({
+          projects: options.projects,
+          defaultEnvironmentId,
+          projectGroups: options.projectGroups,
+          lastProject: options.lastProject,
+        }));
   return project
     ? {
         draft: {
