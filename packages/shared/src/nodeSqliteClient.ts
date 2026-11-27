@@ -214,8 +214,12 @@ try {
     allowExtension: workerData.allowExtension,
   });
   // exec runs every statement; prepare would run only the first.
+  // The writer sets its own cache and mmap; a reader's cache is per connection, so keep it small.
   next.exec(
-    "PRAGMA busy_timeout = 5000; PRAGMA temp_store = MEMORY; PRAGMA cache_size = -32000; PRAGMA mmap_size = 268435456;",
+    "PRAGMA busy_timeout = 5000; PRAGMA temp_store = MEMORY;" +
+      (workerData.role === "reader"
+        ? " PRAGMA cache_size = -32000; PRAGMA mmap_size = 268435456;"
+        : ""),
   );
   // Reads the header, so a file that is not a database fails here rather than on first use.
   const mode = String(next.prepare("PRAGMA journal_mode").get().journal_mode).toLowerCase();
@@ -394,6 +398,7 @@ const makeWorkerConnection = Effect.fnUntraced(function* (options: {
       workerData: {
         filename: options.filename,
         readOnly,
+        role: options.role,
         requireWal: options.role === "reader",
         allowExtension: false,
         prepareCacheSize: 200,

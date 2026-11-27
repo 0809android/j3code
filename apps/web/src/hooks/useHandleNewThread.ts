@@ -488,9 +488,12 @@ export function resolveDefaultProjectRef(
     (project) =>
       scopedProjectKey(scopeProjectRef(project.environmentId, project.id)) === lastUsedProjectKey,
   );
+  // Until the project list is complete, the last used project stands in, whatever its environment.
   if (
     lastUsed &&
-    (defaultThreadEnvironmentId === null || lastUsed.environmentId === defaultThreadEnvironmentId)
+    (!fallbackReady ||
+      defaultThreadEnvironmentId === null ||
+      lastUsed.environmentId === defaultThreadEnvironmentId)
   ) {
     return scopeProjectRef(lastUsed.environmentId, lastUsed.id);
   }
