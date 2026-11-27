@@ -3,8 +3,9 @@ import { availableScratchWorkspaceRoot } from "@t3tools/client-runtime/operation
 import {
   isPickableProjectMember,
   isRepositoryRootProject,
+  selectGroupDefaultProject,
+  sortProjectsByGroupOrder,
 } from "@t3tools/client-runtime/state/project-grouping";
-import { sortProjectsByGroupOrder } from "@t3tools/client-runtime/state/project-grouping";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { repositoryGroupingKeyOf, type EnvironmentId, type ServerConfig } from "@t3tools/contracts";
 
@@ -251,13 +252,33 @@ export function newTaskDestination(options: {
       )
     : [];
   const lastOnDefaultEnvironment = onDefaultEnvironment.find((candidate) => candidate === last);
+  // Members of one group rank alike, so the first of them may be a subfolder: take the group's root.
+  const firstProject = onDefaultEnvironment[0];
+  const firstGroup = firstProject
+    ? options.projectGroups?.find((group) =>
+        group.memberProjectRefs.some(
+          (ref) =>
+            ref.environmentId === firstProject.environmentId && ref.projectId === firstProject.id,
+        ),
+      )
+    : undefined;
+  const firstOnDefaultEnvironment = firstGroup
+    ? selectGroupDefaultProject(
+        onDefaultEnvironment.filter((candidate) =>
+          firstGroup.memberProjectRefs.some(
+            (ref) =>
+              ref.environmentId === candidate.environmentId && ref.projectId === candidate.id,
+          ),
+        ),
+      )
+    : firstProject;
   const project =
     options.useLastProject === false
       ? undefined
       : (find(options.currentProject) ??
         find(options.filteredProject) ??
         lastOnDefaultEnvironment ??
-        onDefaultEnvironment[0] ??
+        firstOnDefaultEnvironment ??
         (last?.archivedAt == null ? last : undefined));
   return project
     ? {

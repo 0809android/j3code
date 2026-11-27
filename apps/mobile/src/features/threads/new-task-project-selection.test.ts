@@ -357,6 +357,37 @@ describe("newTaskDestination", () => {
     });
   });
 
+  it("starts on the repository root, not a subfolder, within the first group", () => {
+    const repositoryKey = "github.com/t3tools/t3code";
+    const projects = [
+      makeProject("subfolder", "environment", {
+        workspaceRoot: "/work/repo/packages/app",
+        repositoryKey,
+      }),
+      makeProject("root", "environment", { workspaceRoot: "/work/repo", repositoryKey }),
+    ].map((project) => ({
+      ...project,
+      repositoryIdentity: { ...project.repositoryIdentity!, rootPath: "/work/repo" },
+    }));
+    expect(
+      destination({
+        useLastProject: true,
+        projects,
+        defaultEnvironmentId: "environment",
+        projectGroups: [
+          {
+            memberProjectRefs: projects.map((project) => ({
+              environmentId: project.environmentId,
+              projectId: project.id,
+            })),
+            pinned: false,
+            archived: false,
+          },
+        ],
+      }),
+    ).toEqual({ draft: { requestId: "request", environmentId: "environment", projectId: "root" } });
+  });
+
   it("prefers the default machine over a remembered project on another machine", () => {
     const projects = [makeProject("remembered", "other-environment"), makeProject("here")];
     expect(
