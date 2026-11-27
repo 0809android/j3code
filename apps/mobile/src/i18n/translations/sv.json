@@ -5777,6 +5777,7 @@
   "d7dbacd4f129a406": "Cirka {size} verktygsutdata och resonemang tas bort.",
   "5433c06b8c28c7d1": "Det gick inte att kontrollera gamla trådar på {label}",
   "81c69c6a704b9ba2": "Det gick inte att rensa trådar på {label}",
+  "72e96cfce5ce6640": "Rensningen av trådhistorik är avstängd.",
   "8d37e1dd4408a2fe": "Inte rensat ännu. Det första passet körs några minuter efter att rensningen slagits på, eller efter serverstarten om den redan är på.",
   "18bb2dd8209b1919": "Senast rensat: {last}. Nästa körning är försenad.",
   "e2f5de1dcb452026": "Senast rensat: {last}. Nästa körning: {next}.",

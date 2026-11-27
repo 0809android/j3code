@@ -1,6 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import {
   describeThreadHistoryTrimSchedule,
+  isThreadHistoryTrimDisabled,
   planThreadHistoryAfterDaysWrites,
   sumThreadHistoryTrimReports,
   uniformThreadHistoryAfterDays,
@@ -136,7 +137,13 @@ export function ThreadHistoryTrimSection({
         const result = await command({ environmentId: target.environmentId, input: {} });
         if (result._tag === "Success") return { target, report: result.value };
         if (!isAtomCommandInterrupted(result)) {
-          Dialog.alert(failureTitle(target.label), String(squashAtomCommandFailure(result)));
+          const failure = squashAtomCommandFailure(result);
+          Dialog.alert(
+            failureTitle(target.label),
+            isThreadHistoryTrimDisabled(failure)
+              ? gt("Thread history trimming is turned off.")
+              : String(failure),
+          );
         }
         return null;
       }),

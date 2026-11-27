@@ -1,8 +1,10 @@
 import {
   AuthEnvironmentMaintainScope,
   DEFAULT_SERVER_SETTINGS,
+  ThreadHistoryTrimDisabledError,
   type ThreadHistoryTrimReport,
 } from "@t3tools/contracts";
+import * as Cause from "effect/Cause";
 import type { ReactNode } from "react";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -248,6 +250,23 @@ describe("ThreadHistoryTrimSection", () => {
     expect(mocks.alert).toHaveBeenCalledWith(
       "Trimming 3 threads",
       expect.stringContaining("2.0 KB"),
+    );
+  });
+
+  it("says trimming is off, not that it started, when the server refuses the trim", async () => {
+    mocks.preview.mockResolvedValue({ _tag: "Success", value: report(3) });
+    mocks.trim.mockResolvedValue({
+      _tag: "Failure",
+      cause: Cause.fail(new ThreadHistoryTrimDisabledError()),
+    });
+    render(target({ days: 30 }));
+
+    await act(async () => button("Trim now").click());
+    await act(async () => mocks.confirm.mock.calls[0]![0].onConfirm());
+    expect(mocks.alert).toHaveBeenCalledOnce();
+    expect(mocks.alert).toHaveBeenCalledWith(
+      expect.stringContaining("Could not trim threads"),
+      "Thread history trimming is turned off.",
     );
   });
 

@@ -5771,6 +5771,7 @@
   "d7dbacd4f129a406": "Se están eliminando unos {size} de salida de herramientas y razonamiento.",
   "5433c06b8c28c7d1": "No se pudieron comprobar los hilos antiguos en {label}",
   "81c69c6a704b9ba2": "No se pudieron limpiar los hilos en {label}",
+  "72e96cfce5ce6640": "La limpieza del historial de hilos está desactivada.",
   "8d37e1dd4408a2fe": "Aún no se ha depurado. La primera pasada se ejecuta unos minutos después de activar la depuración, o después de iniciar el servidor si ya está activada.",
   "18bb2dd8209b1919": "Última limpieza: {last}. La próxima pasada ya toca.",
   "e2f5de1dcb452026": "Última limpieza: {last}. Próxima pasada: {next}.",

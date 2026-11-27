@@ -1380,6 +1380,16 @@ export const ThreadHistoryTrimReport = Schema.Struct({
 });
 export type ThreadHistoryTrimReport = typeof ThreadHistoryTrimReport.Type;
 
+/** Trimming was asked for while the setting is off, so nothing was queued. */
+export class ThreadHistoryTrimDisabledError extends Schema.TaggedError<ThreadHistoryTrimDisabledError>()(
+  "ThreadHistoryTrimDisabledError",
+  {},
+) {
+  override get message() {
+    return "Thread history trimming is turned off.";
+  }
+}
+
 /** ISO times. A pass runs every 30 days; both are null until the first one finishes. */
 export const ThreadHistoryTrimStatus = Schema.Struct({
   lastTrimmedAt: Schema.NullOr(Schema.String),

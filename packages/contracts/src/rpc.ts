@@ -437,6 +437,7 @@ import {
 import { UsagePricing, UsageReadError, UsageSummary, UsageSummaryInput } from "./usage.ts";
 import {
   StorageCleanupReport,
+  ThreadHistoryTrimDisabledError,
   ThreadHistoryTrimReport,
   ThreadHistoryTrimStatus,
   DatabaseReclaimError,
@@ -1017,7 +1018,7 @@ const WsServerPreviewThreadHistoryTrimRpc = Rpc.make(WS_METHODS.serverPreviewThr
 const WsServerTrimThreadHistoryRpc = Rpc.make(WS_METHODS.serverTrimThreadHistory, {
   payload: Schema.Struct({}),
   success: ThreadHistoryTrimReport,
-  error: EnvironmentAuthorizationError,
+  error: Schema.Union([ThreadHistoryTrimDisabledError, EnvironmentAuthorizationError]),
 });
 
 const WsPeerLinksListRpc = Rpc.make(WS_METHODS.peerLinksList, {

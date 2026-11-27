@@ -4,6 +4,7 @@ import type {
   ThreadHistoryTrimReport,
   ThreadHistoryTrimStatus,
 } from "@t3tools/contracts";
+import * as Predicate from "effect/Predicate";
 import { mFallback, msg } from "gt-i18n";
 import type { MFunctionType } from "gt-i18n/types";
 
@@ -31,6 +32,9 @@ export function describeThreadHistoryTrimSchedule(input: {
     msg("Last trimmed {last}. Next pass {next}.", { last, next: input.formatDate(nextTrimAt) }),
   );
 }
+
+/** The server refused to queue a trim because the setting was turned off since the preview. */
+export const isThreadHistoryTrimDisabled = Predicate.isTagged("ThreadHistoryTrimDisabledError");
 
 export function sumThreadHistoryTrimReports(reports: ReadonlyArray<ThreadHistoryTrimReport>) {
   return {

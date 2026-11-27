@@ -16,6 +16,7 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import {
   describeThreadHistoryTrimSchedule,
+  isThreadHistoryTrimDisabled,
   sumThreadHistoryTrimReports,
 } from "@t3tools/client-runtime/state/threadHistoryTrim";
 import { formatBytes } from "../../lib/formatBytes";
@@ -687,10 +688,13 @@ function ThreadHistorySection() {
         const result = await command({ environmentId: target.environmentId, input: {} });
         if (result._tag === "Success") return { target, report: result.value };
         if (!isAtomCommandInterrupted(result)) {
+          const failure = squashAtomCommandFailure(result);
           toastManager.add({
             type: "error",
             title: failureTitle(target.label),
-            description: String(squashAtomCommandFailure(result)),
+            description: isThreadHistoryTrimDisabled(failure)
+              ? gt("Thread history trimming is turned off.")
+              : String(failure),
           });
         }
         return null;

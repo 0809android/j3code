@@ -1,6 +1,11 @@
 import { act, fakeTimers, render, type Screen } from "../../../test/render";
 import { RegistryProvider } from "@effect/atom-react";
-import { DEFAULT_SERVER_SETTINGS, type StorageCleanupReport } from "@t3tools/contracts";
+import {
+  DEFAULT_SERVER_SETTINGS,
+  ThreadHistoryTrimDisabledError,
+  type StorageCleanupReport,
+} from "@t3tools/contracts";
+import * as Cause from "effect/Cause";
 import { type ReactNode } from "react";
 import { expect, it, vi } from "vite-plus/test";
 import { userEvent } from "vite-plus/test/browser";
@@ -122,6 +127,7 @@ vi.mock(import("../ui/toast"), async (original) => {
   return { ...actual, toastManager: { ...actual.toastManager, add: vi.fn() } };
 });
 
+import { toastManager } from "../ui/toast";
 import { StorageCleanupSections } from "./StorageSettings";
 
 function setup() {
@@ -417,6 +423,43 @@ it("trims thread history only on the machines picked in the settings scope", asy
   await act(async () => trimNow.click());
 
   expect(state.run.mock.calls.map(([input]) => input.environmentId)).toEqual(["env-a"]);
+});
+
+it("shows an error, not the trimming toast, when the server says trimming was turned off", async () => {
+  setup();
+  state.threadHistoryTrim = true;
+  state.settings = {
+    ...state.settings,
+    storageCleanup: { ...state.settings.storageCleanup, threadHistoryAfterDays: 30 },
+  };
+  state.targets = [{ environmentId: "env-a", settings: state.settings }];
+  state.run
+    .mockResolvedValueOnce({
+      _tag: "Success",
+      value: { dryRun: true, afterDays: 30, threadCount: 2, itemCount: 5, estimatedBytes: 1024 },
+    })
+    .mockResolvedValueOnce({
+      _tag: "Failure",
+      cause: Cause.fail(new ThreadHistoryTrimDisabledError()),
+    });
+  vi.mocked(toastManager.add).mockClear();
+  await using screen = await render(panel());
+  const clickButton = (label: string) =>
+    act(async () =>
+      Array.from(document.querySelectorAll("button"))
+        .find((button) => button.textContent === label)!
+        .click(),
+    );
+  await clickButton("Trim now");
+  await clickButton("Trim threads");
+
+  expect(screen.container).toBeTruthy();
+  const toasts = vi.mocked(toastManager.add).mock.calls.map(([toast]) => toast);
+  expect(toasts).toHaveLength(1);
+  expect(toasts[0]).toMatchObject({
+    type: "error",
+    description: "Thread history trimming is turned off.",
+  });
 });
 
 it("keeps the thread history switch usable when a selected machine is offline", async () => {
