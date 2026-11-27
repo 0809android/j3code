@@ -379,6 +379,10 @@
       "types": "./src/state/server.ts",
       "default": "./src/state/server.ts"
     },
+    "./state/threadHistoryTrim": {
+      "types": "./src/state/threadHistoryTrim.ts",
+      "default": "./src/state/threadHistoryTrim.ts"
+    },
     "./state/outdatedServerUpdate": {
       "types": "./src/state/outdatedServerUpdate.ts",
       "default": "./src/state/outdatedServerUpdate.ts"
