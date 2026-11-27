@@ -103,6 +103,7 @@ overrides:
   alchemy: "catalog:"
   expo-audio: 58.0.11
   expo-network: 58.0.4
+  expo-quick-actions: 6.0.2
   "@cursor/sdk": 1.4.2
   expo-sharing: 58.0.22
   expo-widgets: 58.0.27
@@ -216,6 +217,8 @@ patchedDependencies:
   expo-audio@58.0.11: patches/expo-audio@58.0.11.patch
   expo-video@58.0.13: patches/expo-video@58.0.13.patch
   expo-network@58.0.4: patches/expo-network@58.0.4.patch
+  # Kotlin 2.3 rejects setIcon's inferred intersection return type; the patch declares it Any?.
+  expo-quick-actions@6.0.2: patches/expo-quick-actions@6.0.2.patch
   "@alchemy.run/test@2.0.0-beta.85": patches/@alchemy.run__test@2.0.0-beta.85.patch
   "@effect/vitest@4.1.5": patches/@effect__vitest@4.1.5.patch
   expo-sharing@58.0.22: patches/expo-sharing@58.0.22.patch
