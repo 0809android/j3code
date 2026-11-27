@@ -664,6 +664,7 @@ function AdaptiveWorkspaceLayoutContent(
             )
           : undefined,
         defaultEnvironmentId,
+        connectedEnvironmentIds,
         // The sidebar's order, so the default machine's first project matches what the list shows.
         projectGroups: sortHomeProjectScopes({
           scopes: buildHomeProjectScopes({ projects, environmentId: null, projectGroupingMode }),

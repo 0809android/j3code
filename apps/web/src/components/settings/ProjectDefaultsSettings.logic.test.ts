@@ -1,10 +1,18 @@
-import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  type ServerProvider,
+} from "@t3tools/contracts";
 import { DEFAULT_UNIFIED_SETTINGS, type UnifiedSettings } from "@t3tools/contracts/settings";
 import { createModelSelection } from "@t3tools/shared/model";
 import { describe, expect, it } from "vite-plus/test";
 
 import { providerInstanceEntriesFor } from "../../providerInstances";
-import { resolveDefaultModelSettingsPresentation } from "./ProjectDefaultsSettings.logic";
+import {
+  resolveDefaultModelSettingsPresentation,
+  resolveDefaultThreadEnvironmentSelection,
+} from "./ProjectDefaultsSettings.logic";
 
 const claudeId = ProviderInstanceId.make("claudeAgent");
 const high = [{ id: "effort", value: "high" }];
@@ -108,5 +116,28 @@ describe("resolveDefaultModelSettingsPresentation", () => {
     );
     expect(row.providerNote).toBeNull();
     expect(row.selection).toMatchObject({ instanceId: claudeId, model: "claude-sonnet-5" });
+  });
+});
+
+describe("resolveDefaultThreadEnvironmentSelection", () => {
+  const environments = [{ environmentId: EnvironmentId.make("environment:laptop") }];
+
+  it("keeps a listed machine selected", () => {
+    expect(
+      resolveDefaultThreadEnvironmentSelection(
+        EnvironmentId.make("environment:laptop"),
+        environments,
+      ),
+    ).toBe(environments[0]);
+  });
+
+  it("reads an id missing from the list, or none, as Automatic", () => {
+    expect(
+      resolveDefaultThreadEnvironmentSelection(
+        EnvironmentId.make("environment:gone"),
+        environments,
+      ),
+    ).toBeNull();
+    expect(resolveDefaultThreadEnvironmentSelection(null, environments)).toBeNull();
   });
 });

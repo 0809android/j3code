@@ -27,7 +27,10 @@ import { TraitsPicker } from "../chat/TraitsPicker";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { toastManager } from "../ui/toast";
 import { Switch } from "../ui/switch";
-import { resolveDefaultModelSettingsPresentation } from "./ProjectDefaultsSettings.logic";
+import {
+  resolveDefaultModelSettingsPresentation,
+  resolveDefaultThreadEnvironmentSelection,
+} from "./ProjectDefaultsSettings.logic";
 import type { ProjectSettingsCategory } from "./ProjectSettingsPanel";
 import { useSearchableSetting } from "./settingsSearch";
 import { useSettingsScope } from "./SettingsScopeContext";
@@ -351,11 +354,11 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
     />
   ) : null;
 
-  const defaultThreadEnvironmentId = clientSettings.defaultThreadEnvironmentId;
-  const selectedDefaultEnvironment =
-    defaultThreadEnvironmentId !== null
-      ? environments.find((environment) => environment.environmentId === defaultThreadEnvironmentId)
-      : undefined;
+  const selectedDefaultEnvironment = resolveDefaultThreadEnvironmentSelection(
+    clientSettings.defaultThreadEnvironmentId,
+    environments,
+  );
+  const defaultThreadEnvironmentId = selectedDefaultEnvironment?.environmentId ?? null;
   const environmentRow = !isProjectScope ? (
     <SettingsRow
       {...searchableSetting("default-thread-environment")}
@@ -388,8 +391,7 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
               {(value: string | null) =>
                 value === null || value === "automatic"
                   ? gt("Automatic")
-                  : (selectedDefaultEnvironment?.label ??
-                    gt("Unavailable", { $context: "setting value cannot be read" }))
+                  : selectedDefaultEnvironment?.label
               }
             </SelectValue>
           </SelectTrigger>

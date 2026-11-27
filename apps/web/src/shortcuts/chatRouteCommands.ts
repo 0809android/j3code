@@ -28,7 +28,7 @@ import { appAtomRegistry } from "../rpc/atomRegistry";
 import { buildSidebarProjectSnapshots } from "../sidebarProjectGrouping";
 import { readProjects, readThreadShell } from "../state/entities";
 import { defaultProjectFallbackReadyAtom } from "../state/projects";
-import { environmentPresentations } from "../state/presentation";
+import { environmentPresentations, environmentSummaries } from "../state/presentation";
 import { primaryEnvironmentIdAtom } from "../state/primaryEnvironment";
 import { readEnvironmentScope } from "../state/session";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
@@ -103,6 +103,7 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
         appAtomRegistry.get(defaultProjectFallbackReadyAtom(lastUsedProjectKey)),
         selectProjectGroupingSettings(clientSettings),
         readDefaultThreadEnvironmentId(),
+        appAtomRegistry.get(environmentSummaries.connectedEnvironmentIdsAtom),
       ),
       handleNewThread,
     };

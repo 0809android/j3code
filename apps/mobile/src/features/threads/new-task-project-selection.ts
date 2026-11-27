@@ -230,6 +230,8 @@ export function newTaskDestination(options: {
   readonly filteredProject: ProjectRef | undefined;
   /** The machine chosen in settings: with no current or filtered project, its projects come first. */
   readonly defaultEnvironmentId?: EnvironmentId | null | undefined;
+  /** An offline default machine cannot send, so it applies only while connected. */
+  readonly connectedEnvironmentIds: ReadonlySet<EnvironmentId>;
   /** The sidebar's project order, as the web picks its default: the first of these on the machine wins. */
   readonly projectGroups?: Parameters<typeof sortProjectsByGroupOrder>[1] | undefined;
   readonly lastProject: ProjectRef | undefined;
@@ -241,12 +243,14 @@ export function newTaskDestination(options: {
     );
   // A remembered project that was archived since opens the picker; the current one still wins.
   const last = find(options.lastProject);
-  const onDefaultEnvironment = options.defaultEnvironmentId
+  const { defaultEnvironmentId: savedDefault, connectedEnvironmentIds } = options;
+  const defaultEnvironmentId =
+    savedDefault && connectedEnvironmentIds.has(savedDefault) ? savedDefault : null;
+  const onDefaultEnvironment = defaultEnvironmentId
     ? sortProjectsByGroupOrder(
         options.projects.filter(
           (candidate) =>
-            candidate.environmentId === options.defaultEnvironmentId &&
-            candidate.archivedAt == null,
+            candidate.environmentId === defaultEnvironmentId && candidate.archivedAt == null,
         ),
         options.projectGroups ?? [],
       )

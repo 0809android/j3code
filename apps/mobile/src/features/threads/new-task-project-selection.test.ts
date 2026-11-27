@@ -282,6 +282,8 @@ describe("newTaskDestination", () => {
     readonly filtered?: EnvironmentProject;
     readonly last?: { readonly environmentId: string; readonly projectId: string };
     readonly defaultEnvironmentId?: string;
+    /** Defaults to the default machine alone being connected. */
+    readonly connected?: ReadonlyArray<string>;
     readonly projectGroups?: Parameters<typeof newTaskDestination>[0]["projectGroups"];
   }) {
     return newTaskDestination({
@@ -299,6 +301,11 @@ describe("newTaskDestination", () => {
       defaultEnvironmentId: options.defaultEnvironmentId
         ? EnvironmentId.make(options.defaultEnvironmentId)
         : null,
+      connectedEnvironmentIds: new Set(
+        (options.connected ?? [options.defaultEnvironmentId ?? ""]).map((id) =>
+          EnvironmentId.make(id),
+        ),
+      ),
       projectGroups: options.projectGroups,
       lastProject: options.last,
     });
@@ -398,6 +405,34 @@ describe("newTaskDestination", () => {
         last: { environmentId: "other-environment", projectId: "remembered" },
       }),
     ).toEqual({ draft: { requestId: "request", environmentId: "environment", projectId: "here" } });
+  });
+
+  it("starts on the default machine when it is connected", () => {
+    const projects = [makeProject("remembered", "other-environment"), makeProject("here")];
+    expect(
+      destination({
+        useLastProject: true,
+        projects,
+        defaultEnvironmentId: "environment",
+        connected: ["environment", "other-environment"],
+        last: { environmentId: "other-environment", projectId: "remembered" },
+      }),
+    ).toEqual({ draft: { requestId: "request", environmentId: "environment", projectId: "here" } });
+  });
+
+  it("starts on the remembered project when the default machine is not connected", () => {
+    const projects = [makeProject("remembered", "other-environment"), makeProject("here")];
+    expect(
+      destination({
+        useLastProject: true,
+        projects,
+        defaultEnvironmentId: "environment",
+        connected: ["other-environment"],
+        last: { environmentId: "other-environment", projectId: "remembered" },
+      }),
+    ).toEqual({
+      draft: { requestId: "request", environmentId: "other-environment", projectId: "remembered" },
+    });
   });
 
   it("keeps the current project ahead of the default machine", () => {

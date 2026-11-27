@@ -482,8 +482,16 @@ export function resolveDefaultProjectRef(
   lastUsedProjectKey: string | null,
   fallbackReady = true,
   groupingSettings?: ProjectGroupingSettings,
-  defaultThreadEnvironmentId: EnvironmentId | null = null,
+  savedDefaultThreadEnvironmentId: EnvironmentId | null = null,
+  connectedEnvironmentIds: ReadonlyArray<EnvironmentId> | undefined = undefined,
 ): ScopedProjectRef | null {
+  // An offline default machine would open a thread that cannot send, so the last used project stands.
+  const defaultThreadEnvironmentId =
+    savedDefaultThreadEnvironmentId !== null &&
+    (connectedEnvironmentIds === undefined ||
+      connectedEnvironmentIds.includes(savedDefaultThreadEnvironmentId))
+      ? savedDefaultThreadEnvironmentId
+      : null;
   const activeProjects = projects.filter((project) => project.archivedAt == null);
   const lastUsed = activeProjects.find(
     (project) =>
@@ -538,6 +546,7 @@ export function useHandleNewThread() {
     null,
     lastUsedProjectKeySchema,
   );
+  const connectedEnvironmentIds = useAtomValue(environmentSummaries.connectedEnvironmentIdsAtom);
   const defaultProjectFallbackReady = useAtomValue(
     defaultProjectFallbackReadyAtom(lastUsedProjectKey),
   );
@@ -563,6 +572,7 @@ export function useHandleNewThread() {
     defaultProjectFallbackReady,
     groupingSettings,
     defaultThreadEnvironmentId,
+    connectedEnvironmentIds,
   );
 
   return {
