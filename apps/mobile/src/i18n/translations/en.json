@@ -5761,5 +5761,6 @@
   "8d545d54c0a9e950": "Hide the commands, edits, and searches agents run. Hide successful keeps failures. Zen shows only final answers. Approvals, questions, and errors always show.",
   "515f8ffb80cca95b": "Default environment",
   "e88c9d8769544731": "Automatic",
-  "fbf24a7de4675ac3": "Use your last used or primary environment."
+  "fbf24a7de4675ac3": "Use your last used or primary environment.",
+  "92b3bb64ec1bd8be": "Tool output and reasoning above this point were removed to save space after {afterDays, plural, one {{afterDays} day} other {{afterDays} days}} without use. Messages, plans and file changes are kept."
 }

@@ -5759,5 +5759,6 @@
   "8d545d54c0a9e950": "Dölj kommandon, redigeringar och sökningar som agenter kör. Dölj lyckade behåller misslyckanden. Zen visar bara slutliga svar. Godkännanden, frågor och fel visas alltid.",
   "515f8ffb80cca95b": "Standardmiljö",
   "e88c9d8769544731": "Automatisk",
-  "fbf24a7de4675ac3": "Använd din senast använda eller primära miljö."
+  "fbf24a7de4675ac3": "Använd din senast använda eller primära miljö.",
+  "92b3bb64ec1bd8be": "Verktygsutdata och resonemang ovanför den här punkten togs bort för att spara utrymme efter {afterDays, plural, one {{afterDays} dag} other {{afterDays} dagar}} utan användning. Meddelanden, planer och filändringar finns kvar."
 }

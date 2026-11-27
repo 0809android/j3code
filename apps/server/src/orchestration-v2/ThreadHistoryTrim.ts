@@ -93,6 +93,7 @@ const nodeBytes = (alias: string) =>
   + 2 * COALESCE(length(${alias}parent_node_id), 0) + 2 * COALESCE(length(${alias}provider_turn_id), 0)
   + COALESCE(length(${alias}provider_thread_id), 0))`;
 
+// The English fallback for clients that read `message`; the clients that know `historyTrim` word it themselves.
 function trimNoticeMessage(afterDays: number): string {
   return `Tool output and reasoning above this point were removed to save space after ${afterDays} ${afterDays === 1 ? "day" : "days"} without use. Messages, plans and file changes are kept.`;
 }
@@ -458,6 +459,7 @@ const make = Effect.gen(function* () {
         updatedAt: now,
         type: "system_notice",
         message: trimNoticeMessage(afterDays),
+        historyTrim: { afterDays },
       },
     } satisfies OrchestrationV2DomainEvent;
   });
@@ -746,6 +748,28 @@ const make = Effect.gen(function* () {
           .enqueue("background")
           .pipe(Effect.andThen(worker.drain), Effect.repeat(Schedule.spaced("6 hours"))),
       ),
+    ),
+  );
+
+  // The check above ends at once while the setting is off, so turning it on later would wait up to
+  // six hours for the next one. A switch from off to on queues one pass, as the start does.
+  const changes = yield* settingsService.subscribeChanges;
+  const initial = yield* settingsService.getSettings.pipe(Effect.orDie);
+  let enabled = (initial.storageCleanup.threadHistoryAfterDays ?? 0) > 0;
+  yield* forkParked(
+    changes.pipe(
+      Stream.filter((settings) => {
+        const next = (settings.storageCleanup.threadHistoryAfterDays ?? 0) > 0;
+        const turnedOn = next && !enabled;
+        enabled = next;
+        return turnedOn;
+      }),
+      Stream.switchMap(() =>
+        Stream.fromEffect(
+          Effect.sleep("5 minutes").pipe(Effect.andThen(worker.enqueue("background"))),
+        ),
+      ),
+      Stream.runDrain,
     ),
   );
 

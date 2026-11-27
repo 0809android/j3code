@@ -2,9 +2,11 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { ThreadId, TurnItemId, type OrchestrationV2TurnItem } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
+import type { MFunctionType } from "gt-i18n/types";
 
 import {
   resolveWorkEntryToolPresentation,
+  systemNoticeText,
   toolItemForDisplay,
   type WorkLogPresentationEntry,
   workEntryIndicatesToolFailure,
@@ -202,5 +204,29 @@ describe("resolveWorkEntryToolPresentation", () => {
         toolData: { server: "another-server", tool: "preview_click" },
       }),
     ).toBeNull();
+  });
+});
+
+describe("systemNoticeText", () => {
+  const english = "Tool output was removed after 30 days without use.";
+
+  it("words a history trim notice through the resolver, from the number of days", () => {
+    const resolve = ((_message: unknown, options?: { readonly afterDays?: number }) =>
+      `translated:${options?.afterDays}`) as MFunctionType;
+    expect(systemNoticeText({ message: english, historyTrim: { afterDays: 30 } }, resolve)).toBe(
+      "translated:30",
+    );
+  });
+
+  it("shows the stored text of a notice saved before the kind existed", () => {
+    const resolve = (() => "translated") as unknown as MFunctionType;
+    expect(systemNoticeText({ message: english }, resolve)).toBe(english);
+  });
+
+  it("falls back to English with the days filled in", () => {
+    const text = (afterDays: number) =>
+      systemNoticeText({ message: "stored", historyTrim: { afterDays } });
+    expect(text(1)).toContain("after 1 day without use");
+    expect(text(30)).toContain("after 30 days without use");
   });
 });

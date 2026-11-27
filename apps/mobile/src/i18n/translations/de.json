@@ -5759,5 +5759,6 @@
   "8d545d54c0a9e950": "Die Befehle, Bearbeitungen und Suchen ausblenden, die Agenten ausführen. „Erfolgreiche ausblenden“ behält Fehler. „Zen“ zeigt nur endgültige Antworten. Genehmigungen, Fragen und Fehler werden immer angezeigt.",
   "515f8ffb80cca95b": "Standardumgebung",
   "e88c9d8769544731": "Automatisch",
-  "fbf24a7de4675ac3": "Zuletzt genutzte oder primäre Umgebung verwenden."
+  "fbf24a7de4675ac3": "Zuletzt genutzte oder primäre Umgebung verwenden.",
+  "92b3bb64ec1bd8be": "Werkzeugausgaben und Überlegungen oberhalb dieser Stelle wurden nach {afterDays, plural, one {{afterDays} Tag} other {{afterDays} Tagen}} ohne Nutzung entfernt, um Speicherplatz zu sparen. Nachrichten, Pläne und Dateiänderungen bleiben erhalten."
 }
