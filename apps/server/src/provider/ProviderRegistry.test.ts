@@ -2692,24 +2692,13 @@ it.layer(
       }),
     );
 
-    it.effect("starts one login shell when a refresh begins during the background PATH refresh", () =>
+    const makeRegistryWithSpawner = (
+      spawner: Layer.Layer<ChildProcessSpawner.ChildProcessSpawner>,
+      prefix: string,
+    ) =>
       Effect.gen(function* () {
-        let spawned = 0;
-        const shellStarted = yield* Deferred.make<void>();
-        const releaseShell = yield* Deferred.make<void>();
-        const spawner = Layer.succeed(
-          ChildProcessSpawner.ChildProcessSpawner,
-          ChildProcessSpawner.make(() =>
-            Effect.gen(function* () {
-              spawned += 1;
-              yield* Deferred.succeed(shellStarted, undefined);
-              yield* Deferred.await(releaseShell);
-              return mockHandle({ stdout: "", stderr: "", code: 0 });
-            }),
-          ),
-        );
         const changes = yield* PubSub.unbounded<void>();
-        const registry = yield* ProviderRegistry.ProviderRegistry.pipe(
+        return yield* ProviderRegistry.ProviderRegistry.pipe(
           Effect.provide(
             ProviderRegistry.layer.pipe(
               Layer.provide(
@@ -2727,29 +2716,105 @@ it.layer(
                 }),
               ),
               Layer.provide(spawner),
-              Layer.provideMerge(
-                ServerConfig.layerTest(process.cwd(), {
-                  prefix: "t3-provider-registry-one-shell-",
-                }),
-              ),
+              Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix })),
               Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
             ),
           ),
         );
+      });
 
-        const background = yield* Effect.forkChild(registry.refreshHostPath);
+    const loginShellHost = {
+      platform: "linux" as const,
+      environment: () => ({ PATH: "/usr/bin", SHELL: "/bin/sh" }) as NodeJS.ProcessEnv,
+    };
+
+    it.effect.each([
+      {
+        name: "refreshes the user waits on",
+        run: (registry: Registry) => registry.refresh(),
+      },
+      {
+        name: "background refreshes",
+        run: (registry: Registry) => registry.refreshHostPath,
+      },
+    ])("starts one login shell for $name that overlap", (trigger) =>
+      Effect.gen(function* () {
+        let spawned = 0;
+        const shellStarted = yield* Deferred.make<void>();
+        const releaseShell = yield* Deferred.make<void>();
+        const registry = yield* makeRegistryWithSpawner(
+          Layer.succeed(
+            ChildProcessSpawner.ChildProcessSpawner,
+            ChildProcessSpawner.make(() =>
+              Effect.gen(function* () {
+                spawned += 1;
+                yield* Deferred.succeed(shellStarted, undefined);
+                yield* Deferred.await(releaseShell);
+                return mockHandle({ stdout: "", stderr: "", code: 0 });
+              }),
+            ),
+          ),
+          "t3-provider-registry-one-shell-",
+        );
+
+        const first = yield* Effect.forkChild(trigger.run(registry));
         yield* Deferred.await(shellStarted);
-        // The user's refresh begins while the background shell is still running.
-        const foreground = yield* Effect.forkChild(registry.refresh(), { startImmediately: true });
+        const second = yield* Effect.forkChild(trigger.run(registry), { startImmediately: true });
         yield* Effect.yieldNow;
         yield* Deferred.succeed(releaseShell, undefined);
-        yield* Fiber.join(background);
-        yield* Fiber.join(foreground);
+        yield* Fiber.join(first);
+        yield* Fiber.join(second);
         assert.strictEqual(spawned, 1);
       }).pipe(
-        Effect.provideService(HostProcess.Platform, "linux"),
-        Effect.provideService(HostProcess.Environment, { PATH: "/usr/bin", SHELL: "/bin/sh" }),
+        Effect.provideService(HostProcess.Platform, loginShellHost.platform),
+        Effect.provideService(HostProcess.Environment, loginShellHost.environment()),
       ),
+    );
+
+    it.effect(
+      "reads a slow login shell's PATH in the background even when a 5 second refresh began first",
+      () =>
+        Effect.gen(function* () {
+          let spawned = 0;
+          const registry = yield* makeRegistryWithSpawner(
+            Layer.succeed(
+              ChildProcessSpawner.ChildProcessSpawner,
+              ChildProcessSpawner.make(() =>
+                Effect.gen(function* () {
+                  spawned += 1;
+                  yield* Effect.sleep("8 seconds");
+                  return mockHandle({
+                    stdout:
+                      "__K3CODE_ENV_PATH_START__\n/opt/slow:/usr/bin\n__K3CODE_ENV_PATH_END__\n",
+                    stderr: "",
+                    code: 0,
+                  });
+                }),
+              ),
+            ),
+            "t3-provider-registry-slow-shell-",
+          );
+          const env = yield* HostProcess.Environment;
+
+          const foreground = yield* Effect.forkChild(registry.refresh(), {
+            startImmediately: true,
+          });
+          const background = yield* Effect.forkChild(registry.refreshHostPath, {
+            startImmediately: true,
+          });
+          yield* Effect.yieldNow;
+          // The 5 second shell gives up; the 15 second one is still running.
+          yield* TestClock.adjust("5 seconds");
+          yield* Fiber.join(foreground);
+          assert.strictEqual(env.PATH, "/usr/bin");
+          yield* TestClock.adjust("3 seconds");
+          yield* Fiber.join(background);
+          assert.strictEqual(env.PATH, "/opt/slow:/usr/bin");
+          assert.strictEqual(spawned, 2);
+        }).pipe(
+          Effect.provideService(HostProcess.Platform, loginShellHost.platform),
+          Effect.provideService(HostProcess.Environment, loginShellHost.environment()),
+        ),
     );
 
     it.effect("publishes a new label for an instance the registry kept live", () =>

@@ -799,12 +799,13 @@ export const layer = Layer.effect(
     const refreshHostPathInBackgroundNow = yield* makeRefreshHostPath(
       BACKGROUND_LOGIN_SHELL_TIMEOUT,
     );
-    // At most one login shell at a time: the startup pass and the first provider refresh begin
-    // together and would each spawn one. A caller that finds one running waits for it instead,
-    // up to `waitLimit` (a refresh the user waits on stops waiting after 5 seconds; the shell
-    // keeps going and the PATH it reads is still applied).
-    const hostPathInFlightRef = yield* Ref.make(Option.none<Deferred.Deferred<void>>());
+    // A caller that finds a shell with its own timeout running waits for it, up to `waitLimit`;
+    // the shell keeps going and its PATH is still applied. Each timeout has its own slot: a 5
+    // second shell must not stand in for the startup pass's 15 seconds on a slow profile.
+    const foregroundHostPathInFlightRef = yield* Ref.make(Option.none<Deferred.Deferred<void>>());
+    const backgroundHostPathInFlightRef = yield* Ref.make(Option.none<Deferred.Deferred<void>>());
     const coalesceHostPathRefresh = Effect.fn("coalesceHostPathRefresh")(function* (
+      hostPathInFlightRef: Ref.Ref<Option.Option<Deferred.Deferred<void>>>,
       execute: Effect.Effect<void>,
       waitLimit: Duration.Input | undefined,
     ) {
@@ -836,8 +837,13 @@ export const layer = Layer.effect(
         ? Deferred.await(claimed.done)
         : Deferred.await(claimed.done).pipe(Effect.timeout(waitLimit), Effect.ignore);
     });
-    const refreshHostPath = coalesceHostPathRefresh(refreshHostPathNow, Duration.seconds(5));
+    const refreshHostPath = coalesceHostPathRefresh(
+      foregroundHostPathInFlightRef,
+      refreshHostPathNow,
+      Duration.seconds(5),
+    );
     const refreshHostPathInBackground = coalesceHostPathRefresh(
+      backgroundHostPathInFlightRef,
       refreshHostPathInBackgroundNow,
       undefined,
     );
