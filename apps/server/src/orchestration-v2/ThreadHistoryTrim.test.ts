@@ -602,6 +602,38 @@ it.layer(layerTest(30))("ThreadHistoryTrim", (it) => {
       assert.deepEqual(yield* itemTitles(idle.threadId), trimmedItems);
     }),
   );
+
+  it.effect("decides the same for a thread and its forks among many unrelated forked threads", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(DateTime.toEpochMillis(now));
+      const forkOf = (name: string, source: { threadId: ThreadId; runId: RunId }, inUse: boolean) =>
+        seedThread(name, {
+          ...(inUse ? { userMessageAt: recent } : {}),
+          thread: {
+            ...(inUse ? {} : { pinnedAt: old }),
+            lineage: {
+              parentThreadId: source.threadId,
+              relationshipToParent: "fork",
+              rootThreadId: source.threadId,
+            },
+            forkedFrom: { type: "run", threadId: source.threadId, runId: source.runId },
+          },
+        });
+      for (let index = 0; index < 25; index += 1) {
+        // Pinned, so none of these is trimmed, and their forks never touch the two sources below.
+        const other = yield* seedThread(`other-${index}`, { thread: { pinnedAt: old } });
+        yield* forkOf(`other-fork-${index}`, other, false);
+      }
+      const used = yield* seedThread("noisy-source-used");
+      const unused = yield* seedThread("noisy-source-unused");
+      yield* forkOf("noisy-fork-used", used, true);
+      yield* forkOf("noisy-fork-unused", unused, false);
+
+      yield* trim;
+      assert.deepEqual(yield* itemTitles(used.threadId), everyItem);
+      assert.deepEqual(yield* itemTitles(unused.threadId), trimmedItems);
+    }),
+  );
 });
 
 type Hook = Effect.Effect<

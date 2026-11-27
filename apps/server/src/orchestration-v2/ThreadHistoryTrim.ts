@@ -174,15 +174,12 @@ const make = Effect.gen(function* () {
   const ids = yield* IdAllocator.IdAllocatorV2;
   const settingsService = yield* ServerSettingsModule.ServerSettingsService;
 
-  // A subagent has no user of its own, so it ages with the thread that started it.
-  const readCandidates = (input: {
-    readonly idleBefore: string;
-    readonly now: string;
-    readonly threadId?: ThreadId;
-  }) => sql<Candidate>`
-    -- Run-forks of each thread at any depth, deleted ones included so they pass the link on (see readForks).
-    -- The thread table is scanned once into fork_rows; the walk below joins that small set, not the table.
-    WITH RECURSIVE fork_rows(thread_id, parent_id, deleted) AS MATERIALIZED (
+  // Run-forks of each thread at any depth, deleted ones included so they pass the link on (see readForks).
+  const forkLinks = (threadId: ThreadId | undefined) =>
+    threadId === undefined
+      ? // The thread table is scanned once into fork_rows; the walk below joins that small set, not the table.
+        sql`
+    fork_rows(thread_id, parent_id, deleted) AS MATERIALIZED (
       SELECT fork.thread_id, json_extract(fork.payload_json, '$.forkedFrom.threadId'),
         fork.deleted_at IS NOT NULL
       FROM orchestration_v2_projection_threads AS fork
@@ -192,24 +189,46 @@ const make = Effect.gen(function* () {
     forks(root_id, thread_id, deleted) AS (
       SELECT fork.parent_id, fork.thread_id, fork.deleted
       FROM fork_rows AS fork
-      -- For one thread, start only from the forks of that thread and of the thread its subagent hangs off.
-      WHERE ${
-          input.threadId === undefined
-            ? sql`1`
-            : sql`fork.parent_id IN (
-          SELECT ${input.threadId}
-          UNION
-          SELECT json_extract(own.payload_json, '$.lineage.rootThreadId')
-          FROM orchestration_v2_projection_threads AS own
-          WHERE own.thread_id = ${input.threadId}
-            AND json_extract(own.payload_json, '$.lineage.relationshipToParent') = 'subagent'
-        )`
-        }
       UNION
       SELECT forks.root_id, fork.thread_id, fork.deleted
       FROM fork_rows AS fork
       JOIN forks ON fork.parent_id = forks.thread_id
-    )
+    )`
+      : // For one thread, walk down from it and from the thread its subagent hangs off, so only
+        // their descendants are read and nothing is copied out of the whole table.
+        sql`
+    forks(root_id, thread_id, deleted) AS (
+      SELECT roots.id, fork.thread_id, fork.deleted_at IS NOT NULL
+      FROM (
+        SELECT ${threadId} AS id
+        UNION
+        SELECT json_extract(own.payload_json, '$.lineage.rootThreadId')
+        FROM orchestration_v2_projection_threads AS own
+        WHERE own.thread_id = ${threadId}
+          AND json_extract(own.payload_json, '$.lineage.relationshipToParent') = 'subagent'
+      ) AS roots
+      JOIN orchestration_v2_projection_threads AS fork
+        ON json_extract(fork.payload_json, '$.forkedFrom.threadId') = roots.id
+      WHERE json_extract(fork.payload_json, '$.forkedFrom.type') = 'run'
+        AND COALESCE(json_extract(fork.payload_json, '$.lineage.sideChat'), 0) = 0
+      UNION
+      SELECT forks.root_id, fork.thread_id, fork.deleted_at IS NOT NULL
+      FROM forks
+      JOIN orchestration_v2_projection_threads AS fork
+        ON json_extract(fork.payload_json, '$.forkedFrom.threadId') = forks.thread_id
+      WHERE json_extract(fork.payload_json, '$.forkedFrom.type') = 'run'
+        AND COALESCE(json_extract(fork.payload_json, '$.lineage.sideChat'), 0) = 0
+    )`;
+
+  // A subagent has no user of its own, so it ages with the thread that started it.
+  // With a `threadId` this is the cheap re-check made inside a write: it reads only that thread,
+  // its anchor and their forks, never the whole thread table.
+  const readCandidates = (input: {
+    readonly idleBefore: string;
+    readonly now: string;
+    readonly threadId?: ThreadId;
+  }) => sql<Candidate>`
+    WITH RECURSIVE ${forkLinks(input.threadId)}
     SELECT
       thread.thread_id AS "threadId",
       -- A rolled-back run's items are hidden, and the notice would go with them.
