@@ -931,7 +931,7 @@ it.layer(hookedFixture)("ThreadHistoryTrim during a pass", (it) => {
     }),
   );
 
-  it.effect("stops trimming a thread whose fork is used after the pass chose its rows", () =>
+  it.effect("checks forks before the pages, not in each page's write, and still copies to them", () =>
     Effect.gen(function* () {
       yield* isolate;
       const source = yield* seedThread("fork-used-between");
@@ -947,9 +947,17 @@ it.layer(hookedFixture)("ThreadHistoryTrim during a pass", (it) => {
           forkedFrom: { type: "run", threadId: source.threadId, runId: source.runId },
         },
       }).pipe(Effect.asVoid);
+      // The write that removes a page checks the thread's own rows only, so a fork used after the
+      // pass's check does not stop this pass (the next one sees it); the fork is still told.
       yield* arm(forkUsed);
       yield* trim;
-      assert.deepEqual(yield* itemTitles(source.threadId), everyItem);
+      assert.deepEqual(yield* itemTitles(source.threadId), trimmedItems);
+      const waited = (yield* TrimHook).waitedOn;
+      assert.isTrue(
+        waited.some((threadIds) =>
+          threadIds?.includes(ThreadId.make("thread:trim:fork-used-between-fork")) === true,
+        ),
+      );
     }),
   );
 
