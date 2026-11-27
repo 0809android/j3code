@@ -6117,6 +6117,7 @@
   "a5e5026e2a80fb37": "Importer depuis T3 Code",
   "6a29c6637efa84f1": "{count, plural, one {{count} fournisseur} other {{count} fournisseurs}}",
   "56d1a850db38d0d1": "Remplace l’historique de cette app après un redémarrage. {size} Mo. L’historique actuel est conservé dans un fichier de sauvegarde.",
+  "873b565b1ae82669": "Pour que rien ne s’exécute deux fois, les fils encore en cours dans T3 Code s’arrêtent ici et les tâches planifiées arrivent en pause. Reprenez-les dans cette app quand vous n’utilisez plus T3 Code.",
   "ca3c8995e6535035": "Apparence, raccourcis et préférences. Les connexions et les appareils ne sont pas repris.",
   "54488fcdfe691ef0": "Import impossible : {message}",
   "c0fd6bfd0a873fdc": "Importé.",

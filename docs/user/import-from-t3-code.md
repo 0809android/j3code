@@ -1,19 +1,36 @@
-# Importing from T3 Code
+# T3 Code から引き継ぐ
 
-K3 Code keeps its data in `~/.k3code`, apart from a T3 Code install's `~/.t3`. When both exist on
-the same computer, K3 Code can bring over what you choose. Your T3 Code data is only read, never
-changed.
+K3 Code のデータは `~/.k3code` に入っていて、T3 Code の `~/.t3` とは分かれています。同じパソコンに
+両方があるとき、K3 Code は T3 Code から、選んだものを引き継げます。T3 Code 側のデータは読むだけで、
+変えません。
 
-On first launch a window offers the import. Later, use **Settings → General → Import** and
-**Choose what to import**.
+初めて起動したときに、引き継ぐかどうかを聞く画面が出ます。あとから引き継ぐときは、
+**設定 → 一般 → T3 Code からインポート** の **インポートする内容を選ぶ** を使います。
 
-- **Settings and keyboard shortcuts:** appearance, preferences, and keybindings. Sign-ins,
-  microphones, browser profiles, and anything tied to a project or device stay behind. Your
-  current keybindings are saved as `keybindings.json.before-import` first.
-- **Provider settings:** the provider instances you set up. Credentials kept in T3 Code's secret
-  store are not copied; sign in again where a provider asks.
-- **Sessions and history:** all threads and their attachments. This replaces the history in K3 Code
-  and takes effect after a restart. The history it replaces stays beside the database as
-  `statev2.sqlite.before-import-<time>`. Importing again later replaces the history again.
+- **設定とキーボードショートカット:** 見た目、各種の設定、キー割り当てを引き継ぎます。サインイン、
+  マイク、ブラウザーのプロファイルなど、プロジェクトや端末に結びついたものは引き継ぎません。
+  今のキー割り当ては、先に `keybindings.json.before-import` として保存します。
+- **プロバイダー設定:** 設定したプロバイダーを引き継ぎます。T3 Code のシークレットに保存した
+  認証情報は写さないので、プロバイダーに求められたら、サインインし直してください。
+- **セッションと履歴:** すべてのスレッドと、その添付ファイルを引き継ぎます。K3 Code の履歴を
+  置き換え、再起動したあとに反映されます。置き換える前の履歴は、データベースの隣に
+  `statev2.sqlite.before-import-<日時>` として残ります。あとでもう一度引き継ぐと、履歴はまた
+  置き換わります。
 
-An import can fail when the T3 Code data is newer than K3 Code; update K3 Code first.
+## T3 Code を使い続けている場合
+
+T3 Code が動いたままでも引き継げます。ただし、同じ作業が T3 Code と K3 Code の両方で動かないよう、
+次のようにします。
+
+- **作業中だったスレッド:** T3 Code で作業の途中だったスレッドは、K3 Code では止まった状態で
+  入ります。自動では続きを始めません。T3 Code での作業が終わってから、K3 Code でメッセージを
+  送れば続けられます。
+- **スケジュールタスク:** すべて一時停止の状態で入ります。T3 Code を使わなくなったら、
+  **設定 → スケジュールタスク** で、続けたいものをオンにしてください。同じタスクを両方でオンに
+  すると、同じ時刻に 2 回実行されます。
+
+K3 Code のサインインやペアリングした端末、ほかのパソコンとのつながりは、履歴を置き換えても
+そのまま残ります。T3 Code 側のものは引き継ぎません。
+
+T3 Code のデータのほうが K3 Code より新しいと、引き継げないことがあります。先に K3 Code を
+更新してください。

@@ -6118,6 +6118,7 @@
   "a5e5026e2a80fb37": "Import from T3 Code",
   "6a29c6637efa84f1": "{count, plural, one {{count} provider} other {{count} providers}}",
   "56d1a850db38d0d1": "Replaces the history in this app after a restart. {size} MB. The current history is kept as a backup file.",
+  "873b565b1ae82669": "So nothing runs twice, threads still working in T3 Code stop here and scheduled tasks arrive paused. Continue them in this app once you stop using T3 Code.",
   "ca3c8995e6535035": "Appearance, shortcuts and preferences. Sign-ins and devices stay.",
   "54488fcdfe691ef0": "Could not import: {message}",
   "c0fd6bfd0a873fdc": "Imported.",

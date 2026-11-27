@@ -6116,6 +6116,7 @@
   "a5e5026e2a80fb37": "Importar desde T3 Code",
   "6a29c6637efa84f1": "{count, plural, one {{count} proveedor} other {{count} proveedores}}",
   "56d1a850db38d0d1": "Reemplaza el historial de esta app tras reiniciar. {size} MB. El historial actual se conserva como archivo de respaldo.",
+  "873b565b1ae82669": "Para que nada se ejecute dos veces, los hilos que seguían trabajando en T3 Code se detienen aquí y las tareas programadas llegan en pausa. Reanúdalos en esta app cuando dejes de usar T3 Code.",
   "ca3c8995e6535035": "Apariencia, atajos y preferencias. Los inicios de sesión y los dispositivos no se traspasan.",
   "54488fcdfe691ef0": "No se pudo importar: {message}",
   "c0fd6bfd0a873fdc": "Importado.",
