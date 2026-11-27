@@ -804,39 +804,38 @@ export const layer = Layer.effect(
     // up to `waitLimit` (a refresh the user waits on stops waiting after 5 seconds; the shell
     // keeps going and the PATH it reads is still applied).
     const hostPathInFlightRef = yield* Ref.make(Option.none<Deferred.Deferred<void>>());
-    const coalesceHostPathRefresh = (
+    const coalesceHostPathRefresh = Effect.fn("coalesceHostPathRefresh")(function* (
       execute: Effect.Effect<void>,
       waitLimit: Duration.Input | undefined,
-    ) =>
-      Effect.gen(function* () {
-        const claimed = yield* Ref.modify(
-          hostPathInFlightRef,
-          (
-            inFlight,
-          ): readonly [
-            { readonly owner: boolean; readonly done: Deferred.Deferred<void> },
-            Option.Option<Deferred.Deferred<void>>,
-          ] => {
-            if (Option.isSome(inFlight)) return [{ owner: false, done: inFlight.value }, inFlight];
-            const done = Deferred.makeUnsafe<void>();
-            return [{ owner: true, done }, Option.some(done)];
-          },
-        );
-        if (claimed.owner) {
-          // Detached, so the first caller's interruption cannot cancel what others wait on.
-          yield* execute.pipe(
-            Effect.onExit(() =>
-              Ref.set(hostPathInFlightRef, Option.none()).pipe(
-                Effect.andThen(Deferred.succeed(claimed.done, undefined)),
-              ),
+    ) {
+      const claimed = yield* Ref.modify(
+        hostPathInFlightRef,
+        (
+          inFlight,
+        ): readonly [
+          { readonly owner: boolean; readonly done: Deferred.Deferred<void> },
+          Option.Option<Deferred.Deferred<void>>,
+        ] => {
+          if (Option.isSome(inFlight)) return [{ owner: false, done: inFlight.value }, inFlight];
+          const done = Deferred.makeUnsafe<void>();
+          return [{ owner: true, done }, Option.some(done)];
+        },
+      );
+      if (claimed.owner) {
+        // Detached, so the first caller's interruption cannot cancel what others wait on.
+        yield* execute.pipe(
+          Effect.onExit(() =>
+            Ref.set(hostPathInFlightRef, Option.none()).pipe(
+              Effect.andThen(Deferred.succeed(claimed.done, undefined)),
             ),
-            Effect.forkDetach,
-          );
-        }
-        yield* waitLimit === undefined
-          ? Deferred.await(claimed.done)
-          : Deferred.await(claimed.done).pipe(Effect.timeout(waitLimit), Effect.ignore);
-      });
+          ),
+          Effect.forkDetach,
+        );
+      }
+      yield* waitLimit === undefined
+        ? Deferred.await(claimed.done)
+        : Deferred.await(claimed.done).pipe(Effect.timeout(waitLimit), Effect.ignore);
+    });
     const refreshHostPath = coalesceHostPathRefresh(refreshHostPathNow, Duration.seconds(5));
     const refreshHostPathInBackground = coalesceHostPathRefresh(
       refreshHostPathInBackgroundNow,

@@ -2719,7 +2719,7 @@ it.layer(
               ),
               Layer.provideMerge(
                 Layer.succeed(ProviderInstanceRegistry.ProviderInstanceRegistry, {
-                  getInstance: () => Effect.succeed(undefined),
+                  getInstance: () => Effect.undefined,
                   listInstances: Effect.succeed([]),
                   listUnavailable: Effect.succeed([]),
                   streamChanges: Stream.fromPubSub(changes),
