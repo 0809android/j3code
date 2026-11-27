@@ -31,6 +31,7 @@ import { SettingsScreen } from "./components/SettingsScreen";
 import { useSettingsEnvironmentMenu } from "./components/SettingsEnvironmentFilterHeader";
 import { BranchNamingSettings } from "./components/BranchNamingSettings";
 import { DatabaseStorageNotice } from "./components/DatabaseStorageNotice";
+import { ThreadHistoryTrimSection } from "./components/ThreadHistoryTrimSection";
 import { ListChoiceRow as SettingsChoiceRow } from "../../components/ui/ListChoiceRow";
 import { SettingsSection } from "./components/SettingsSection";
 import { SettingsSwitchRow } from "./components/SettingsSwitchRow";
@@ -571,6 +572,7 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
                     )}
                   />
                 ) : null}
+                {!projectSelected ? <ThreadHistoryTrimSection targets={selectedTargets} /> : null}
                 {!projectSelected ? (
                   <SettingsSection title={gt("Manage environments")}>
                     {selectedTargets.map((target) => (

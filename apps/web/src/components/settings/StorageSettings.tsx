@@ -14,6 +14,10 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
+import {
+  describeThreadHistoryTrimSchedule,
+  sumThreadHistoryTrimReports,
+} from "@t3tools/client-runtime/state/threadHistoryTrim";
 import { formatBytes } from "../../lib/formatBytes";
 import { environmentAtomList, environmentIdsKey } from "../../state/environmentAtomList";
 import { serverEnvironment } from "../../state/server";
@@ -594,6 +598,7 @@ interface TrimTarget {
 
 function ThreadHistorySection() {
   const gt = useGT();
+  const resolve = useMessages();
   const setting = useSearchableSetting();
   const { connectedEnvironments, targets } = useSettingsScope();
   const scopedSettings = useScopedSettings();
@@ -639,18 +644,12 @@ function ThreadHistorySection() {
     const query = statuses[connectedEnvironments.indexOf(environment)];
     if (query?._tag !== "Success") return [];
     if (environment.serverConfig?.settings.storageCleanup.threadHistoryAfterDays == null) return [];
-    const { lastTrimmedAt, nextTrimAt } = query.value;
-    const text =
-      lastTrimmedAt === null || nextTrimAt === null
-        ? gt("Not trimmed yet. The first pass runs a few minutes after the server starts.")
-        : Date.parse(nextTrimAt) <= nowMs
-          ? gt("Last trimmed {last}. The next pass is due.", {
-              last: formatTrimDate(lastTrimmedAt),
-            })
-          : gt("Last trimmed {last}. Next pass {next}.", {
-              last: formatTrimDate(lastTrimmedAt),
-              next: formatTrimDate(nextTrimAt),
-            });
+    const text = describeThreadHistoryTrimSchedule({
+      status: query.value,
+      nowMs,
+      formatDate: formatTrimDate,
+      resolve,
+    });
     const label = settingsScopeEnvironmentLabel(environment, connectedEnvironments);
     return [
       {
@@ -711,22 +710,25 @@ function ThreadHistorySection() {
       ({ target }) =>
         confirming?.filter((entry) => entry.target.environmentId === target.environmentId) ?? [],
     );
-    const count = previewed.reduce((sum, { report }) => sum + report.threadCount, 0);
+    const { threadCount: count, estimatedBytes } = sumThreadHistoryTrimReports(
+      previewed.map(({ report }) => report),
+    );
     toastManager.add({
       type: "success",
       title: gt("{count, plural, one {Trimming {count} thread} other {Trimming {count} threads}}", {
         count,
       }),
       description: gt("About {size} of tool output and reasoning is being removed.", {
-        size: formatBytes(previewed.reduce((sum, { report }) => sum + report.estimatedBytes, 0)),
+        size: formatBytes(estimatedBytes),
       }),
     });
   };
 
-  const threadCount = (confirming ?? []).reduce((sum, { report }) => sum + report.threadCount, 0);
-  const size = formatBytes(
-    (confirming ?? []).reduce((sum, { report }) => sum + report.estimatedBytes, 0),
+  const confirmingTotals = sumThreadHistoryTrimReports(
+    (confirming ?? []).map(({ report }) => report),
   );
+  const threadCount = confirmingTotals.threadCount;
+  const size = formatBytes(confirmingTotals.estimatedBytes);
   const update = (patch: Partial<StorageCleanupSettings>, options: SaveOptions) =>
     updateSettings({ storageCleanup: patch }, options);
 
