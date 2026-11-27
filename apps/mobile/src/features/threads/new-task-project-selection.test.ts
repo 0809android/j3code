@@ -322,9 +322,9 @@ describe("newTaskDestination", () => {
         ? EnvironmentId.make(options.defaultEnvironmentId)
         : null,
       connectedEnvironmentIds: new Set(
-        (options.connected ?? [options.defaultEnvironmentId ?? ""]).map((id) =>
-          EnvironmentId.make(id),
-        ),
+        (
+          options.connected ?? (options.defaultEnvironmentId ? [options.defaultEnvironmentId] : [])
+        ).map((id) => EnvironmentId.make(id)),
       ),
       projectGroups: options.projectGroups,
       lastProject: options.last,
