@@ -33,10 +33,7 @@ function logPathHydrationWarning(message: string, error?: unknown): void {
 // with the shell's PATH, or `mise x` can rebuild PATH behind a same-named
 // wrapper (`exec mise x claude -- claude`) that then re-runs itself forever.
 const LOGIN_SHELL_ENV_NAMES = ["PATH", "__MISE_DIFF", "JAVA_HOME", "K3CODE_FEATURE_FLAGS"] as const;
-// Someone waiting on a refresh (Settings, discovery) gets this; only the background pass at
-// startup, which nobody waits on, can afford the longer wait a slow profile needs.
 const LOGIN_SHELL_TIMEOUT = Duration.seconds(5);
-export const BACKGROUND_LOGIN_SHELL_TIMEOUT = Duration.seconds(15);
 const SLOW_LOGIN_SHELL_TIMEOUT_MS = 20_000;
 
 function readSlowLoginShellEnvironment(shell: string): Partial<Record<string, string>> {
@@ -164,67 +161,67 @@ export const fixPath = Effect.fn("fixPath")(function* (options?: {
   );
 });
 
-const captureLoginShellOutput = Effect.fn("captureLoginShellOutput")(function* (shell: string) {
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const child = yield* spawner.spawn(
-    ChildProcess.make(
-      shell,
-      ["-ilc", buildEnvironmentCaptureCommand(shell, LOGIN_SHELL_ENV_NAMES)],
-      {
-        stdin: "ignore",
-        stdout: "pipe",
-        stderr: "ignore",
-        // A profile that traps SIGTERM would otherwise hold the scope open
-        // past the timeout while cleanup waits for the exit.
-        forceKillAfter: "1 second",
-      },
-    ),
-  );
-  const [stdout, exitCode] = yield* Effect.all(
-    [Stream.mkString(Stream.decodeText(child.stdout)), child.exitCode],
-    { concurrency: 2 },
-  );
-  if (exitCode === 0) return stdout;
-  yield* Effect.logWarning(`Login shell ${shell} exited with code ${exitCode} while reading PATH.`);
-  return "";
-}, Effect.scoped);
-
-const readLoginShellOutput = (shell: string, timeout: Duration.Duration) =>
-  captureLoginShellOutput(shell).pipe(Effect.timeoutOption(timeout));
+const readLoginShellOutput = Effect.fn("readLoginShellOutput")(
+  function* (shell: string) {
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const child = yield* spawner.spawn(
+      ChildProcess.make(
+        shell,
+        ["-ilc", buildEnvironmentCaptureCommand(shell, LOGIN_SHELL_ENV_NAMES)],
+        {
+          stdin: "ignore",
+          stdout: "pipe",
+          stderr: "ignore",
+          // A profile that traps SIGTERM would otherwise hold the scope open
+          // past the timeout while cleanup waits for the exit.
+          forceKillAfter: "1 second",
+        },
+      ),
+    );
+    const [stdout, exitCode] = yield* Effect.all(
+      [Stream.mkString(Stream.decodeText(child.stdout)), child.exitCode],
+      { concurrency: 2 },
+    );
+    if (exitCode === 0) return stdout;
+    yield* Effect.logWarning(
+      `Login shell ${shell} exited with code ${exitCode} while reading PATH.`,
+    );
+    return "";
+  },
+  Effect.scoped,
+  Effect.timeoutOption(LOGIN_SHELL_TIMEOUT),
+);
 
 // Runs even when the desktop prepared the environment: that capture was taken
 // once at launch. Only the user's own shell counts; a fallback shell's PATH is
 // not their environment. Failure leaves PATH alone.
-export const refreshPathFromLoginShell = Effect.fn("refreshPathFromLoginShell")(
-  function* (options?: { readonly timeout?: Duration.Duration }) {
-    const timeout = options?.timeout ?? LOGIN_SHELL_TIMEOUT;
-    const platform = yield* HostProcess.Platform;
-    if (platform !== "darwin" && platform !== "linux") return;
-    const env = yield* HostProcess.Environment;
-    const [shell] = listLoginShellCandidates(platform, env.SHELL);
-    if (!shell) return;
+export const refreshPathFromLoginShell = Effect.fn("refreshPathFromLoginShell")(function* () {
+  const platform = yield* HostProcess.Platform;
+  if (platform !== "darwin" && platform !== "linux") return;
+  const env = yield* HostProcess.Environment;
+  const [shell] = listLoginShellCandidates(platform, env.SHELL);
+  if (!shell) return;
 
-    const output = yield* readLoginShellOutput(shell, timeout).pipe(
-      Effect.catchCause((cause) =>
-        Effect.logWarning(`Failed to read PATH from login shell ${shell}.`, cause).pipe(
-          Effect.as(Option.some("")),
-        ),
+  const output = yield* readLoginShellOutput(shell).pipe(
+    Effect.catchCause((cause) =>
+      Effect.logWarning(`Failed to read PATH from login shell ${shell}.`, cause).pipe(
+        Effect.as(Option.some("")),
       ),
+    ),
+  );
+  if (Option.isNone(output)) {
+    yield* Effect.logWarning(
+      `Timed out reading PATH from login shell ${shell} after ${Duration.format(LOGIN_SHELL_TIMEOUT)}; PATH is unchanged.`,
     );
-    if (Option.isNone(output)) {
-      yield* Effect.logWarning(
-        `Timed out reading PATH from login shell ${shell} after ${Duration.format(timeout)}; PATH is unchanged.`,
-      );
-      return;
-    }
-    const shellEnvironment = extractEnvironmentValues(output.value, LOGIN_SHELL_ENV_NAMES);
-    if (shellEnvironment.PATH) {
-      applyLoginShellEnvironment(env, platform, shellEnvironment);
-    } else {
-      yield* Effect.logWarning(`Login shell ${shell} printed no PATH; PATH is unchanged.`);
-    }
-  },
-);
+    return;
+  }
+  const shellEnvironment = extractEnvironmentValues(output.value, LOGIN_SHELL_ENV_NAMES);
+  if (shellEnvironment.PATH) {
+    applyLoginShellEnvironment(env, platform, shellEnvironment);
+  } else {
+    yield* Effect.logWarning(`Login shell ${shell} printed no PATH; PATH is unchanged.`);
+  }
+});
 
 // Installers write PATH to the registry, which the server's launch-time PATH never sees again.
 // Returns whether PATH gained a directory.

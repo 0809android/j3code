@@ -779,7 +779,6 @@ const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
   layerProviderInstallationRefresh,
   ProviderInstallation.layer,
   ReplayMarkers.layer,
-  // Runs before requests are accepted: a background sweep would race project mutations.
   Layer.effectDiscard(ProjectSettingsOverrideSweep.sweep),
 ).pipe(
   Layer.provideMerge(layerOrchestrationApplication),
@@ -1408,14 +1407,6 @@ const layerMakeServer = Layer.unwrap(
       withRootRequestSpans,
       Layer.tap(() => Deferred.succeed(routesReady, undefined).pipe(Effect.orDie)),
     );
-    const layerBackgroundShellPathRefresh = config.shellEnvironmentPrepared
-      ? Layer.empty
-      : Layer.effectDiscard(
-          Effect.gen(function* () {
-            const providers = yield* ProviderRegistry.ProviderRegistry;
-            yield* ServerActivation.forkParked(providers.refreshHostPath);
-          }),
-        );
     const layerServerApplication = Layer.mergeAll(
       layerRoutes,
       layerHttpListening,
@@ -1423,7 +1414,6 @@ const layerMakeServer = Layer.unwrap(
       layerRuntimeState.pipe(Layer.provide(layerLauncher)),
       layerTailscaleServe,
       layerCloudDesiredLinkReconcile,
-      layerBackgroundShellPathRefresh,
       HeapSnapshot.layer,
     );
 

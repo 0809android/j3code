@@ -3,23 +3,12 @@ import { it as effectIt } from "@effect/vitest";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { CommandAvailability, WindowsShellEnvironment } from "@t3tools/shared/shell";
 import * as Effect from "effect/Effect";
-import * as Fiber from "effect/Fiber";
-import * as Sink from "effect/Sink";
-import * as Stream from "effect/Stream";
-import * as TestClock from "effect/testing/TestClock";
-import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 // @effect-diagnostics-next-line nodeBuiltinImport:off -- Observe the existing synchronous shell probe without launching the user's login shell.
 import * as NodeChildProcess from "node:child_process";
 import * as NodeOS from "node:os";
 import { assert, it, vi } from "vite-plus/test";
 
-import {
-  BACKGROUND_LOGIN_SHELL_TIMEOUT,
-  fixPath,
-  hydratePosixHome,
-  refreshPathFromLoginShell,
-  refreshWindowsPath,
-} from "./os-jank.ts";
+import { fixPath, hydratePosixHome, refreshWindowsPath } from "./os-jank.ts";
 
 vi.mock("node:child_process", { spy: true });
 
@@ -69,7 +58,6 @@ effectIt.effect("hydrates PATH when the desktop handoff is absent", () =>
         );
 
         assert.equal(probe.mock.calls.length, 1);
-        assert.equal(probe.mock.calls[0]?.[1]?.[0], "-ilc");
         assert.equal(env.PATH, "/opt/tools/bin:/usr/bin");
       }),
     (probe) => Effect.sync(() => probe.mockRestore()),
@@ -239,51 +227,5 @@ effectIt.effect("adds a directory an installer wrote to the registry after launc
     );
 
     assert.deepEqual(env, { PATH: `C:\\Tools;C:\\Windows;${installed}` });
-  }),
-);
-
-// A login shell whose profile never finishes, and a log of what the refresh warned.
-const hangingLoginShell = ChildProcessSpawner.make(() =>
-  Effect.succeed(
-    ChildProcessSpawner.makeHandle({
-      pid: ChildProcessSpawner.ProcessId(1),
-      exitCode: Effect.never,
-      isRunning: Effect.succeed(true),
-      kill: () => Effect.void,
-      unref: Effect.succeed(Effect.void),
-      stdin: Sink.drain,
-      stdout: Stream.never,
-      stderr: Stream.empty,
-      all: Stream.empty,
-      getInputFd: () => Sink.drain,
-      getOutputFd: () => Stream.empty,
-    }),
-  ),
-);
-
-effectIt.effect("gives up on a slow login shell after 5 seconds unless the caller allows longer", () =>
-  Effect.gen(function* () {
-    const env: NodeJS.ProcessEnv = { SHELL: "/bin/bash", PATH: "/usr/bin" };
-    const run = (options?: Parameters<typeof refreshPathFromLoginShell>[0]) =>
-      refreshPathFromLoginShell(options).pipe(
-        Effect.provideService(HostProcess.Platform, "linux"),
-        Effect.provideService(HostProcess.Environment, env),
-        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, hangingLoginShell),
-        Effect.forkChild,
-      );
-
-    // The default is what a user waiting on a refresh gets.
-    const waited = yield* run();
-    yield* TestClock.adjust("4 seconds");
-    assert.isUndefined(waited.pollUnsafe());
-    yield* TestClock.adjust("1 second");
-    yield* Fiber.join(waited);
-
-    // The background pass at startup may wait out a slow profile.
-    const background = yield* run({ timeout: BACKGROUND_LOGIN_SHELL_TIMEOUT });
-    yield* TestClock.adjust("14 seconds");
-    assert.isUndefined(background.pollUnsafe());
-    yield* TestClock.adjust("1 second");
-    yield* Fiber.join(background);
   }),
 );

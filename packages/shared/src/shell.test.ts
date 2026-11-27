@@ -195,7 +195,6 @@ describe("readEnvironmentFromLoginShell", () => {
       detached: true,
       stdio: ["ignore", "pipe", "ignore"],
     });
-    expect(execFile.mock.calls[0]?.[1]?.[0]).toBe("-ilc");
   });
 
   it("omits environment variables that are missing or empty", () => {

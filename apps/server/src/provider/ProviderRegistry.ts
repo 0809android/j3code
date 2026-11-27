@@ -33,11 +33,7 @@ import * as ProviderLatestVersions from "@t3tools/provider-core/server/ProviderL
 import * as ModelManifest from "./ModelManifest.ts";
 import { applyProviderCompatibility } from "./providerCompatibility.ts";
 import * as ServerConfig from "../config.ts";
-import {
-  BACKGROUND_LOGIN_SHELL_TIMEOUT,
-  refreshPathFromLoginShell,
-  refreshWindowsPath,
-} from "../os-jank.ts";
+import { refreshPathFromLoginShell, refreshWindowsPath } from "../os-jank.ts";
 import * as ProviderInstanceRegistry from "./ProviderInstanceRegistry.ts";
 import * as ProviderInstanceRegistryMutator from "./ProviderInstanceRegistryMutator.ts";
 import {
@@ -69,12 +65,6 @@ export class ProviderRegistry extends Context.Service<
     readonly refresh: (
       provider?: ProviderDriverKind,
     ) => Effect.Effect<ReadonlyArray<ServerProvider>>;
-
-    /**
-     * Re-reads the host PATH in the background, waiting out a slow login shell; instances still
-     * missing their CLI are rebuilt when it changed. Refreshes a user waits on use a shorter wait.
-     */
-    readonly refreshHostPath: Effect.Effect<void>;
 
     /** Unknown instance ids return the cached list without error. */
     readonly refreshInstance: (
@@ -764,88 +754,29 @@ export const layer = Layer.effect(
     const readHostPath = () => hostEnvironment.PATH ?? hostEnvironment.Path ?? hostEnvironment.path;
     const lastHostPathRef = yield* Ref.make(readHostPath());
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-    // Refreshes someone waits on keep the short login shell timeout; the startup pass, which
-    // nobody waits on, can wait out a slow profile. Both share the PATH comparison above.
-    const makeRefreshHostPath = (loginShellTimeout?: Duration.Duration) =>
-      refreshWindowsPath().pipe(
-        Effect.andThen(
-          refreshPathFromLoginShell(
-            loginShellTimeout === undefined ? undefined : { timeout: loginShellTimeout },
-          ),
-        ),
-        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-        Effect.andThen(
-          Effect.suspend(() => {
-            const path = readHostPath();
-            return Ref.getAndSet(lastHostPathRef, path).pipe(Effect.map((last) => last !== path));
-          }),
-        ),
-        Effect.flatMap((changed) =>
-          changed
-            ? Ref.get(providersRef).pipe(
-                Effect.flatMap((providers) =>
-                  instanceRegistryMutator.rebuild(
-                    providers
-                      .filter((provider) => provider.enabled && !provider.installed)
-                      .map((provider) => provider.instanceId),
-                  ),
+    const refreshHostPath = yield* refreshWindowsPath().pipe(
+      Effect.andThen(refreshPathFromLoginShell()),
+      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+      Effect.andThen(
+        Effect.suspend(() => {
+          const path = readHostPath();
+          return Ref.getAndSet(lastHostPathRef, path).pipe(Effect.map((last) => last !== path));
+        }),
+      ),
+      Effect.flatMap((changed) =>
+        changed
+          ? Ref.get(providersRef).pipe(
+              Effect.flatMap((providers) =>
+                instanceRegistryMutator.rebuild(
+                  providers
+                    .filter((provider) => provider.enabled && !provider.installed)
+                    .map((provider) => provider.instanceId),
                 ),
-              )
-            : Effect.void,
-        ),
-        Effect.cachedWithTTL(Duration.seconds(10)),
-    );
-    const refreshHostPathNow = yield* makeRefreshHostPath();
-    const refreshHostPathInBackgroundNow = yield* makeRefreshHostPath(
-      BACKGROUND_LOGIN_SHELL_TIMEOUT,
-    );
-    // A caller that finds a shell with its own timeout running waits for it, up to `waitLimit`;
-    // the shell keeps going and its PATH is still applied. Each timeout has its own slot: a 5
-    // second shell must not stand in for the startup pass's 15 seconds on a slow profile.
-    const foregroundHostPathInFlightRef = yield* Ref.make(Option.none<Deferred.Deferred<void>>());
-    const backgroundHostPathInFlightRef = yield* Ref.make(Option.none<Deferred.Deferred<void>>());
-    const coalesceHostPathRefresh = Effect.fn("coalesceHostPathRefresh")(function* (
-      hostPathInFlightRef: Ref.Ref<Option.Option<Deferred.Deferred<void>>>,
-      execute: Effect.Effect<void>,
-      waitLimit: Duration.Input | undefined,
-    ) {
-      const claimed = yield* Ref.modify(
-        hostPathInFlightRef,
-        (
-          inFlight,
-        ): readonly [
-          { readonly owner: boolean; readonly done: Deferred.Deferred<void> },
-          Option.Option<Deferred.Deferred<void>>,
-        ] => {
-          if (Option.isSome(inFlight)) return [{ owner: false, done: inFlight.value }, inFlight];
-          const done = Deferred.makeUnsafe<void>();
-          return [{ owner: true, done }, Option.some(done)];
-        },
-      );
-      if (claimed.owner) {
-        // Detached, so the first caller's interruption cannot cancel what others wait on.
-        yield* execute.pipe(
-          Effect.onExit(() =>
-            Ref.set(hostPathInFlightRef, Option.none()).pipe(
-              Effect.andThen(Deferred.succeed(claimed.done, undefined)),
-            ),
-          ),
-          Effect.forkDetach,
-        );
-      }
-      yield* waitLimit === undefined
-        ? Deferred.await(claimed.done)
-        : Deferred.await(claimed.done).pipe(Effect.timeout(waitLimit), Effect.ignore);
-    });
-    const refreshHostPath = coalesceHostPathRefresh(
-      foregroundHostPathInFlightRef,
-      refreshHostPathNow,
-      Duration.seconds(5),
-    );
-    const refreshHostPathInBackground = coalesceHostPathRefresh(
-      backgroundHostPathInFlightRef,
-      refreshHostPathInBackgroundNow,
-      undefined,
+              ),
+            )
+          : Effect.void,
+      ),
+      Effect.cachedWithTTL(Duration.seconds(10)),
     );
     const refreshAllInFlightRef = yield* Ref.make<Option.Option<RefreshAllCompletion>>(
       Option.none(),
@@ -930,10 +861,7 @@ export const layer = Layer.effect(
       value: string,
     ) {
       const instanceIds = yield* instanceRegistryMutator.applySecret(reference, value);
-      yield* Effect.forEach(instanceIds, refreshInstance, {
-        concurrency: "unbounded",
-        discard: true,
-      });
+      yield* Effect.forEach(instanceIds, refreshInstance, { discard: true });
       return yield* Ref.get(providersRef);
     });
 
@@ -1435,7 +1363,6 @@ export const layer = Layer.effect(
       getProviders: Ref.get(providersRef),
       refresh: (provider?: ProviderDriverKind) =>
         refresh(provider).pipe(Effect.catchCause(recoverRefreshFailure)),
-      refreshHostPath: refreshHostPathInBackground.pipe(Effect.ignore),
       refreshInstance: (instanceId: ProviderInstanceId) =>
         refreshInstance(instanceId).pipe(Effect.catchCause(recoverRefreshFailure)),
       reloadSecretsAndRefresh: (instanceId?: ProviderInstanceId) =>
