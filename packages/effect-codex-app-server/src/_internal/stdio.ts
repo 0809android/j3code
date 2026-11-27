@@ -1,6 +1,8 @@
 import * as NodeUtil from "node:util";
 
 import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
+import * as Deferred from "effect/Deferred";
 import * as Fiber from "effect/Fiber";
 import * as Effect from "effect/Effect";
 import * as Queue from "effect/Queue";
@@ -13,7 +15,7 @@ import { ChildProcessSpawner } from "effect/process";
 import * as CodexError from "../errors.ts";
 
 const encoder = new TextEncoder();
-const PROCESS_EXIT_DRAIN_GRACE = "250 millis";
+const PROCESS_EXIT_DRAIN_GRACE_MS = 250;
 
 export const makeChildStdio = (
   handle: Pick<ChildProcessSpawner.ChildProcessHandle, "stdin" | "stdout" | "exitCode">,
@@ -23,15 +25,34 @@ export const makeChildStdio = (
     args: Effect.succeed([]),
     stdin: Stream.unwrap(
       Effect.gen(function* () {
-        const pull = yield* Stream.toPull(handle.stdout);
         // Descendants can retain stdout after the owner exits. After exit, keep reading while
-        // data arrives and stop once a read waits PROCESS_EXIT_DRAIN_GRACE with nothing new.
-        const idleAfterExit = handle.exitCode.pipe(
+        // data arrives and stop once PROCESS_EXIT_DRAIN_GRACE passes with nothing new. Until then
+        // stdout is read as it is, and the exit status is awaited once, not once per chunk.
+        const idle = yield* Deferred.make<void>();
+        const lastDataAt = yield* Ref.make(0);
+        yield* handle.exitCode.pipe(
+          // A failed status read is not an exit; the protocol reports it as its own error.
+          Effect.flatMap(() => Clock.currentTimeMillis),
+          Effect.flatMap((exitedAt) => Ref.update(lastDataAt, (last) => Math.max(last, exitedAt))),
+          Effect.flatMap(() =>
+            Effect.gen(function* () {
+              while (true) {
+                const last = yield* Ref.get(lastDataAt);
+                const remaining = last + PROCESS_EXIT_DRAIN_GRACE_MS - (yield* Clock.currentTimeMillis);
+                if (remaining <= 0) return yield* Deferred.succeed(idle, undefined);
+                yield* Effect.sleep(remaining);
+              }
+            }),
+          ),
           Effect.ignore,
-          Effect.andThen(Effect.sleep(PROCESS_EXIT_DRAIN_GRACE)),
-          Effect.andThen(Cause.done()),
+          Effect.forkScoped,
         );
-        return Stream.fromPull(Effect.succeed(Effect.raceFirst(pull, idleAfterExit)));
+        return handle.stdout.pipe(
+          Stream.tap(() =>
+            Effect.flatMap(Clock.currentTimeMillis, (now) => Ref.set(lastDataAt, now)),
+          ),
+          Stream.interruptWhen(Deferred.await(idle)),
+        );
       }),
     ).pipe(
       // Finish stderr separately from the protocol's exit-status deadline.

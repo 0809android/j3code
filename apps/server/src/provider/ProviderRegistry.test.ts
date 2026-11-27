@@ -2692,6 +2692,66 @@ it.layer(
       }),
     );
 
+    it.effect("starts one login shell when a refresh begins during the background PATH refresh", () =>
+      Effect.gen(function* () {
+        let spawned = 0;
+        const shellStarted = yield* Deferred.make<void>();
+        const releaseShell = yield* Deferred.make<void>();
+        const spawner = Layer.succeed(
+          ChildProcessSpawner.ChildProcessSpawner,
+          ChildProcessSpawner.make(() =>
+            Effect.gen(function* () {
+              spawned += 1;
+              yield* Deferred.succeed(shellStarted, undefined);
+              yield* Deferred.await(releaseShell);
+              return mockHandle({ stdout: "", stderr: "", code: 0 });
+            }),
+          ),
+        );
+        const changes = yield* PubSub.unbounded<void>();
+        const registry = yield* ProviderRegistry.ProviderRegistry.pipe(
+          Effect.provide(
+            ProviderRegistry.layer.pipe(
+              Layer.provide(
+                Layer.mock(ProviderInstanceRegistryMutator.ProviderInstanceRegistryMutator)({
+                  rebuild: () => Effect.void,
+                }),
+              ),
+              Layer.provideMerge(
+                Layer.succeed(ProviderInstanceRegistry.ProviderInstanceRegistry, {
+                  getInstance: () => Effect.succeed(undefined),
+                  listInstances: Effect.succeed([]),
+                  listUnavailable: Effect.succeed([]),
+                  streamChanges: Stream.fromPubSub(changes),
+                  subscribeChanges: PubSub.subscribe(changes),
+                }),
+              ),
+              Layer.provide(spawner),
+              Layer.provideMerge(
+                ServerConfig.layerTest(process.cwd(), {
+                  prefix: "t3-provider-registry-one-shell-",
+                }),
+              ),
+              Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+            ),
+          ),
+        );
+
+        const background = yield* Effect.forkChild(registry.refreshHostPath);
+        yield* Deferred.await(shellStarted);
+        // The user's refresh begins while the background shell is still running.
+        const foreground = yield* Effect.forkChild(registry.refresh(), { startImmediately: true });
+        yield* Effect.yieldNow;
+        yield* Deferred.succeed(releaseShell, undefined);
+        yield* Fiber.join(background);
+        yield* Fiber.join(foreground);
+        assert.strictEqual(spawned, 1);
+      }).pipe(
+        Effect.provideService(HostProcess.Platform, "linux"),
+        Effect.provideService(HostProcess.Environment, { PATH: "/usr/bin", SHELL: "/bin/sh" }),
+      ),
+    );
+
     it.effect("publishes a new label for an instance the registry kept live", () =>
       Effect.gen(function* () {
         const driver = ProviderDriverKind.make("antigravity");

@@ -795,9 +795,52 @@ export const layer = Layer.effect(
         ),
         Effect.cachedWithTTL(Duration.seconds(10)),
     );
-    const refreshHostPath = yield* makeRefreshHostPath();
-    const refreshHostPathInBackground = yield* makeRefreshHostPath(
+    const refreshHostPathNow = yield* makeRefreshHostPath();
+    const refreshHostPathInBackgroundNow = yield* makeRefreshHostPath(
       BACKGROUND_LOGIN_SHELL_TIMEOUT,
+    );
+    // At most one login shell at a time: the startup pass and the first provider refresh begin
+    // together and would each spawn one. A caller that finds one running waits for it instead,
+    // up to `waitLimit` (a refresh the user waits on stops waiting after 5 seconds; the shell
+    // keeps going and the PATH it reads is still applied).
+    const hostPathInFlightRef = yield* Ref.make(Option.none<Deferred.Deferred<void>>());
+    const coalesceHostPathRefresh = (
+      execute: Effect.Effect<void>,
+      waitLimit: Duration.Input | undefined,
+    ) =>
+      Effect.gen(function* () {
+        const claimed = yield* Ref.modify(
+          hostPathInFlightRef,
+          (
+            inFlight,
+          ): readonly [
+            { readonly owner: boolean; readonly done: Deferred.Deferred<void> },
+            Option.Option<Deferred.Deferred<void>>,
+          ] => {
+            if (Option.isSome(inFlight)) return [{ owner: false, done: inFlight.value }, inFlight];
+            const done = Deferred.makeUnsafe<void>();
+            return [{ owner: true, done }, Option.some(done)];
+          },
+        );
+        if (claimed.owner) {
+          // Detached, so the first caller's interruption cannot cancel what others wait on.
+          yield* execute.pipe(
+            Effect.onExit(() =>
+              Ref.set(hostPathInFlightRef, Option.none()).pipe(
+                Effect.andThen(Deferred.succeed(claimed.done, undefined)),
+              ),
+            ),
+            Effect.forkDetach,
+          );
+        }
+        yield* waitLimit === undefined
+          ? Deferred.await(claimed.done)
+          : Deferred.await(claimed.done).pipe(Effect.timeout(waitLimit), Effect.ignore);
+      });
+    const refreshHostPath = coalesceHostPathRefresh(refreshHostPathNow, Duration.seconds(5));
+    const refreshHostPathInBackground = coalesceHostPathRefresh(
+      refreshHostPathInBackgroundNow,
+      undefined,
     );
     const refreshAllInFlightRef = yield* Ref.make<Option.Option<RefreshAllCompletion>>(
       Option.none(),

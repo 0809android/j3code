@@ -17,6 +17,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
+import * as Ref from "effect/Ref";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
@@ -153,6 +154,54 @@ function withoutParentsOfKept(
   return removed;
 }
 
+/** Run-forks by the thread they hang off, as the pass read them. */
+interface ForkTable {
+  readonly children: ReadonlyMap<
+    ThreadId,
+    ReadonlyArray<{ readonly id: ThreadId; readonly deleted: boolean }>
+  >;
+  /** The same rows as `[id, parent, deleted]` triples, for a query to join. */
+  readonly json: string;
+  /** The thread table's newest rowid when this was read; a larger one means a thread was made since. */
+  readonly maxRowid: number;
+}
+
+function makeForkTable(
+  rows: ReadonlyArray<{
+    readonly id: ThreadId;
+    readonly parent: ThreadId | null;
+    readonly deleted: number;
+  }>,
+  maxRowid: number,
+): ForkTable {
+  const children = new Map<ThreadId, Array<{ id: ThreadId; deleted: boolean }>>();
+  const triples: Array<readonly [ThreadId, ThreadId, number]> = [];
+  for (const row of rows) {
+    if (row.parent === null) continue;
+    const siblings = children.get(row.parent) ?? [];
+    siblings.push({ id: row.id, deleted: row.deleted !== 0 });
+    children.set(row.parent, siblings);
+    triples.push([row.id, row.parent, row.deleted !== 0 ? 1 : 0]);
+  }
+  return { children, json: JSON.stringify(triples), maxRowid };
+}
+
+/** Live forks that show this thread's rows, at any depth; a deleted fork still passes them on. */
+function liveForksOf(table: ForkTable, threadId: ThreadId): ReadonlyArray<ThreadId> {
+  const seen = new Set<ThreadId>([threadId]);
+  const live: Array<ThreadId> = [];
+  const pending = [threadId];
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    for (const fork of table.children.get(next) ?? []) {
+      if (seen.has(fork.id)) continue;
+      seen.add(fork.id);
+      pending.push(fork.id);
+      if (!fork.deleted) live.push(fork.id);
+    }
+  }
+  return live;
+}
+
 const DUTY_REST_FACTOR = 9;
 const MAX_DUTY_REST_MS = 60_000;
 
@@ -177,64 +226,78 @@ const make = Effect.gen(function* () {
   const ids = yield* IdAllocator.IdAllocatorV2;
   const settingsService = yield* ServerSettingsModule.ServerSettingsService;
 
-  // Run-forks of each thread at any depth, deleted ones included so they pass the link on (see readForks).
-  const forkLinks = (threadId: ThreadId | undefined) =>
-    threadId === undefined
-      ? // The thread table is scanned once into fork_rows; the walk below joins that small set, not the table.
-        sql`
-    fork_rows(thread_id, parent_id, deleted) AS MATERIALIZED (
-      SELECT fork.thread_id, json_extract(fork.payload_json, '$.forkedFrom.threadId'),
-        fork.deleted_at IS NOT NULL
+  // Every run-fork in the thread table, read once per pass (the table has no index on the
+  // parent a fork hangs off, so each read is a full scan). Deleted forks stay in so they pass the
+  // link on to their own forks. A fork made after this read is left to the next pass.
+  // The thread table's primary key is text, so it keeps an implicit rowid that grows with each new
+  // thread, and its maximum is one b-tree seek (there is no index on created_at to use instead).
+  // Read before the rows, so a thread made between the two reads counts as new, not as missed.
+  const readMaxThreadRowid = sql<{ readonly maxRowid: number | null }>`
+    SELECT MAX(rowid) AS "maxRowid" FROM orchestration_v2_projection_threads
+  `.pipe(
+    NodeSqliteClient.readOnly,
+    Effect.map((rows) => rows[0]?.maxRowid ?? 0),
+  );
+  const readForkTable = Effect.fn("ThreadHistoryTrim.readForkTable")(function* () {
+    const maxRowid = yield* readMaxThreadRowid;
+    const rows = yield* sql<{
+      readonly id: ThreadId;
+      readonly parent: ThreadId | null;
+      readonly deleted: number;
+    }>`
+      SELECT fork.thread_id AS id,
+        json_extract(fork.payload_json, '$.forkedFrom.threadId') AS parent,
+        fork.deleted_at IS NOT NULL AS deleted
       FROM orchestration_v2_projection_threads AS fork
       WHERE json_extract(fork.payload_json, '$.forkedFrom.type') = 'run'
         AND COALESCE(json_extract(fork.payload_json, '$.lineage.sideChat'), 0) = 0
+    `.pipe(NodeSqliteClient.readOnly);
+    return makeForkTable(rows, maxRowid);
+  });
+
+  // The forks of each thread at any depth, from the table read above. Handed to the query as JSON,
+  // so the walk joins that small set and never touches the thread table.
+  const forkLinks = (forks: ForkTable, threadId: ThreadId | undefined) => sql`
+    fork_rows(thread_id, parent_id, deleted) AS MATERIALIZED (
+      SELECT json_extract(entry.value, '$[0]'), json_extract(entry.value, '$[1]'),
+        json_extract(entry.value, '$[2]')
+      FROM json_each(${forks.json}) AS entry
     ),
     forks(root_id, thread_id, deleted) AS (
       SELECT fork.parent_id, fork.thread_id, fork.deleted
       FROM fork_rows AS fork
-      UNION
-      SELECT forks.root_id, fork.thread_id, fork.deleted
-      FROM fork_rows AS fork
-      JOIN forks ON fork.parent_id = forks.thread_id
-    )`
-      : // For one thread, walk down from it and from the thread its subagent hangs off, so only
-        // their descendants are read and nothing is copied out of the whole table.
-        sql`
-    forks(root_id, thread_id, deleted) AS (
-      SELECT roots.id, fork.thread_id, fork.deleted_at IS NOT NULL
-      FROM (
-        SELECT ${threadId} AS id
+      ${
+        threadId === undefined
+          ? sql``
+          : // Walk down from this thread and from the thread its subagent hangs off.
+            sql`WHERE fork.parent_id IN (
+        SELECT ${threadId}
         UNION
         SELECT json_extract(own.payload_json, '$.lineage.rootThreadId')
         FROM orchestration_v2_projection_threads AS own
         WHERE own.thread_id = ${threadId}
           AND json_extract(own.payload_json, '$.lineage.relationshipToParent') = 'subagent'
-      ) AS roots
-      JOIN orchestration_v2_projection_threads AS fork
-        ON json_extract(fork.payload_json, '$.forkedFrom.threadId') = roots.id
-      WHERE json_extract(fork.payload_json, '$.forkedFrom.type') = 'run'
-        AND COALESCE(json_extract(fork.payload_json, '$.lineage.sideChat'), 0) = 0
+      )`
+      }
       UNION
-      SELECT forks.root_id, fork.thread_id, fork.deleted_at IS NOT NULL
-      FROM forks
-      JOIN orchestration_v2_projection_threads AS fork
-        ON json_extract(fork.payload_json, '$.forkedFrom.threadId') = forks.thread_id
-      WHERE json_extract(fork.payload_json, '$.forkedFrom.type') = 'run'
-        AND COALESCE(json_extract(fork.payload_json, '$.lineage.sideChat'), 0) = 0
+      SELECT forks.root_id, fork.thread_id, fork.deleted
+      FROM fork_rows AS fork
+      JOIN forks ON fork.parent_id = forks.thread_id
     )`;
 
   // A subagent has no user of its own, so it ages with the thread that started it.
   // With a `threadId` and `ignoreForks` this is the cheap re-check made inside a write: it reads
   // only that thread and its anchor, through their own tables' indexes. The forks' use has no
   // index to seek (it hangs off a JSON field of the thread table), so it is checked outside the
-  // write, once before a thread's pages, by the call that leaves `ignoreForks` off.
-  const readCandidates = (input: {
-    readonly idleBefore: string;
-    readonly now: string;
-    readonly threadId?: ThreadId;
-    readonly ignoreForks?: boolean;
-  }) => sql<Candidate>`
-    ${input.ignoreForks === true ? sql`` : sql`WITH RECURSIVE ${forkLinks(input.threadId)}`}
+  // write, once before a thread's pages, by the call that is given the pass's fork table.
+  const readCandidates = (
+    input: {
+      readonly idleBefore: string;
+      readonly now: string;
+      readonly threadId?: ThreadId;
+    } & ({ readonly ignoreForks: true } | { readonly forks: ForkTable }),
+  ) => sql<Candidate>`
+    ${"forks" in input ? sql`WITH RECURSIVE ${forkLinks(input.forks, input.threadId)}` : sql``}
     SELECT
       thread.thread_id AS "threadId",
       -- A rolled-back run's items are hidden, and the notice would go with them.
@@ -286,9 +349,8 @@ const make = Effect.gen(function* () {
             OR COALESCE(recent.completed_at, '') >= ${input.idleBefore}
           )
       )
-      ${input.ignoreForks === true
-        ? sql``
-        : sql`
+      ${"forks" in input
+        ? sql`
       -- A live fork shows this thread's rows, so its use keeps them too.
       AND NOT EXISTS (
         SELECT 1 FROM forks AS link
@@ -314,7 +376,8 @@ const make = Effect.gen(function* () {
                 )
             )
           )
-      )`}
+      )`
+        : sql``}
       AND (${input.threadId !== undefined ? sql`1` : sql`0`} OR EXISTS (
         SELECT 1 FROM orchestration_v2_projection_turn_items AS item
         WHERE item.thread_id = thread.thread_id
@@ -363,25 +426,6 @@ const make = Effect.gen(function* () {
       WHERE thread_id = ${threadId} AND root_node_id IS NOT NULL
     UNION SELECT owner_node_id FROM orchestration_v2_projection_provider_threads
       WHERE thread_id = ${threadId} AND owner_node_id IS NOT NULL
-  `;
-
-  // Live forks that show this thread's rows, at any depth; a deleted fork still passes them on.
-  const readForks = (threadId: ThreadId) => sql<{ readonly id: ThreadId }>`
-    WITH RECURSIVE fork_rows(thread_id, parent_id, deleted) AS MATERIALIZED (
-      SELECT fork.thread_id, json_extract(fork.payload_json, '$.forkedFrom.threadId'),
-        fork.deleted_at IS NOT NULL
-      FROM orchestration_v2_projection_threads AS fork
-      WHERE json_extract(fork.payload_json, '$.forkedFrom.type') = 'run'
-        AND COALESCE(json_extract(fork.payload_json, '$.lineage.sideChat'), 0) = 0
-    ),
-    forks(thread_id, deleted) AS (
-      SELECT ${threadId}, 0
-      UNION
-      SELECT fork.thread_id, fork.deleted
-      FROM fork_rows AS fork
-      JOIN forks ON fork.parent_id = forks.thread_id
-    )
-    SELECT thread_id AS id FROM forks WHERE thread_id <> ${threadId} AND deleted = 0
   `;
 
   const select = Effect.fn("ThreadHistoryTrim.select")(function* (candidate: Candidate) {
@@ -461,7 +505,10 @@ const make = Effect.gen(function* () {
 
   const estimate = Effect.fn("ThreadHistoryTrim.estimate")(function* (dryRun: boolean) {
     const { afterDays, now, idleBefore } = yield* window;
-    const candidates = afterDays <= 0 ? [] : yield* readCandidates({ idleBefore, now });
+    const candidates =
+      afterDays <= 0
+        ? []
+        : yield* readCandidates({ idleBefore, now, forks: yield* readForkTable() });
     let itemCount = 0;
     let estimatedBytes = 0;
     for (const candidate of candidates) {
@@ -656,10 +703,20 @@ const make = Effect.gen(function* () {
    * Moves each live fork's revision once per thread, after its last page: every copy makes a
    * subscribed fork re-read and resend its whole snapshot, so one per page would repeat that.
    */
-  const copyToForks = Effect.fn("ThreadHistoryTrim.copyToForks")(function* (threadId: ThreadId) {
+  const copyToForks = Effect.fn("ThreadHistoryTrim.copyToForks")(function* (
+    threadId: ThreadId,
+    forkTableRef: Ref.Ref<ForkTable>,
+  ) {
+    // A fork made since the table was read inherited rows this trim has removed, so it must hear
+    // of it. A newer thread means the table is read again, and the rest of the pass uses that one.
+    let forkTable = yield* Ref.get(forkTableRef);
+    if ((yield* readMaxThreadRowid) !== forkTable.maxRowid) {
+      forkTable = yield* readForkTable();
+      yield* Ref.set(forkTableRef, forkTable);
+    }
     // A fork may have started a run during the rests between pages, so the write waits for the
     // provider snapshots queued for each fork, as any write to that thread does.
-    const forks = yield* readForks(threadId).pipe(NodeSqliteClient.readOnly);
+    const forks = liveForksOf(forkTable, threadId).map((id) => ({ id }));
     if (forks.length === 0) return;
     yield* eventSink.writeBuilt(
       Effect.gen(function* () {
@@ -714,6 +771,7 @@ const make = Effect.gen(function* () {
   const trimThread = Effect.fn("ThreadHistoryTrim.trimThread")(function* (
     candidate: Candidate,
     rest: Effect.Effect<void>,
+    forkTableRef: Ref.Ref<ForkTable>,
   ) {
     const progress = { removedAny: false };
     return yield* trimPages(candidate, rest, progress).pipe(
@@ -723,7 +781,7 @@ const make = Effect.gen(function* () {
         Effect.suspend(() =>
           !progress.removedAny || (Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause))
             ? Effect.void
-            : copyToForks(candidate.threadId).pipe(
+            : copyToForks(candidate.threadId, forkTableRef).pipe(
                 Effect.catchCause((cause) =>
                   Effect.logWarning("Copying a history trim to forks failed", {
                     threadId: candidate.threadId,
@@ -773,7 +831,14 @@ const make = Effect.gen(function* () {
     }
     // The sweep keeps to a 10% duty so a backlog never competes with a turn; a requested trim does not wait.
     const rest = mode === "manual" ? Effect.yieldNow : yield* makeDutyRest;
-    const candidates = yield* readCandidates({ idleBefore, now }).pipe(
+    // Read once for the whole pass (again only if a thread is made before a copy to forks): the
+    // candidate list, each candidate's re-check, and the copies all use it.
+    const forkTableRef = yield* Ref.make(yield* readForkTable());
+    const candidates = yield* readCandidates({
+      idleBefore,
+      now,
+      forks: yield* Ref.get(forkTableRef),
+    }).pipe(
       NodeSqliteClient.readOnly,
     );
     if (mode !== "manual" && candidates.length > 0) {
@@ -786,15 +851,16 @@ const make = Effect.gen(function* () {
     let estimatedBytes = 0;
     for (const listed of candidates) {
       // A long pass outlives its list: a thread used since is no longer one. This read-side call
-      // is the only one that walks the thread's forks; the page writes check the thread alone.
+      // is the only one that checks the thread's forks; the page writes check the thread alone.
       const current = yield* readCandidates({
         idleBefore,
         now,
         threadId: listed.threadId,
+        forks: yield* Ref.get(forkTableRef),
       }).pipe(NodeSqliteClient.readOnly);
       const candidate = current[0];
       if (candidate === undefined) continue;
-      const removed = yield* trimThread(candidate, rest).pipe(
+      const removed = yield* trimThread(candidate, rest, forkTableRef).pipe(
         Effect.catchCauseIf(
           (cause) => !Cause.hasInterruptsOnly(cause),
           (cause) =>

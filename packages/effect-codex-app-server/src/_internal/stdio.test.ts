@@ -124,6 +124,73 @@ describe("Codex App Server child process termination", () => {
     }),
   );
 
+  it.effect("awaits the exit status once, however many chunks arrive while it runs", () =>
+    Effect.gen(function* () {
+      const { stdio, input } = yield* makeInMemoryStdio();
+      const terminated = yield* Deferred.make<CodexError.CodexAppServerError>();
+      const notifications = yield* Ref.make<ReadonlyArray<string>>([]);
+      const tail = yield* makeStderrTail(Stream.empty);
+      const exited = yield* Deferred.make<ChildProcessSpawner.ExitCode>();
+      const waits = yield* Ref.make(0);
+      const handle = {
+        stdout: stdio.stdin,
+        stdin: stdio.stdout(),
+        pid: ChildProcessSpawner.ProcessId(57),
+        exitCode: Effect.andThen(
+          Ref.update(waits, (count) => count + 1),
+          Deferred.await(exited),
+        ),
+      };
+      yield* CodexProtocol.makeCodexAppServerPatchedProtocol({
+        stdio: makeChildStdio(handle, tail.awaitDrained),
+        terminationError: Effect.never,
+        onTermination: (error) => Deferred.succeed(terminated, error).pipe(Effect.asVoid),
+        onNotification: ({ method }) => Ref.update(notifications, (all) => [...all, method]),
+      });
+      for (const method of ["a", "b", "c", "d", "e"]) {
+        yield* Queue.offer(input, new TextEncoder().encode(`${JSON.stringify({ method })}\n`));
+        yield* TestClock.adjust("10 millis");
+      }
+      assert.deepEqual(yield* Ref.get(notifications), ["a", "b", "c", "d", "e"]);
+      assert.equal(yield* Ref.get(waits), 1);
+    }),
+  );
+
+  it.effect("does not cut stdout after an idle grace when the exit status fails to read", () =>
+    Effect.gen(function* () {
+      const { stdio, input } = yield* makeInMemoryStdio();
+      const terminated = yield* Deferred.make<CodexError.CodexAppServerError>();
+      const notifications = yield* Ref.make<ReadonlyArray<string>>([]);
+      const tail = yield* makeStderrTail(Stream.empty);
+      const handle = {
+        stdout: stdio.stdin,
+        stdin: stdio.stdout(),
+        pid: ChildProcessSpawner.ProcessId(58),
+        exitCode: Effect.fail(
+          PlatformError.systemError({
+            _tag: "Unknown",
+            module: "ChildProcess",
+            method: "exitCode",
+            cause: new Error("status unavailable"),
+          }),
+        ),
+      };
+      yield* CodexProtocol.makeCodexAppServerPatchedProtocol({
+        stdio: makeChildStdio(handle, tail.awaitDrained),
+        terminationError: makeTerminationError(handle, tail.read),
+        onTermination: (error) => Deferred.succeed(terminated, error).pipe(Effect.asVoid),
+        onNotification: ({ method }) => Ref.update(notifications, (all) => [...all, method]),
+      });
+      // Silent for far longer than the grace: a failed status read is not an exit.
+      yield* TestClock.adjust("5 seconds");
+      assert.isFalse(yield* Deferred.isDone(terminated));
+      yield* Queue.offer(input, new TextEncoder().encode(`${JSON.stringify({ method: "late" })}\n`));
+      yield* TestClock.adjust("10 millis");
+      assert.deepEqual(yield* Ref.get(notifications), ["late"]);
+      assert.isFalse(yield* Deferred.isDone(terminated));
+    }),
+  );
+
   it.effect("retains the process identifier and exact exit-status cause", () =>
     Effect.gen(function* () {
       const rootCause = new Error("private process diagnostics");
