@@ -674,7 +674,7 @@ it.effect("applies every reader PRAGMA, not just the first", () =>
       const [temp] = yield* sql<{ readonly temp_store: number }>`PRAGMA temp_store`.pipe(
         SqliteClient.readOnly,
       );
-      assert.equal(cache?.cache_size, -32000);
+      assert.equal(cache?.cache_size, -4000);
       assert.equal(temp?.temp_store, 2);
     }),
   ),
@@ -689,9 +689,9 @@ it.effect("applies the cache and mmap PRAGMAs to readers only, not the writer", 
       });
       const reader = yield* pragmas.pipe(SqliteClient.readOnly);
       const writer = yield* pragmas;
-      assert.equal(reader.cache[0]?.cache_size, -32000);
+      assert.equal(reader.cache[0]?.cache_size, -4000);
       assert.equal(reader.mmap[0]?.mmap_size, 268435456);
-      assert.notEqual(writer.cache[0]?.cache_size, -32000);
+      assert.notEqual(writer.cache[0]?.cache_size, -4000);
       assert.equal(writer.mmap[0]?.mmap_size, 0);
     }),
   ),

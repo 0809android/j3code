@@ -224,14 +224,17 @@ const make = Effect.gen(function* () {
     )`;
 
   // A subagent has no user of its own, so it ages with the thread that started it.
-  // With a `threadId` this is the cheap re-check made inside a write: it reads only that thread,
-  // its anchor and their forks, never the whole thread table.
+  // With a `threadId` and `ignoreForks` this is the cheap re-check made inside a write: it reads
+  // only that thread and its anchor, through their own tables' indexes. The forks' use has no
+  // index to seek (it hangs off a JSON field of the thread table), so it is checked outside the
+  // write, once before a thread's pages, by the call that leaves `ignoreForks` off.
   const readCandidates = (input: {
     readonly idleBefore: string;
     readonly now: string;
     readonly threadId?: ThreadId;
+    readonly ignoreForks?: boolean;
   }) => sql<Candidate>`
-    WITH RECURSIVE ${forkLinks(input.threadId)}
+    ${input.ignoreForks === true ? sql`` : sql`WITH RECURSIVE ${forkLinks(input.threadId)}`}
     SELECT
       thread.thread_id AS "threadId",
       -- A rolled-back run's items are hidden, and the notice would go with them.
@@ -283,6 +286,9 @@ const make = Effect.gen(function* () {
             OR COALESCE(recent.completed_at, '') >= ${input.idleBefore}
           )
       )
+      ${input.ignoreForks === true
+        ? sql``
+        : sql`
       -- A live fork shows this thread's rows, so its use keeps them too.
       AND NOT EXISTS (
         SELECT 1 FROM forks AS link
@@ -308,7 +314,7 @@ const make = Effect.gen(function* () {
                 )
             )
           )
-      )
+      )`}
       AND (${input.threadId !== undefined ? sql`1` : sql`0`} OR EXISTS (
         SELECT 1 FROM orchestration_v2_projection_turn_items AS item
         WHERE item.thread_id = thread.thread_id
@@ -517,7 +523,12 @@ const make = Effect.gen(function* () {
     } satisfies OrchestrationV2DomainEvent;
   });
 
-  /** Removes one page in a transaction that first confirms the thread is still idle and trimming on. */
+  /**
+   * Removes one page in a transaction that first confirms the thread itself is still idle and
+   * trimming on. A fork's use is not read here: `pass` checked it just before the first page, and
+   * one that starts in the gap is caught by the next pass's check. The copy to the forks still
+   * waits on their queued snapshots.
+   */
   const trimPage = Effect.fn("ThreadHistoryTrim.trimPage")(function* (
     threadId: ThreadId,
     page: { readonly itemIds: ReadonlyArray<string>; readonly nodeIds: ReadonlyArray<string> },
@@ -536,7 +547,12 @@ const make = Effect.gen(function* () {
           outcome = "trimming-off";
           return [];
         }
-        const current = (yield* readCandidates({ idleBefore, now, threadId }))[0];
+        const current = (yield* readCandidates({
+          idleBefore,
+          now,
+          threadId,
+          ignoreForks: true,
+        }))[0];
         if (current === undefined) {
           outcome = "thread-in-use";
           return [];
@@ -769,7 +785,8 @@ const make = Effect.gen(function* () {
     let itemCount = 0;
     let estimatedBytes = 0;
     for (const listed of candidates) {
-      // A long pass outlives its list: a thread used since is no longer one.
+      // A long pass outlives its list: a thread used since is no longer one. This read-side call
+      // is the only one that walks the thread's forks; the page writes check the thread alone.
       const current = yield* readCandidates({
         idleBefore,
         now,

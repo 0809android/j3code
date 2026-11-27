@@ -218,7 +218,7 @@ try {
   next.exec(
     "PRAGMA busy_timeout = 5000; PRAGMA temp_store = MEMORY;" +
       (workerData.role === "reader"
-        ? " PRAGMA cache_size = -32000; PRAGMA mmap_size = 268435456;"
+        ? " PRAGMA cache_size = -4000; PRAGMA mmap_size = 268435456;"
         : ""),
   );
   // Reads the header, so a file that is not a database fails here rather than on first use.
