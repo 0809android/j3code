@@ -749,6 +749,28 @@ const make = Effect.gen(function* () {
     ),
   );
 
+  // The check above ends at once while the setting is off, so turning it on later would wait up to
+  // six hours for the next one. A switch from off to on queues one pass, as the start does.
+  const changes = yield* settingsService.subscribeChanges;
+  const initial = yield* settingsService.getSettings.pipe(Effect.orDie);
+  let enabled = (initial.storageCleanup.threadHistoryAfterDays ?? 0) > 0;
+  yield* forkParked(
+    changes.pipe(
+      Stream.filter((settings) => {
+        const next = (settings.storageCleanup.threadHistoryAfterDays ?? 0) > 0;
+        const turnedOn = next && !enabled;
+        enabled = next;
+        return turnedOn;
+      }),
+      Stream.switchMap(() =>
+        Stream.fromEffect(
+          Effect.sleep("5 minutes").pipe(Effect.andThen(worker.enqueue("background"))),
+        ),
+      ),
+      Stream.runDrain,
+    ),
+  );
+
   return ThreadHistoryTrim.of({
     preview: estimate(true).pipe(NodeSqliteClient.readOnly, mapError("preview")),
     trimNow: estimate(false).pipe(

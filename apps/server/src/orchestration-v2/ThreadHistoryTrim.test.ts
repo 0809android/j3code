@@ -21,6 +21,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as PubSub from "effect/PubSub";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -1082,6 +1083,61 @@ it.layer(dependencies(30))("ThreadHistoryTrim schedule", (it) => {
         assert.deepEqual(yield* itemTitles(later.threadId), everyItem);
         yield* afterWaiting("5 days");
         assert.deepEqual(yield* itemTitles(later.threadId), trimmedItems);
+      }).pipe(whileRunning);
+    }),
+  );
+});
+
+// The test settings layer never publishes changes, so this one does for each update.
+const publishingSettings = Layer.effect(
+  ServerSettings.ServerSettingsService,
+  Effect.gen(function* () {
+    const base = yield* ServerSettings.ServerSettingsService;
+    const changes = yield* PubSub.unbounded<Effect.Success<typeof base.getSettings>>();
+    return {
+      ...base,
+      updateSettings: (patch) =>
+        base.updateSettings(patch).pipe(Effect.tap((settings) => PubSub.publish(changes, settings))),
+      streamChanges: Stream.fromPubSub(changes),
+      subscribeChanges: PubSub.subscribe(changes).pipe(Effect.map(Stream.fromSubscription)),
+    } satisfies typeof base;
+  }),
+).pipe(
+  Layer.provide(
+    ServerSettings.ServerSettingsService.layerTest({
+      storageCleanup: { threadHistoryAfterDays: null },
+    }),
+  ),
+);
+const dependenciesWhoseSettingsChange = Layer.mergeAll(
+  stores,
+  OrchestrationEventStore.layer.pipe(Layer.provide(database)),
+  EventSink.layer.pipe(Layer.provide(stores)),
+  IdAllocator.layer,
+  publishingSettings,
+);
+
+it.layer(dependenciesWhoseSettingsChange)("ThreadHistoryTrim turned on while running", (it) => {
+  it.effect("runs one pass five minutes after the setting goes from off to on", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(DateTime.toEpochMillis(now));
+      const { threadId } = yield* seedThread("turned-on");
+      const settings = yield* ServerSettings.ServerSettingsService;
+
+      yield* Effect.gen(function* () {
+        // The pass at the start finds the setting off and does nothing.
+        yield* afterWaiting("5 minutes");
+        assert.deepEqual(yield* itemTitles(threadId), everyItem);
+        assert.isNull(yield* lastTrimmedAt);
+
+        yield* settings.updateSettings({ storageCleanup: { threadHistoryAfterDays: 30 } });
+        yield* Effect.yieldNow;
+        yield* afterWaiting("4 minutes");
+        assert.deepEqual(yield* itemTitles(threadId), everyItem);
+
+        yield* afterWaiting("1 minute");
+        assert.deepEqual(yield* itemTitles(threadId), trimmedItems);
+        assert.equal(yield* lastTrimmedAt, DateTime.formatIso(DateTime.add(now, { minutes: 10 })));
       }).pipe(whileRunning);
     }),
   );
