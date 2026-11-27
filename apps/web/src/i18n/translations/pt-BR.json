@@ -6126,6 +6126,7 @@
   "382dcc85d648b2df": "Importar",
   "4e91eca2d1813df8": "Nenhum dado do T3 Code foi encontrado neste computador.",
   "a147667b50ef6a6c": "Escolha o que trazer da sua instalação do T3 Code. Os dados do T3 Code são apenas lidos, nunca alterados.",
+  "a3d9a4de867f6718": "Deixe as threads que estão trabalhando no T3 Code terminarem antes de importar. As que ainda estiverem em execução são interrompidas aqui em vez de retomadas. Depois, continue essas threads em apenas um app: se os dois apps as continuarem, o trabalho é feito duas vezes.",
   "3af3a9d66423b2b9": "Não há nada para importar.",
   "d6c31ff9bb97570e": "Limite de varredura atingido. Alguns projetos ou conversas podem estar faltando.",
   "da6f86321113fb7b": "Esta conexão não pode importar projetos nem histórico de threads.",

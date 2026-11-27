@@ -28,6 +28,7 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 
 import * as ServerConfig from "./config.ts";
+import { clearAppliedLegacyImport, hasAppliedLegacyImport } from "./legacyImport/stagedImport.ts";
 import * as ServiceLauncherClient from "./cloud/serviceLauncherClient.ts";
 import { flushCompileCache } from "./compileCache.ts";
 import * as Keybindings from "./keybindings.ts";
@@ -508,6 +509,8 @@ const make = Effect.fn("serverRuntimeStartup.make")(function* (options?: Startup
         },
       });
     }
+    // Turns and deliveries T3 Code had in flight when its database was imported still run there.
+    const justImported = yield* hasAppliedLegacyImport(serverConfig.stateDir);
     const { recovery, bootstrap: bootstrapTargets } = yield* runOrderedV2StartupPhases({
       importLegacyShells: runStartupPhase(
         "orchestration-v2.legacy-v1.import-shells",
@@ -519,10 +522,17 @@ const make = Effect.fn("serverRuntimeStartup.make")(function* (options?: Startup
           ),
         ),
       ),
-      recover: runStartupPhase("orchestration-v2.recovery", providerRuntimeRecovery.recover),
+      recover: runStartupPhase(
+        "orchestration-v2.recovery",
+        justImported
+          ? providerRuntimeRecovery
+              .reconcile("startup", { afterImport: true })
+              .pipe(Effect.tap(() => clearAppliedLegacyImport(serverConfig.stateDir)))
+          : providerRuntimeRecovery.recover,
+      ),
       recoverDelegatedTasks: runStartupPhase(
         "orchestration-v2.delegated-tasks.recover",
-        orchestrator.recoverDelegatedTasks,
+        justImported ? Effect.void : orchestrator.recoverDelegatedTasks,
       ),
       startEffectWorker: runStartupPhase(
         "orchestration-v2.effect-worker.start",

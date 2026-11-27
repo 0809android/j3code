@@ -209,6 +209,48 @@ it.effect("recovers an admitted continuation after another crash before provider
   }),
 );
 
+it.effect("does not continue a running turn right after an import", () =>
+  Effect.gen(function* () {
+    const running = makeProjection();
+    const continuations = (afterImport: boolean) =>
+      Effect.gen(function* () {
+        const commits: Parameters<EventSink.EventSinkV2["Service"]["commitCommand"]>[0][] = [];
+        const recovery = yield* ProviderRuntimeRecovery.make.pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              ServerSettings.layerTest({ continueThreadsAfterServerUpdate: true }),
+              Layer.mock(ProjectionStore.ProjectionStoreV2)({
+                getRecoveryThreadIds: () => Effect.succeed([threadId]),
+                getRuntimeRecoveryProjection: () => Effect.succeed(running),
+                getThreadRecords: () => Effect.succeed(running),
+              }),
+              Layer.mock(EventSink.EventSinkV2)({
+                commitCommand: (input) =>
+                  Effect.sync(() => {
+                    commits.push(input);
+                    return { committed: true, cancelledEffectCount: 0 } as never;
+                  }),
+              }),
+              IdAllocator.layer,
+              Layer.mock(EffectWorker.OrchestrationEffectWorkerV2)({}),
+              Layer.mock(EffectOutbox.EffectOutboxV2)({
+                get: () => Effect.succeedNone,
+                reconcileAfterProcessLoss: Effect.succeed({ requeued: 0, cancelled: 0 }),
+              }),
+            ),
+          ),
+        );
+        yield* recovery.reconcile("startup", { afterImport });
+        return commits.flatMap((commit) =>
+          commit.effects.filter((effect) => effect.request.type === "provider-runtime.continue"),
+        );
+      });
+
+    assert.lengthOf(yield* continuations(false), 1);
+    assert.lengthOf(yield* continuations(true), 0);
+  }),
+);
+
 it("does not continue settled root runs with restart-cancelled background work", () => {
   const projection = makeProjection();
   const settled = {

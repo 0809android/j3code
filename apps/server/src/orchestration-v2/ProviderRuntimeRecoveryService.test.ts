@@ -553,7 +553,9 @@ it.effect.each([
   "running-delegated-snoozed",
   "running-delegated-stopped",
   "running-resume",
+  "running-resume-imported",
 ] as const)("recovers $0 work after restart", (scenario) => {
+  const resume = scenario.startsWith("running-resume");
   const status = scenario.startsWith("starting")
     ? "starting"
     : scenario.startsWith("running")
@@ -567,7 +569,7 @@ it.effect.each([
     scenario === "running-delegated-capped" ||
     scenario === "running-delegated-snoozed" ||
     scenario === "running-delegated-stopped" ||
-    scenario === "running-resume";
+    resume;
   const startedAt =
     status === "running" || scenario === "starting-steered"
       ? DateTime.makeUnsafe("2026-11-01T19:34:40.403Z")
@@ -592,7 +594,7 @@ it.effect.each([
           : null,
       lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
       forkedFrom: null,
-      ...(scenario === "running-resume"
+      ...(resume
         ? {
             limitRecovery: {
               runId: RunId.make("run_queued_restart_limited"),
@@ -636,7 +638,7 @@ it.effect.each([
         userMessageId: MessageId.make("message_queued_restart"),
         queuePosition: 1,
         providerInstanceId: ProviderInstanceId.make("codex"),
-        ...(scenario === "running-resume"
+        ...(resume
           ? { usageLimitContinuationOfRunId: RunId.make("run_queued_restart_limited") }
           : {}),
         ...(status === "preparing"
@@ -687,7 +689,7 @@ it.effect.each([
               id: MessageId.make("message_queued_restart"),
               ...(scenario.startsWith("running-delegated")
                 ? { createdBy: "agent", creationSource: "mcp" }
-                : scenario === "running-resume"
+                : resume
                   ? { createdBy: "agent", creationSource: "server" }
                   : { createdBy: "user" }),
               ...(scenario === "starting-scheduled" ? { scheduledTaskId: "scheduled-task" } : {}),
@@ -761,7 +763,9 @@ it.effect.each([
 
   return Effect.gen(function* () {
     const summary =
-      yield* (yield* ProviderRuntimeRecovery.ProviderRuntimeRecoveryService).reconcile("startup");
+      yield* (yield* ProviderRuntimeRecovery.ProviderRuntimeRecoveryService).reconcile("startup", {
+        afterImport: scenario === "running-resume-imported",
+      });
     assert.equal(summary.terminalizedRuns, terminalized ? 1 : 0);
     const command = committedInput;
     assert.isNotNull(command);
@@ -815,6 +819,14 @@ it.effect.each([
           : null,
         command.commandId,
       );
+    }
+    // Right after an import the resume belongs to T3 Code, so this copy stops waiting to send it.
+    if (scenario === "running-resume-imported") {
+      const disarmed = command.events.find((event) => event.type === "thread.metadata-updated");
+      const limitRecovery =
+        disarmed?.type === "thread.metadata-updated" ? disarmed.payload.limitRecovery : null;
+      assert.isFalse(limitRecovery?.autoResume);
+      assert.isUndefined(limitRecovery?.requestId);
     }
   }).pipe(Effect.provide(layer));
 });

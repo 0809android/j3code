@@ -6128,6 +6128,7 @@
   "382dcc85d648b2df": "Import",
   "4e91eca2d1813df8": "No T3 Code data was found on this computer.",
   "a147667b50ef6a6c": "Choose what to bring over from your T3 Code install. Your T3 Code data is only read, never changed.",
+  "a3d9a4de867f6718": "Let threads that are working in T3 Code finish before you import. Any still running are stopped here instead of resuming. Afterwards, keep working on these threads in one app only: if both apps continue them, the work runs twice.",
   "3af3a9d66423b2b9": "There is nothing to import.",
   "d6c31ff9bb97570e": "Scan limit reached. Some projects or conversations may be missing.",
   "da6f86321113fb7b": "This connection cannot import projects or thread history.",

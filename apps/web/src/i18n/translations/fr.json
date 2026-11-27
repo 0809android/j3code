@@ -6127,6 +6127,7 @@
   "382dcc85d648b2df": "Importer",
   "4e91eca2d1813df8": "Aucune donnée T3 Code n’a été trouvée sur cet ordinateur.",
   "a147667b50ef6a6c": "Choisissez ce qu’il faut reprendre de votre installation de T3 Code. Vos données T3 Code sont seulement lues, jamais modifiées.",
+  "a3d9a4de867f6718": "Laissez les fils en cours dans T3 Code se terminer avant l’import. Ceux qui tournent encore sont arrêtés ici au lieu de reprendre. Ensuite, poursuivez ces fils dans une seule app : si les deux apps les continuent, le travail est fait deux fois.",
   "3af3a9d66423b2b9": "Il n’y a rien à importer.",
   "d6c31ff9bb97570e": "Limite d’analyse atteinte. Certains projets ou certaines conversations peuvent manquer.",
   "da6f86321113fb7b": "Cette connexion ne peut pas importer de projets ni d’historique de fils.",

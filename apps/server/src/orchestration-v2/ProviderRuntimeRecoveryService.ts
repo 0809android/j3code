@@ -77,11 +77,17 @@ export interface ProviderRuntimeReconciliationSummary {
   readonly requeuedEffects: number;
 }
 
+interface ReconcileOptions {
+  /** The database was just imported from T3 Code, whose in-flight work stays T3 Code's. */
+  readonly afterImport?: boolean;
+}
+
 export class ProviderRuntimeRecoveryService extends Context.Service<
   ProviderRuntimeRecoveryService,
   {
     readonly reconcile: (
       trigger: "startup" | "shutdown",
+      options?: ReconcileOptions,
     ) => Effect.Effect<ProviderRuntimeReconciliationSummary, ProviderRuntimeRecoveryError>;
     readonly prepareForShutdown: Effect.Effect<void, ProviderRuntimeRecoveryError>;
     readonly recover: Effect.Effect<ProviderRuntimeRecoverySummary, ProviderRuntimeRecoveryError>;
@@ -258,6 +264,7 @@ export const make = Effect.gen(function* () {
       trigger: "startup" | "shutdown",
       continueAfterRestart: boolean,
       stoppedThisPass: ReadonlyMap<string, RecoverySession> = new Map(),
+      afterImport = false,
     ) {
       const now = yield* DateTime.now;
       const projection = yield* rewindUnacceptedRuns(stored);
@@ -594,6 +601,7 @@ export const make = Effect.gen(function* () {
       const limitRecovery = projection.thread.limitRecovery;
       // The unsent resume spent the worker's request id, so a fresh one lets it send again. An
       // untagged resume from an older server stays cancelled: its copy couldn't be hidden.
+      // After an import the resume is T3 Code's to send, so this copy stops waiting to send it.
       if (limitRecovery?.autoResume === true && unsentResumeRunIds.length > 0) {
         events.push({
           id: yield* allocateEventId(),
@@ -602,7 +610,14 @@ export const make = Effect.gen(function* () {
           occurredAt: now,
           payload: {
             ...projection.thread,
-            limitRecovery: { ...limitRecovery, requestId: commandId },
+            limitRecovery: afterImport
+              ? {
+                  runId: limitRecovery.runId,
+                  resetAt: limitRecovery.resetAt,
+                  autoResume: false,
+                  ...(limitRecovery.snooze === undefined ? {} : { snooze: limitRecovery.snooze }),
+                }
+              : { ...limitRecovery, requestId: commandId },
             updatedAt: now,
           },
         });
@@ -1093,8 +1108,12 @@ export const make = Effect.gen(function* () {
 
   const reconcile = Effect.fn("ProviderRuntimeRecoveryService.reconcile")(function* (
     trigger: "startup" | "shutdown",
+    options?: ReconcileOptions,
   ) {
-    const continueAfterRestart = yield* settings.getSettings.pipe(Effect.orElseSucceed(() => null));
+    const afterImport = options?.afterImport === true;
+    const continueAfterRestart = afterImport
+      ? null
+      : yield* settings.getSettings.pipe(Effect.orElseSucceed(() => null));
     const threadIds = yield* projections
       .getRecoveryThreadIds("runtime")
       .pipe(
@@ -1129,7 +1148,13 @@ export const make = Effect.gen(function* () {
             continueAfterRestart !== null &&
             resolveProjectSettings(continueAfterRestart, projection.thread.projectId).settings
               .continueThreadsAfterServerUpdate;
-          const result = yield* reconcileProjection(projection, trigger, enabled, stoppedThisPass);
+          const result = yield* reconcileProjection(
+            projection,
+            trigger,
+            enabled,
+            stoppedThisPass,
+            afterImport,
+          );
           for (const session of projection.providerSessions) {
             if (session.status !== "stopped" && session.status !== "error") {
               stoppedThisPass.set(session.id, session);

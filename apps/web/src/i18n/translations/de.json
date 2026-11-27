@@ -6127,6 +6127,7 @@
   "382dcc85d648b2df": "Importieren",
   "4e91eca2d1813df8": "Auf diesem Computer wurden keine K3-Code-Daten gefunden.",
   "a147667b50ef6a6c": "Wähle, was aus deiner K3-Code-Installation übernommen werden soll. Deine K3-Code-Daten werden nur gelesen, nie verändert.",
+  "a3d9a4de867f6718": "Lass Threads, die in T3 Code noch arbeiten, vor dem Import fertig werden. Threads, die dann noch laufen, werden hier angehalten statt fortgesetzt. Arbeite danach nur in einer App an diesen Threads weiter: Wenn beide Apps sie fortsetzen, läuft die Arbeit doppelt.",
   "3af3a9d66423b2b9": "Es gibt nichts zu importieren.",
   "d6c31ff9bb97570e": "Suchlimit erreicht. Einige Projekte oder Unterhaltungen fehlen möglicherweise.",
   "da6f86321113fb7b": "Diese Verbindung kann keine Projekte oder Thread-Verläufe importieren.",

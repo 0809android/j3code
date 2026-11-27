@@ -6126,6 +6126,7 @@
   "382dcc85d648b2df": "Importar",
   "4e91eca2d1813df8": "No se encontraron datos de T3 Code en este equipo.",
   "a147667b50ef6a6c": "Elige qué traspasar desde tu instalación de T3 Code. Tus datos de T3 Code solo se leen, nunca se modifican.",
+  "a3d9a4de867f6718": "Deja que terminen los hilos que están trabajando en T3 Code antes de importar. Los que sigan en marcha se detienen aquí en lugar de reanudarse. Después, sigue trabajando en esos hilos en una sola app: si ambas apps los continúan, el trabajo se hace dos veces.",
   "3af3a9d66423b2b9": "No hay nada que importar.",
   "d6c31ff9bb97570e": "Se alcanzó el límite de escaneo. Puede que falten algunos proyectos o conversaciones.",
   "da6f86321113fb7b": "Esta conexión no puede importar proyectos ni historial de hilos.",

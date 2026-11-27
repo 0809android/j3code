@@ -16,4 +16,15 @@ On first launch a window offers the import. Later, use **Settings â†’ General â†
   and takes effect after a restart. The history it replaces stays beside the database as
   `statev2.sqlite.before-import-<time>`. Importing again later replaces the history again.
 
+## Before you import sessions
+
+- **Let running threads finish in T3 Code first.** A thread that is still working when you import
+  is stopped in K3 Code after the restart instead of picking up where it left off, and work T3 Code
+  had queued for it is dropped. It keeps running in T3 Code.
+- **Afterwards, continue each thread in one app only.** The imported threads are copies. If you
+  keep using both apps, the same thread can carry on in each, for example when a subagent's result
+  arrives or a usage limit resets, and the work runs twice.
+- **You stay signed in.** The desktop app's session and your paired devices are kept; T3 Code's
+  are not copied.
+
 An import can fail when the T3 Code data is newer than K3 Code; update K3 Code first.

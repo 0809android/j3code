@@ -6127,6 +6127,7 @@
   "382dcc85d648b2df": "Importera",
   "4e91eca2d1813df8": "Inga T3 Code-data hittades på den här datorn.",
   "a147667b50ef6a6c": "Välj vad som ska föras över från din T3 Code-installation. Dina T3 Code-data läses bara, aldrig ändras.",
+  "a3d9a4de867f6718": "Låt trådar som arbetar i T3 Code bli klara innan du importerar. Trådar som fortfarande körs stoppas här i stället för att fortsätta. Fortsätt sedan bara med de här trådarna i en app: om båda apparna fortsätter dem körs arbetet två gånger.",
   "3af3a9d66423b2b9": "Det finns inget att importera.",
   "d6c31ff9bb97570e": "Sökgränsen nåddes. Vissa projekt eller konversationer kan saknas.",
   "da6f86321113fb7b": "Den här anslutningen kan inte importera projekt eller trådhistorik.",

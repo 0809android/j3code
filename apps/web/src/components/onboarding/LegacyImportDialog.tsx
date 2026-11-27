@@ -298,6 +298,15 @@ export function LegacyImportDialog({
                   <T>There is nothing to import.</T>
                 </p>
               ) : null}
+              {available.some((item) => item.kind === "sessions") && !unchecked.has("sessions") ? (
+                <p className="px-2 pt-1 text-xs text-muted-foreground">
+                  <T>
+                    Let threads that are working in T3 Code finish before you import. Any still
+                    running are stopped here instead of resuming. Afterwards, keep working on these
+                    threads in one app only: if both apps continue them, the work runs twice.
+                  </T>
+                </p>
+              ) : null}
             </div>
             {outcome._tag === "failed" ? (
               <p className="mt-3 text-sm text-destructive-foreground">
