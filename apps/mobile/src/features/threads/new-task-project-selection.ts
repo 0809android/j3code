@@ -259,13 +259,15 @@ function resolveNewTaskStartProject(options: {
       (ref) => ref.environmentId === project.environmentId && ref.projectId === project.id,
     );
   const openGroups = pickableProjectGroups(groups);
+  const inArchivedGroup = (project: Pick<EnvironmentProject, "environmentId" | "id">) =>
+    groups.some((group) => group.archived && inGroup(group, project));
   const onDefaultEnvironment = defaultEnvironmentId
     ? sortProjectsByGroupOrder(
         options.projects.filter(
           (candidate) =>
             candidate.environmentId === defaultEnvironmentId &&
             candidate.archivedAt == null &&
-            !groups.some((group) => group.archived && inGroup(group, candidate)),
+            !inArchivedGroup(candidate),
         ),
         groups,
       )
@@ -284,7 +286,7 @@ function resolveNewTaskStartProject(options: {
   return (
     lastOnDefaultEnvironment ??
     firstOnDefaultEnvironment ??
-    (last?.archivedAt == null ? last : undefined)
+    (last && last.archivedAt == null && !inArchivedGroup(last) ? last : undefined)
   );
 }
 

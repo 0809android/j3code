@@ -406,6 +406,22 @@ describe("newTaskDestination", () => {
     });
   });
 
+  it("does not start on the remembered project when it is in an archived group", () => {
+    const projects = [makeProject("remembered", "other-environment"), makeProject("here")];
+    const ref = (project: EnvironmentProject) => ({
+      environmentId: project.environmentId,
+      projectId: project.id,
+    });
+    expect(
+      destination({
+        useLastProject: true,
+        projects: [projects[0]!],
+        last: { environmentId: "other-environment", projectId: "remembered" },
+        projectGroups: [{ memberProjectRefs: [ref(projects[0]!)], pinned: false, archived: true }],
+      }),
+    ).toEqual({ draft: { requestId: "request" } });
+  });
+
   it("starts on the repository root, not a subfolder, within the first group", () => {
     const repositoryKey = "github.com/t3tools/t3code";
     const projects = [
