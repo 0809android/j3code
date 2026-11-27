@@ -19,11 +19,14 @@ import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
+import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -1328,6 +1331,54 @@ it.layer(dependencies(30))("ThreadHistoryTrim schedule", (it) => {
         yield* afterWaiting("5 days");
         assert.deepEqual(yield* itemTitles(later.threadId), trimmedItems);
       }).pipe(whileRunning);
+    }),
+  );
+});
+
+// Each page's work counts one second, so the duty rest after it is nine seconds. `restStarted`
+// fires when that rest begins; the sleep itself still runs on the test clock.
+const steppedMonotonicClock = (restStarted: Deferred.Deferred<void>) =>
+  Effect.gen(function* () {
+    const clock = yield* Clock.Clock;
+    let monotonic = 0n;
+    return new Proxy(clock, {
+      get: (target, property) => {
+        if (property === "monotonicTimeNanos") {
+          return Effect.sync(() => (monotonic += 1_000_000_000n));
+        }
+        if (property === "sleep") {
+          return (duration: Duration.Duration) =>
+            Duration.toMillis(duration) === 9_000
+              ? Deferred.succeed(restStarted, undefined).pipe(Effect.andThen(clock.sleep(duration)))
+              : clock.sleep(duration);
+        }
+        return Reflect.get(target, property, target);
+      },
+    });
+  });
+
+it.layer(dependencies(30))("ThreadHistoryTrim requested during a background pass", (it) => {
+  it.effect("cuts short the rest of the background pass instead of waiting it out", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(DateTime.toEpochMillis(now));
+      const { threadId } = yield* seedThread("behind-rest");
+      const restStarted = yield* Deferred.make<void>();
+      const scope = yield* Scope.make();
+      yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void));
+      const services = yield* Layer.build(ThreadHistoryTrim.layer).pipe(
+        Effect.provideService(Clock.Clock, yield* steppedMonotonicClock(restStarted)),
+        Scope.provide(scope),
+      );
+      yield* Effect.gen(function* () {
+        const service = yield* ThreadHistoryTrim.ThreadHistoryTrim;
+        // The background pass starts five minutes in and rests after its first page.
+        yield* TestClock.adjust("5 minutes");
+        yield* Deferred.await(restStarted);
+        yield* service.trimNow;
+        // No further clock movement: the nine second rest must not be waited out.
+        yield* service.drain;
+        assert.deepEqual(yield* itemTitles(threadId), trimmedItems);
+      }).pipe(Effect.provide(services));
     }),
   );
 });

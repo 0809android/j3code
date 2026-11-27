@@ -16,6 +16,7 @@ import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Latch from "effect/Latch";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 import * as Schedule from "effect/Schedule";
@@ -821,6 +822,11 @@ const make = Effect.gen(function* () {
     yield* SubscriptionRef.set(statusRef, statusOf(finishedAt));
   });
 
+  // Requested trims queued or running. The worker is serial, so a background sweep's rests would
+  // otherwise hold a requested trim behind them for as long as the sweep takes.
+  const manualPendingRef = yield* Ref.make(0);
+  const manualQueued = yield* Latch.make();
+
   const pass = Effect.fn("ThreadHistoryTrim.pass")(function* (mode: Mode) {
     const { afterDays, now, idleBefore } = yield* window;
     if (afterDays <= 0) return;
@@ -829,8 +835,12 @@ const make = Effect.gen(function* () {
       const last = yield* readLastPass;
       if (last !== null && Date.parse(now) - Date.parse(last) < PASS_INTERVAL_MS) return;
     }
-    // The sweep keeps to a 10% duty so a backlog never competes with a turn; a requested trim does not wait.
-    const rest = mode === "manual" ? Effect.yieldNow : yield* makeDutyRest;
+    // The sweep keeps to a 10% duty so a backlog never competes with a turn. A requested trim does
+    // not rest, and cuts short the rests of a sweep it is queued behind.
+    const rest =
+      mode === "manual"
+        ? Effect.yieldNow
+        : (yield* makeDutyRest).pipe(Effect.raceFirst(manualQueued.await));
     // Read once for the whole pass (again only if a thread is made before a copy to forks): the
     // candidate list, each candidate's re-check, and the copies all use it.
     const forkTableRef = yield* Ref.make(yield* readForkTable());
@@ -850,6 +860,8 @@ const make = Effect.gen(function* () {
     let itemCount = 0;
     let estimatedBytes = 0;
     for (const listed of candidates) {
+      // A requested trim sweeps these threads next and records the pass.
+      if (mode !== "manual" && (yield* Ref.get(manualPendingRef)) > 0) return;
       // A long pass outlives its list: a thread used since is no longer one. This read-side call
       // is the only one that checks the thread's forks; the page writes check the thread alone.
       const current = yield* readCandidates({
@@ -889,7 +901,17 @@ const make = Effect.gen(function* () {
     yield* recordPass;
   });
 
-  const worker = yield* makeDrainableWorker((mode: Mode) => pass(mode));
+  const worker = yield* makeDrainableWorker((mode: Mode) =>
+    mode === "manual"
+      ? pass(mode).pipe(
+          Effect.ensuring(
+            Ref.updateAndGet(manualPendingRef, (pending) => pending - 1).pipe(
+              Effect.flatMap((pending) => (pending === 0 ? manualQueued.close : Effect.void)),
+            ),
+          ),
+        )
+      : pass(mode),
+  );
 
   const mapError =
     (operation: string) =>
@@ -936,7 +958,11 @@ const make = Effect.gen(function* () {
     preview: estimate(true).pipe(NodeSqliteClient.readOnly, mapError("preview")),
     trimNow: Effect.gen(function* () {
       const { afterDays } = yield* window;
-      yield* worker.enqueue("manual");
+      yield* Ref.update(manualPendingRef, (pending) => pending + 1).pipe(
+        Effect.andThen(manualQueued.open),
+        Effect.andThen(worker.enqueue("manual")),
+        Effect.uninterruptible,
+      );
       return {
         dryRun: false,
         afterDays,
