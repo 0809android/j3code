@@ -32,7 +32,7 @@ export interface UpdatePauseDependencies {
   >;
   readonly sessions: Pick<
     ProviderSessionManager.ProviderSessionManagerV2Shape,
-    "interruptForShutdown" | "resumeEventIngestion" | "shutdown"
+    "interruptForShutdown" | "resumeEventIngestion" | "pauseDispatch" | "resumeDispatch" | "shutdown"
   >;
 }
 
@@ -60,6 +60,8 @@ export const makeUpdatePauseController = Effect.fn("UpdatePause.makeController")
         }),
       ),
     );
+    // After reconcile, so a send to a cut thread cannot interleave with it; before the worker.
+    yield* deps.sessions.resumeDispatch;
     yield* deps.reopenCommands;
     yield* deps.startEffectWorker;
     yield* Effect.logInfo("Resumed turns paused for an update that did not install");
@@ -75,6 +77,8 @@ export const makeUpdatePauseController = Effect.fn("UpdatePause.makeController")
         // Before the server is ready, startup still owns the worker and the continuations are not
         // yet deliverable; pausing then would race startup, so the update proceeds without it.
         if (!(yield* deps.closeCommands)) return { pausedRuns: 0 };
+        // Commands are refused above; this stops the server's own sends (schedules, webhooks).
+        yield* deps.sessions.pauseDispatch;
         yield* deps.stopEffectWorker;
         const turns = yield* deps.recovery.prepareForUpdate.pipe(
           Effect.catchCause((cause) =>

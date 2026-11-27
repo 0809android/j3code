@@ -16644,6 +16644,19 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
 
   // dispatchWithReceiptEffect owns the dispatch span; this wrapper selects the thread locks.
   const dispatchWithReceipt = Effect.fnUntraced(function* (command: OrchestrationV2ServerCommand) {
+    // Refused before any receipt, so the caller's own retry (or a later schedule) can succeed.
+    if (
+      (command.type === "message.dispatch" ||
+        command.type === "thread.create" ||
+        (command.type === "thread.metadata.update" && command.continuation !== undefined)) &&
+      (yield* providerSessions.isDispatchPausedForUpdate)
+    ) {
+      return yield* new OrchestratorCommandRejectedError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: "K3 Code is pausing running turns to install an update. Try again shortly.",
+      });
+    }
     const dispatch = threadDispatch.withLock(
       commandThreadId(command),
       dispatchWithReceiptEffect(command),

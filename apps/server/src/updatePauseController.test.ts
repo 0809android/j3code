@@ -22,6 +22,7 @@ const setupWith = Effect.fn("test.setup")(function* (options: { readonly ready: 
     yield* gate.signalCommandReady;
   }
   const calls: Array<string> = [];
+  let dispatchPaused = false;
   const record = (call: string) => Effect.sync(() => void calls.push(call));
   const controller = yield* makeUpdatePauseController({
     closeCommands: gate.closeCommands(
@@ -47,36 +48,49 @@ const setupWith = Effect.fn("test.setup")(function* (options: { readonly ready: 
       interruptForShutdown: (turns) => record(`interrupt ${turns.length}`),
       shutdown: record("release sessions"),
       resumeEventIngestion: record("ingest events"),
+      pauseDispatch: Effect.sync(() => {
+        dispatchPaused = true;
+        calls.push("pause dispatch");
+      }),
+      resumeDispatch: Effect.sync(() => {
+        dispatchPaused = false;
+        calls.push("resume dispatch");
+      }),
     },
   });
   const commandAccepted = Effect.exit(gate.enqueueCommand(Effect.void)).pipe(
     Effect.map(Exit.isSuccess),
   );
-  return { controller, calls, commandAccepted, gate };
+  const dispatchOpen = Effect.sync(() => !dispatchPaused);
+  return { controller, calls, commandAccepted, dispatchOpen, gate };
 });
 
 const setup = setupWith({ ready: true });
 
-const PAUSE = ["stop worker", "interrupt 2"];
+const PAUSE = ["stop worker", "pause dispatch", "interrupt 2"];
 const UNPAUSE = [
   "release sessions",
   "ingest events",
   "reconcile shutdown not-installed",
+  "resume dispatch",
   "start worker",
 ];
 
 it.effect("un-pauses once at the deadline when no restart follows the pause", () =>
   Effect.gen(function* () {
-    const { controller, calls, commandAccepted } = yield* setup;
+    const { controller, calls, commandAccepted, dispatchOpen } = yield* setup;
+    assert.isTrue(yield* dispatchOpen);
     assert.deepEqual(yield* controller.pauseRunsForUpdate, { pausedRuns: 2 });
     assert.deepEqual(yield* controller.pauseRunsForUpdate, { pausedRuns: 2 });
     assert.isFalse(yield* commandAccepted);
+    assert.isFalse(yield* dispatchOpen);
 
     yield* TestClock.adjust("119 seconds");
     assert.deepEqual(calls, PAUSE);
     yield* TestClock.adjust("1 second");
     assert.deepEqual(calls, [...PAUSE, ...UNPAUSE]);
     assert.isTrue(yield* commandAccepted);
+    assert.isTrue(yield* dispatchOpen);
 
     yield* controller.resumeRunsAfterUpdate;
     yield* TestClock.adjust("10 minutes");
@@ -112,11 +126,12 @@ it.effect("keeps the pause when the update stops the server", () =>
 
 it.effect("does not pause while startup has not signalled command readiness", () =>
   Effect.gen(function* () {
-    const { controller, calls, gate } = yield* setupWith({ ready: false });
+    const { controller, calls, gate, dispatchOpen } = yield* setupWith({ ready: false });
     const queued = yield* gate.enqueueCommand(Effect.succeed("ran")).pipe(Effect.forkScoped);
 
     assert.deepEqual(yield* controller.pauseRunsForUpdate, { pausedRuns: 0 });
     assert.deepEqual(calls, []);
+    assert.isTrue(yield* dispatchOpen);
 
     // Startup finishing afterwards admits the command; no deadline un-pause is left behind.
     yield* gate.signalCommandReady;

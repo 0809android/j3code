@@ -244,7 +244,10 @@ export type ProviderSessionManagerV2Error = typeof ProviderSessionManagerV2Error
 
 export interface ProviderSessionManagerV2Shape {
   readonly shutdown: Effect.Effect<void>;
-  /** Stops recording provider events, as a shutdown signal does, then interrupts each turn. */
+  /**
+   * Stops recording events from the sessions these turns run in, as a shutdown signal does for
+   * every session, then interrupts each turn. Other sessions keep their events.
+   */
   readonly interruptForShutdown: (
     turns: ReadonlyArray<{
       readonly providerSessionId: ProviderSessionId;
@@ -254,6 +257,11 @@ export interface ProviderSessionManagerV2Shape {
   ) => Effect.Effect<void>;
   /** Accepts provider events again after a pause that no shutdown followed. */
   readonly resumeEventIngestion: Effect.Effect<void>;
+  /** Makes `isDispatchPausedForUpdate` true: server-internal sends must wait for the update. */
+  readonly pauseDispatch: Effect.Effect<void>;
+  /** Undoes `pauseDispatch` after a pause that no shutdown followed. */
+  readonly resumeDispatch: Effect.Effect<void>;
+  readonly isDispatchPausedForUpdate: Effect.Effect<boolean>;
   readonly open: (input: {
     readonly threadId: ThreadId;
     readonly providerSessionId: ProviderSessionId;
@@ -564,6 +572,11 @@ export const layerWithOptions = (
       const layerScope = yield* Effect.scope;
       // Group signals stop providers before restart capture; drop post-signal events so recovery owns that state.
       const shutdownSignal = { received: false };
+      // An update pause cuts only the sessions it interrupts; other sessions keep recording.
+      const pausedForUpdate = new Set<string>();
+      const dispatchPause = { paused: false };
+      const eventsDropped = (providerSessionId: ProviderSessionId) =>
+        shutdownSignal.received || pausedForUpdate.has(sessionKey(providerSessionId));
       const onShutdownSignal = () => {
         shutdownSignal.received = true;
       };
@@ -3028,7 +3041,7 @@ export const layerWithOptions = (
           // Several adapters never end their event stream, and a parked pump retains the whole session.
           Stream.interruptWhen(Deferred.await(sessionClosed)),
           Stream.runForEach((nativeEvent) => {
-            if (shutdownSignal.received) return Effect.void;
+            if (eventsDropped(entry.runtime.providerSessionId)) return Effect.void;
             // Live output bypasses persistence and subscribers so floods cannot delay domain events.
             if (nativeEvent.type === "command_output.delta") {
               return commandOutput.append(nativeEvent);
@@ -3173,7 +3186,7 @@ export const layerWithOptions = (
           Effect.exit,
           Effect.flatMap((exit) =>
             Effect.gen(function* () {
-              if (shutdownSignal.received) return;
+              if (eventsDropped(entry.runtime.providerSessionId)) return;
               const current = (yield* Ref.get(sessions)).get(
                 sessionKey(entry.runtime.providerSessionId),
               );
@@ -3248,11 +3261,18 @@ export const layerWithOptions = (
       return ProviderSessionManagerV2.of({
         shutdown,
         resumeEventIngestion: Effect.sync(() => {
-          shutdownSignal.received = false;
+          pausedForUpdate.clear();
         }),
+        pauseDispatch: Effect.sync(() => {
+          dispatchPause.paused = true;
+        }),
+        resumeDispatch: Effect.sync(() => {
+          dispatchPause.paused = false;
+        }),
+        isDispatchPausedForUpdate: Effect.sync(() => dispatchPause.paused),
         interruptForShutdown: Effect.fn("ProviderSessionManager.interruptForShutdown")(
           function* (turns) {
-            shutdownSignal.received = true;
+            for (const turn of turns) pausedForUpdate.add(sessionKey(turn.providerSessionId));
             const live = yield* Ref.get(sessions);
             yield* Effect.forEach(
               turns,
