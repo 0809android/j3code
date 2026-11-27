@@ -282,6 +282,7 @@ describe("newTaskDestination", () => {
     readonly filtered?: EnvironmentProject;
     readonly last?: { readonly environmentId: string; readonly projectId: string };
     readonly defaultEnvironmentId?: string;
+    readonly projectGroups?: Parameters<typeof newTaskDestination>[0]["projectGroups"];
   }) {
     return newTaskDestination({
       projects: options.projects,
@@ -298,6 +299,7 @@ describe("newTaskDestination", () => {
       defaultEnvironmentId: options.defaultEnvironmentId
         ? EnvironmentId.make(options.defaultEnvironmentId)
         : null,
+      projectGroups: options.projectGroups,
       lastProject: options.last,
     });
   }
@@ -320,6 +322,38 @@ describe("newTaskDestination", () => {
       }),
     ).toEqual({
       draft: { requestId: "request", environmentId: "environment", projectId: "second" },
+    });
+  });
+
+  it("starts on the first project of the user's order on the default machine", () => {
+    const projects = [
+      makeProject("elsewhere", "other-environment"),
+      makeProject("first-in-list", "environment"),
+      makeProject("first-in-order", "environment"),
+    ];
+    const group = (projectId: string, environmentId: string) => ({
+      memberProjectRefs: [
+        {
+          environmentId: EnvironmentId.make(environmentId),
+          projectId: ProjectId.make(projectId),
+        },
+      ],
+      pinned: false,
+      archived: false,
+    });
+    expect(
+      destination({
+        useLastProject: true,
+        projects,
+        defaultEnvironmentId: "environment",
+        projectGroups: [
+          group("elsewhere", "other-environment"),
+          group("first-in-order", "environment"),
+          group("first-in-list", "environment"),
+        ],
+      }),
+    ).toEqual({
+      draft: { requestId: "request", environmentId: "environment", projectId: "first-in-order" },
     });
   });
 

@@ -4,6 +4,7 @@ import {
   isPickableProjectMember,
   isRepositoryRootProject,
 } from "@t3tools/client-runtime/state/project-grouping";
+import { sortProjectsByGroupOrder } from "@t3tools/client-runtime/state/project-grouping";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { repositoryGroupingKeyOf, type EnvironmentId, type ServerConfig } from "@t3tools/contracts";
 
@@ -228,6 +229,8 @@ export function newTaskDestination(options: {
   readonly filteredProject: ProjectRef | undefined;
   /** The machine chosen in settings: with no current or filtered project, its projects come first. */
   readonly defaultEnvironmentId?: EnvironmentId | null | undefined;
+  /** The sidebar's project order, as the web picks its default: the first of these on the machine wins. */
+  readonly projectGroups?: Parameters<typeof sortProjectsByGroupOrder>[1] | undefined;
   readonly lastProject: ProjectRef | undefined;
 }) {
   const find = (ref: ProjectRef | undefined) =>
@@ -238,9 +241,13 @@ export function newTaskDestination(options: {
   // A remembered project that was archived since opens the picker; the current one still wins.
   const last = find(options.lastProject);
   const onDefaultEnvironment = options.defaultEnvironmentId
-    ? options.projects.filter(
-        (candidate) =>
-          candidate.environmentId === options.defaultEnvironmentId && candidate.archivedAt == null,
+    ? sortProjectsByGroupOrder(
+        options.projects.filter(
+          (candidate) =>
+            candidate.environmentId === options.defaultEnvironmentId &&
+            candidate.archivedAt == null,
+        ),
+        options.projectGroups ?? [],
       )
     : [];
   const lastOnDefaultEnvironment = onDefaultEnvironment.find((candidate) => candidate === last);

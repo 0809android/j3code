@@ -510,6 +510,47 @@ it.layer(layerTest(30))("ThreadHistoryTrim", (it) => {
       assert.deepEqual(yield* itemTitles(idleSubagent.threadId), trimmedItems);
     }),
   );
+
+  it.effect("keeps a thread whose live fork is in use, and trims it when the fork is idle", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(DateTime.toEpochMillis(now));
+      const forkOf = (
+        name: string,
+        source: { threadId: ThreadId; runId: RunId },
+        options: SeedOptions,
+      ) =>
+        seedThread(name, {
+          ...options,
+          thread: {
+            ...options.thread,
+            lineage: {
+              parentThreadId: source.threadId,
+              relationshipToParent: "fork",
+              rootThreadId: source.threadId,
+            },
+            forkedFrom: { type: "run", threadId: source.threadId, runId: source.runId },
+          },
+        });
+      const messaged = yield* seedThread("source-fork-messaged");
+      const visited = yield* seedThread("source-fork-visited");
+      const grandchildUsed = yield* seedThread("source-grandchild-used");
+      const idle = yield* seedThread("source-fork-idle");
+      // Pinned, so a fork that is not in use stays out of the pass itself.
+      const pinned = { thread: { pinnedAt: old } };
+      yield* forkOf("fork-messaged", messaged, { userMessageAt: recent });
+      yield* forkOf("fork-visited", visited, { thread: { lastVisitedAt: recent } });
+      const middle = yield* forkOf("fork-middle", grandchildUsed, pinned);
+      yield* forkOf("fork-grandchild", middle, { userMessageAt: recent });
+      yield* forkOf("fork-idle", idle, pinned);
+
+      const report = yield* trim;
+      for (const source of [messaged, visited, grandchildUsed]) {
+        assert.deepEqual(yield* itemTitles(source.threadId), everyItem, source.threadId);
+      }
+      assert.equal(report.threadCount, 1);
+      assert.deepEqual(yield* itemTitles(idle.threadId), trimmedItems);
+    }),
+  );
 });
 
 type Hook = Effect.Effect<
@@ -837,9 +878,10 @@ it.layer(hookedFixture)("ThreadHistoryTrim during a pass", (it) => {
       yield* isolate;
       const source = yield* seedThread("fork-source");
       const forkOf = (name: string, parent: { threadId: ThreadId; runId: RunId }) =>
+        // Pinned, not recent: a fork in use would keep the source from being trimmed.
         seedThread(name, {
-          userMessageAt: recent,
           thread: {
+            pinnedAt: old,
             lineage: {
               parentThreadId: parent.threadId,
               relationshipToParent: "fork",
@@ -874,8 +916,8 @@ it.layer(hookedFixture)("ThreadHistoryTrim during a pass", (it) => {
       // More than two pages of 200 rows.
       const source = yield* seedThread("fork-pages", { extraReasoning: 450 });
       const fork = yield* seedThread("fork-of-pages", {
-        userMessageAt: recent,
         thread: {
+          pinnedAt: old,
           lineage: {
             parentThreadId: source.threadId,
             relationshipToParent: "fork",
