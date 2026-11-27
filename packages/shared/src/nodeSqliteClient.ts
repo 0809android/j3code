@@ -215,11 +215,10 @@ try {
   });
   // exec runs every statement; prepare would run only the first.
   // The writer sets its own cache and mmap; a reader's cache is per connection, so keep it small.
-  // Only a reader keeps temp data in memory: a writer's index builds and VACUUM can be huge.
   next.exec(
     "PRAGMA busy_timeout = 5000;" +
       (workerData.role === "reader"
-        ? " PRAGMA temp_store = MEMORY; PRAGMA cache_size = -4000; PRAGMA mmap_size = 268435456;"
+        ? " PRAGMA cache_size = -4000; PRAGMA mmap_size = 268435456;"
         : ""),
   );
   // Reads the header, so a file that is not a database fails here rather than on first use.

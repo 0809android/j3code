@@ -671,11 +671,7 @@ it.effect("applies every reader PRAGMA, not just the first", () =>
       const [cache] = yield* sql<{ readonly cache_size: number }>`PRAGMA cache_size`.pipe(
         SqliteClient.readOnly,
       );
-      const [temp] = yield* sql<{ readonly temp_store: number }>`PRAGMA temp_store`.pipe(
-        SqliteClient.readOnly,
-      );
       assert.equal(cache?.cache_size, -4000);
-      assert.equal(temp?.temp_store, 2);
     }),
   ),
 );
@@ -697,13 +693,13 @@ it.effect("applies the cache and mmap PRAGMAs to readers only, not the writer", 
   ),
 );
 
-it.effect("keeps temp data in memory for readers only, leaving the writer's default", () =>
+it.effect("leaves temp data in files for readers too, so a heavy query cannot fill memory", () =>
   withWriterAndReader((sql) =>
     Effect.gen(function* () {
       const tempStore = sql<{ readonly temp_store: number }>`PRAGMA temp_store`;
       const [reader] = yield* tempStore.pipe(SqliteClient.readOnly);
       const [writer] = yield* tempStore;
-      assert.equal(reader?.temp_store, 2);
+      assert.equal(reader?.temp_store, 0);
       assert.equal(writer?.temp_store, 0);
     }),
   ),
