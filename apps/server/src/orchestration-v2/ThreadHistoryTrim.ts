@@ -459,6 +459,8 @@ const make = Effect.gen(function* () {
         updatedAt: now,
         type: "system_notice",
         message: trimNoticeMessage(afterDays),
+        // Clients show a notice with no level as a warning.
+        level: "info",
         historyTrim: { afterDays },
       },
     } satisfies OrchestrationV2DomainEvent;

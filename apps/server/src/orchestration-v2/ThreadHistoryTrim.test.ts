@@ -450,6 +450,7 @@ it.layer(layerTest(30))("ThreadHistoryTrim", (it) => {
         notice?.type === "system_notice" ? notice.message : "",
         "removed to save space after 30 days",
       );
+      assert.equal(notice?.type === "system_notice" ? notice.level : undefined, "info");
       // Clients word the notice from this, in the user's language.
       assert.deepEqual(notice?.type === "system_notice" ? notice.historyTrim : undefined, {
         afterDays: 30,
