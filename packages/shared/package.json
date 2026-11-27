@@ -43,6 +43,10 @@
       "types": "./src/relay/index.ts",
       "import": "./src/relay/index.ts"
     },
+    "./relay/ledgerFile": {
+      "types": "./src/relay/ledgerFile.ts",
+      "import": "./src/relay/ledgerFile.ts"
+    },
     "./notify": {
       "types": "./src/notify/index.ts",
       "import": "./src/notify/index.ts"

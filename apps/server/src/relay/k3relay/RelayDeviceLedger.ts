@@ -4,11 +4,8 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 
-import {
-  type DeviceLedger,
-  makeDeviceLedger,
-  makeJsonFileLedgerStore,
-} from "@t3tools/shared/relay";
+import { type DeviceLedger, makeDeviceLedger } from "@t3tools/shared/relay";
+import { makeJsonFileLedgerStore } from "@t3tools/shared/relay/ledgerFile";
 
 import * as ServerConfig from "../../config.ts";
 
