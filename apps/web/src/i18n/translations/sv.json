@@ -6117,6 +6117,7 @@
   "a5e5026e2a80fb37": "Importera från T3 Code",
   "6a29c6637efa84f1": "{count, plural, one {{count} leverantör} other {{count} leverantörer}}",
   "56d1a850db38d0d1": "Ersätter historiken i den här appen efter en omstart. {size} MB. Den nuvarande historiken sparas som en säkerhetskopia.",
+  "873b565b1ae82669": "För att inget ska köras två gånger stoppas trådar som fortfarande arbetade i T3 Code här, och schemalagda uppgifter kommer in pausade. Fortsätt dem i den här appen när du slutar använda T3 Code.",
   "ca3c8995e6535035": "Utseende, kortkommandon och inställningar. Inloggningar och enheter följer inte med.",
   "54488fcdfe691ef0": "Det gick inte att importera: {message}",
   "c0fd6bfd0a873fdc": "Importerat.",

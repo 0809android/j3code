@@ -11,15 +11,95 @@ import * as Path from "effect/Path";
 import * as ServerConfig from "../config.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as LegacyImport from "./LegacyImport.ts";
-import { applyStagedLegacyImport } from "./stagedImport.ts";
+import {
+  applyStagedLegacyImport,
+  STAGING_DIRNAME,
+  clearAppliedLegacyImport,
+  hasAppliedLegacyImport,
+} from "./stagedImport.ts";
 
 const createDatabase = (file: string, migrationId: number, note: string) => {
   const database = new NodeSqlite.DatabaseSync(file);
   try {
+    // 本物の V2 データベースは、作るときにこれを有効にする。
+    database.exec("PRAGMA auto_vacuum = INCREMENTAL");
     database.exec("CREATE TABLE effect_sql_migrations (migration_id INTEGER PRIMARY KEY)");
     database.exec(`INSERT INTO effect_sql_migrations VALUES (${migrationId})`);
     database.exec("CREATE TABLE notes (value TEXT)");
     database.exec(`INSERT INTO notes VALUES ('${note}')`);
+  } finally {
+    database.close();
+  }
+};
+
+const addQueuedEffect = (file: string) => {
+  const database = new NodeSqlite.DatabaseSync(file);
+  try {
+    database.exec(
+      "CREATE TABLE orchestration_v2_effect_outbox (effect_id TEXT PRIMARY KEY, status TEXT NOT NULL, lease_owner TEXT, completed_at TEXT, updated_at TEXT, last_error TEXT)",
+    );
+    database.exec(
+      "INSERT INTO orchestration_v2_effect_outbox VALUES ('queued', 'pending', NULL, NULL, NULL, NULL)",
+    );
+    database.exec(
+      "INSERT INTO orchestration_v2_effect_outbox VALUES ('done', 'succeeded', NULL, NULL, NULL, NULL)",
+    );
+  } finally {
+    database.close();
+  }
+};
+
+const addAuthSession = (file: string, sessionId: string, columns: ReadonlyArray<string>) => {
+  const database = new NodeSqlite.DatabaseSync(file);
+  try {
+    database.exec(`CREATE TABLE IF NOT EXISTS auth_sessions (${columns.join(" TEXT, ")} TEXT)`);
+    database.prepare(`INSERT INTO auth_sessions (session_id) VALUES (?)`).run(sessionId);
+  } finally {
+    database.close();
+  }
+};
+
+const addScheduledTask = (file: string) => {
+  const database = new NodeSqlite.DatabaseSync(file);
+  try {
+    database.exec("CREATE TABLE scheduled_tasks (task_id TEXT, enabled INTEGER, updated_at TEXT)");
+    database.exec("INSERT INTO scheduled_tasks VALUES ('nightly', 1, NULL)");
+  } finally {
+    database.close();
+  }
+};
+
+const readEnabledTasks = (file: string) => {
+  const database = new NodeSqlite.DatabaseSync(file, { readOnly: true });
+  try {
+    return database
+      .prepare("SELECT task_id FROM scheduled_tasks WHERE enabled = 1")
+      .all()
+      .map((row) => String(row.task_id));
+  } finally {
+    database.close();
+  }
+};
+
+const readAuthSessions = (file: string) => {
+  const database = new NodeSqlite.DatabaseSync(file, { readOnly: true });
+  try {
+    return database
+      .prepare("SELECT session_id FROM auth_sessions")
+      .all()
+      .map((row) => String(row.session_id));
+  } finally {
+    database.close();
+  }
+};
+
+const readEffectStatuses = (file: string) => {
+  const database = new NodeSqlite.DatabaseSync(file, { readOnly: true });
+  try {
+    return database
+      .prepare("SELECT effect_id, status FROM orchestration_v2_effect_outbox ORDER BY effect_id")
+      .all()
+      .map((row) => `${String(row.effect_id)}:${String(row.status)}`);
   } finally {
     database.close();
   }
@@ -85,7 +165,11 @@ it.layer(layer)("LegacyImport", (it) => {
         }),
       );
       createDatabase(path.join(legacy, "statev2.sqlite"), 5, "from t3 code");
+      addQueuedEffect(path.join(legacy, "statev2.sqlite"));
+      addAuthSession(path.join(legacy, "statev2.sqlite"), "t3-sign-in", ["session_id", "subject"]);
+      addScheduledTask(path.join(legacy, "statev2.sqlite"));
       createDatabase(config.dbPath, 5, "from k3 code");
+      addAuthSession(config.dbPath, "k3-sign-in", ["session_id", "subject"]);
 
       const importer = yield* LegacyImport.LegacyImport;
       const scan = yield* importer.scan;
@@ -114,11 +198,74 @@ it.layer(layer)("LegacyImport", (it) => {
       );
       assert.equal(settings.defaultRuntimeMode, "approval-required");
 
-      // The running database is untouched until the next start swaps the snapshot in.
+      // 動いているデータベースは、次の起動で差し替えるまで変わらない。
       assert.equal(readNote(config.dbPath), "from k3 code");
       assert.isTrue((yield* importer.scan).sessionsStaged);
+      // 取り込んでから再起動するまでのペアリングも残る。
+      addAuthSession(config.dbPath, "k3-paired-later", ["session_id", "subject"]);
       yield* applyStagedLegacyImport(config.stateDir, config.dbPath);
       assert.equal(readNote(config.dbPath), "from t3 code");
+      assert.isFalse((yield* importer.scan).sessionsStaged);
+      // T3 Code が予約した処理はそちらに残し、取り込み後の起動だけが、コピーした実行だと分かる。
+      assert.deepEqual(readEffectStatuses(config.dbPath), ["done:succeeded", "queued:cancelled"]);
+      assert.deepEqual(readEffectStatuses(path.join(legacy, "statev2.sqlite")), [
+        "done:succeeded",
+        "queued:pending",
+      ]);
+      assert.deepEqual(readAuthSessions(config.dbPath), ["k3-sign-in", "k3-paired-later"]);
+      assert.deepEqual(readEnabledTasks(config.dbPath), []);
+      assert.deepEqual(readEnabledTasks(path.join(legacy, "statev2.sqlite")), ["nightly"]);
+      assert.isTrue(yield* hasAppliedLegacyImport(config.stateDir));
+      assert.isTrue(yield* hasAppliedLegacyImport(config.stateDir));
+      yield* clearAppliedLegacyImport(config.stateDir);
+      assert.isFalse(yield* hasAppliedLegacyImport(config.stateDir));
+    }),
+  );
+
+  it.effect("stages nothing when the import stops before it finishes", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const config = yield* ServerConfig.ServerConfig;
+      const home = yield* HostProcess.HomeDirectory;
+      const legacy = path.join(home, ".t3", "userdata");
+      yield* fs.remove(path.join(legacy, "statev2.sqlite"), { force: true });
+      createDatabase(path.join(legacy, "statev2.sqlite"), 5, "from t3 code");
+      yield* fs.remove(config.dbPath, { force: true });
+      createDatabase(config.dbPath, 5, "from k3 code");
+      // データベースのコピーを書いたあとで、添付ファイルのコピーが失敗する。
+      yield* fs.makeDirectory(path.join(legacy, "attachments", "thread"), { recursive: true });
+      yield* fs.writeFileString(path.join(legacy, "attachments", "thread", "a.png"), "png");
+      yield* fs.makeDirectory(config.attachmentsDir, { recursive: true });
+      yield* fs.writeFileString(path.join(config.attachmentsDir, "thread"), "not a directory");
+
+      const importer = yield* LegacyImport.LegacyImport;
+      const failure = yield* Effect.flip(importer.run({ kinds: ["sessions"] }));
+      assert.equal(failure.operation, "sessions");
+      assert.isFalse((yield* importer.scan).sessionsStaged);
+      assert.deepEqual(yield* fs.readDirectory(path.join(config.stateDir, STAGING_DIRNAME)), []);
+      yield* fs.remove(path.join(legacy, "attachments"), { recursive: true });
+      yield* fs.remove(path.join(config.attachmentsDir, "thread"));
+    }),
+  );
+
+  it.effect("refuses T3 Code data too old to keep this app's sign-ins", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const config = yield* ServerConfig.ServerConfig;
+      const home = yield* HostProcess.HomeDirectory;
+      const legacy = path.join(home, ".t3", "userdata");
+      yield* fs.remove(path.join(legacy, "statev2.sqlite"), { force: true });
+      createDatabase(path.join(legacy, "statev2.sqlite"), 5, "from t3 code");
+      addAuthSession(path.join(legacy, "statev2.sqlite"), "t3-sign-in", ["session_id"]);
+      yield* fs.remove(config.dbPath, { force: true });
+      createDatabase(config.dbPath, 5, "from k3 code");
+      addAuthSession(config.dbPath, "k3-sign-in", ["session_id", "proof_key_thumbprint"]);
+
+      const importer = yield* LegacyImport.LegacyImport;
+      const failure = yield* Effect.flip(importer.run({ kinds: ["sessions"] }));
+      assert.equal(failure.operation, "sessions");
       assert.isFalse((yield* importer.scan).sessionsStaged);
     }),
   );

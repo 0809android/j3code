@@ -85,6 +85,11 @@ export class ProviderRuntimeRecoveryService extends Context.Service<
     ) => Effect.Effect<ProviderRuntimeReconciliationSummary, ProviderRuntimeRecoveryError>;
     readonly prepareForShutdown: Effect.Effect<void, ProviderRuntimeRecoveryError>;
     readonly recover: Effect.Effect<ProviderRuntimeRecoverySummary, ProviderRuntimeRecoveryError>;
+    /** 別のインストールからコピーしたデータベース用の回復。途中の実行は止めるだけで、続きは始めない。 */
+    readonly recoverImported: Effect.Effect<
+      ProviderRuntimeRecoverySummary,
+      ProviderRuntimeRecoveryError
+    >;
   }
 >()("t3/orchestration-v2/ProviderRuntimeRecoveryService") {}
 
@@ -1093,8 +1098,12 @@ export const make = Effect.gen(function* () {
 
   const reconcile = Effect.fn("ProviderRuntimeRecoveryService.reconcile")(function* (
     trigger: "startup" | "shutdown",
+    options?: { readonly neverContinue?: boolean },
   ) {
-    const continueAfterRestart = yield* settings.getSettings.pipe(Effect.orElseSucceed(() => null));
+    const continueAfterRestart =
+      options?.neverContinue === true
+        ? null
+        : yield* settings.getSettings.pipe(Effect.orElseSucceed(() => null));
     const threadIds = yield* projections
       .getRecoveryThreadIds("runtime")
       .pipe(
@@ -1245,7 +1254,18 @@ export const make = Effect.gen(function* () {
     return (yield* reconcile("startup")) satisfies ProviderRuntimeRecoverySummary;
   });
 
-  return ProviderRuntimeRecoveryService.of({ reconcile, prepareForShutdown, recover });
+  const recoverImported = Effect.gen(function* () {
+    return (yield* reconcile("startup", {
+      neverContinue: true,
+    })) satisfies ProviderRuntimeRecoverySummary;
+  });
+
+  return ProviderRuntimeRecoveryService.of({
+    reconcile,
+    prepareForShutdown,
+    recover,
+    recoverImported,
+  });
 });
 
 export const layer = Layer.effect(ProviderRuntimeRecoveryService, make);

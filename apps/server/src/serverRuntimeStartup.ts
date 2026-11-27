@@ -31,6 +31,7 @@ import * as ServerConfig from "./config.ts";
 import * as ServiceLauncherClient from "./cloud/serviceLauncherClient.ts";
 import { flushCompileCache } from "./compileCache.ts";
 import * as Keybindings from "./keybindings.ts";
+import { runFirstStartAfterLegacyImport } from "./legacyImport/stagedImport.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import * as EffectWorker from "./orchestration-v2/EffectWorker.ts";
 import * as LegacyV1ThreadImporter from "./orchestration-v2/legacy/LegacyV1ThreadImporter.ts";
@@ -508,40 +509,50 @@ const make = Effect.fn("serverRuntimeStartup.make")(function* (options?: Startup
         },
       });
     }
-    const { recovery, bootstrap: bootstrapTargets } = yield* runOrderedV2StartupPhases({
-      importLegacyShells: runStartupPhase(
-        "orchestration-v2.legacy-v1.import-shells",
-        legacyV1ThreadImporter.reconcileShells.pipe(
-          Effect.tap((summary) =>
-            summary.importedThreadCount === 0
-              ? Effect.void
-              : Effect.logInfo("Imported legacy v1 thread shells", summary),
-          ),
-        ),
-      ),
-      recover: runStartupPhase("orchestration-v2.recovery", providerRuntimeRecovery.recover),
-      recoverDelegatedTasks: runStartupPhase(
-        "orchestration-v2.delegated-tasks.recover",
-        orchestrator.recoverDelegatedTasks,
-      ),
-      startEffectWorker: runStartupPhase(
-        "orchestration-v2.effect-worker.start",
-        startEffectWorkerWithRelay({
-          runWorker: EffectWorker.runDaemon,
-          startRelay: agentAwarenessRelay.start(),
-          workerFiberRef: effectWorkerFiber,
-        }),
-      ),
-      autoBootstrap: (serverConfig.autoBootstrapProjectFromCwd
-        ? runStartupPhase(
-            "welcome.autobootstrap",
-            resolveAutoBootstrapWelcomeTargets.pipe(
-              Effect.provideService(SecureRandom.SecureRandom, random),
+    // 取り込んだ直後のデータベースの実行や配送は、取り込み元でまだ動いているかもしれない。
+    const { recovery, bootstrap: bootstrapTargets } = yield* runFirstStartAfterLegacyImport(
+      serverConfig.stateDir,
+      (importedDatabase) =>
+        runOrderedV2StartupPhases({
+          importLegacyShells: runStartupPhase(
+            "orchestration-v2.legacy-v1.import-shells",
+            legacyV1ThreadImporter.reconcileShells.pipe(
+              Effect.tap((summary) =>
+                summary.importedThreadCount === 0
+                  ? Effect.void
+                  : Effect.logInfo("Imported legacy v1 thread shells", summary),
+              ),
             ),
-          )
-        : Effect.succeed({})
-      ).pipe(Effect.map((targets): AutoBootstrapWelcomeTargets => targets)),
-    });
+          ),
+          recover: runStartupPhase(
+            "orchestration-v2.recovery",
+            importedDatabase
+              ? providerRuntimeRecovery.recoverImported
+              : providerRuntimeRecovery.recover,
+          ),
+          recoverDelegatedTasks: runStartupPhase(
+            "orchestration-v2.delegated-tasks.recover",
+            importedDatabase ? Effect.void : orchestrator.recoverDelegatedTasks,
+          ),
+          startEffectWorker: runStartupPhase(
+            "orchestration-v2.effect-worker.start",
+            startEffectWorkerWithRelay({
+              runWorker: EffectWorker.runDaemon,
+              startRelay: agentAwarenessRelay.start(),
+              workerFiberRef: effectWorkerFiber,
+            }),
+          ),
+          autoBootstrap: (serverConfig.autoBootstrapProjectFromCwd
+            ? runStartupPhase(
+                "welcome.autobootstrap",
+                resolveAutoBootstrapWelcomeTargets.pipe(
+                  Effect.provideService(SecureRandom.SecureRandom, random),
+                ),
+              )
+            : Effect.succeed({})
+          ).pipe(Effect.map((targets): AutoBootstrapWelcomeTargets => targets)),
+        }),
+    );
     yield* Effect.logInfo("V2 orchestration recovery completed", recovery);
     // Runs after activation: the status check fetches every enabled project's
     // remote, and awaiting it here held command readiness for that long.

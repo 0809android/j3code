@@ -52,6 +52,7 @@ it.effect.each([
   "launch-failure",
   "project-failure",
   "project-refused",
+  "imported-database",
 ] as const)("keeps bootstrap launch failures separate from project failures: %s", (scenario) =>
   Effect.gen(function* () {
     const projectId = ProjectId.make("bootstrap-project");
@@ -67,6 +68,8 @@ it.effect.each([
       requeuedEffects: 0,
     };
     const imports = { importedThreadCount: 0, importedMessageCount: 0 };
+    const calls: string[] = [];
+    const record = (name: string) => Effect.sync(() => void calls.push(name));
     const dependencies = Layer.mergeAll(
       NodeCrypto.layer,
       Path.layer,
@@ -110,11 +113,14 @@ it.effect.each([
         importPendingTranscripts: Effect.succeed(imports),
       }),
       Layer.mock(ProviderRuntimeRecovery.ProviderRuntimeRecoveryService)({
-        recover: Effect.succeed(recovery),
+        recover: record("recover").pipe(Effect.as(recovery)),
+        recoverImported: record("recoverImported").pipe(Effect.as(recovery)),
         prepareForShutdown: Effect.void,
         reconcile: () => Effect.succeed(recovery),
       }),
-      Layer.mock(Orchestrator.OrchestratorV2)({ recoverDelegatedTasks: Effect.void }),
+      Layer.mock(Orchestrator.OrchestratorV2)({
+        recoverDelegatedTasks: record("recoverDelegatedTasks"),
+      }),
       Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({ shutdown: Effect.void }),
       Layer.mock(AgentAwarenessRelay.AgentAwarenessRelay)({ start: () => Effect.void }),
       Layer.mock(EffectWorker.OrchestrationEffectWorkerV2)({ runOnce: () => Effect.never }),
@@ -208,7 +214,12 @@ it.effect.each([
         prepareTrial: () => Effect.undefined,
       }),
       Layer.mock(GitVcsDriver.GitVcsDriver)({}),
-      FileSystem.layerNoop({}),
+      // 取り込み後の起動の印だけが、このテストで見えるファイル。
+      FileSystem.layerNoop({
+        exists: (file) =>
+          Effect.succeed(scenario === "imported-database" && file.endsWith("applied")),
+        remove: (file) => record(`remove ${file.split("/").slice(-2).join("/")}`),
+      }),
       Layer.mock(ServerSecretStore.ServerSecretStore)({ get: () => Effect.succeedNone }),
       Layer.mock(EnvironmentAuth.EnvironmentAuth)({}),
       Layer.mock(ExternalLauncher.ExternalLauncher)({}),
@@ -234,6 +245,14 @@ it.effect.each([
           assert.isUndefined(welcome.payload.bootstrapThreadId);
         }
       }
+      if (scenario === "project-failure") return;
+      // 取り込んだデータベースでは、実行も配送も続けず、起動が済んでから印を消す。
+      assert.deepEqual(
+        calls,
+        scenario === "imported-database"
+          ? ["recoverImported", "remove legacy-import/applied"]
+          : ["recover", "recoverDelegatedTasks"],
+      );
     }).pipe(
       Effect.provide(ServerRuntimeStartup.layerWithOptions().pipe(Layer.provide(dependencies))),
       Effect.provideService(ServerActivation, Effect.never),

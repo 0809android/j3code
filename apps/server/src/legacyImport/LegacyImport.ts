@@ -12,6 +12,7 @@ import {
   type LegacyImportScanResult,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -23,8 +24,14 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 
 import * as ServerConfig from "../config.ts";
 import * as DatabaseStorage from "../persistence/DatabaseStorage.ts";
+import { snapshotSqliteDatabase } from "../persistence/sqliteSnapshot.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import { DATABASE_FILENAME, STAGING_DIRNAME } from "./stagedImport.ts";
+import {
+  DATABASE_FILENAME,
+  missingLocalColumns,
+  STAGING_DIRNAME,
+  tableColumns,
+} from "./stagedImport.ts";
 
 /** The home directory of the T3 Code this app was forked from. */
 const LEGACY_HOME_DIRNAME = ".t3";
@@ -86,8 +93,6 @@ export class LegacyImport extends Context.Service<
   }
 >()("t3/legacyImport/LegacyImport") {}
 
-const quoteSqlString = (value: string) => `'${value.replaceAll("'", "''")}'`;
-
 const maxMigrationId = (databasePath: string) => {
   const database = new NodeSqlite.DatabaseSync(databasePath, { readOnly: true });
   try {
@@ -97,6 +102,50 @@ const maxMigrationId = (databasePath: string) => {
     return row?.id ?? 0;
   } finally {
     database.close();
+  }
+};
+
+/** 取り込み元が古すぎて、このアプリのサインインの表を受け止められないとき。 */
+const TOO_OLD_FOR_LOCAL_TABLES =
+  "The T3 Code data is too old to keep this app's sign-ins. Update T3 Code first.";
+
+/** 取り込み元からコピーしたデータベースを、差し替える前にこのインストールに合わせる。 */
+const prepareCopiedDatabase = (input: {
+  readonly copyPath: string;
+  readonly livePath: string;
+  readonly now: string;
+}) => {
+  const copy = new NodeSqlite.DatabaseSync(input.copyPath);
+  const live = new NodeSqlite.DatabaseSync(input.livePath, { readOnly: true });
+  try {
+    // サインインの表は差し替えるときに今の中身を写す。受け止められないなら、ここで断る。
+    if (missingLocalColumns(copy, live).length > 0) return TOO_OLD_FOR_LOCAL_TABLES;
+    copy.exec("BEGIN");
+    // 取り込み元が予約した処理はそちらのプロセスのもので、まだ実行中かもしれない。
+    if (tableColumns(copy, "orchestration_v2_effect_outbox").length > 0) {
+      copy
+        .prepare(
+          `UPDATE orchestration_v2_effect_outbox
+           SET status = 'cancelled', lease_owner = NULL, completed_at = ?, updated_at = ?,
+             last_error = 'Cancelled because it was imported from T3 Code.'
+           WHERE status IN ('pending', 'running')`,
+        )
+        .run(input.now, input.now);
+    }
+    // 両方のアプリで同じ時刻に動かないよう、一時停止で入れる。オンに戻すのは利用者。
+    if (tableColumns(copy, "scheduled_tasks").length > 0) {
+      copy
+        .prepare("UPDATE scheduled_tasks SET enabled = 0, updated_at = ? WHERE enabled = 1")
+        .run(input.now);
+    }
+    copy.exec("COMMIT");
+    return undefined;
+  } catch (error) {
+    if (copy.isTransaction) copy.exec("ROLLBACK");
+    throw error;
+  } finally {
+    live.close();
+    copy.close();
   }
 };
 
@@ -118,6 +167,8 @@ const make = Effect.gen(function* () {
   const sourceFile = (name: string) => path.join(sourceDir, name);
   const stagingDir = path.join(config.stateDir, STAGING_DIRNAME);
   const stagedDatabase = path.join(stagingDir, DATABASE_FILENAME);
+  // 次の起動はこのパスにあるものを反映するので、ここには出来上がったコピーしか置かない。
+  const partialDatabase = `${stagedDatabase}.partial`;
 
   const exists = (file: string) => fs.exists(file).pipe(Effect.orElseSucceed(() => false));
   const realPathOr = (target: string) =>
@@ -226,6 +277,7 @@ const make = Effect.gen(function* () {
     const source = sourceFile(DATABASE_FILENAME);
     yield* fs.makeDirectory(stagingDir, { recursive: true });
     yield* fs.remove(stagedDatabase, { force: true });
+    yield* fs.remove(partialDatabase, { force: true });
     const sessionsError = (cause: unknown) =>
       new LegacyImportError({ operation: "sessions", cause });
     // An older app cannot run a database a newer app has migrated.
@@ -238,17 +290,13 @@ const make = Effect.gen(function* () {
         "The T3 Code data is newer than this app. Update this app first.",
       );
     }
-    yield* Effect.try({
-      try: () => {
-        const database = new NodeSqlite.DatabaseSync(source, { readOnly: true });
-        try {
-          database.exec(`VACUUM INTO ${quoteSqlString(stagedDatabase)}`);
-        } finally {
-          database.close();
-        }
-      },
+    yield* snapshotSqliteDatabase(source, partialDatabase).pipe(Effect.mapError(sessionsError));
+    const now = DateTime.formatIso(yield* DateTime.now);
+    const refusal = yield* Effect.try({
+      try: () => prepareCopiedDatabase({ copyPath: partialDatabase, livePath: config.dbPath, now }),
       catch: sessionsError,
     });
+    if (refusal !== undefined) return yield* sessionsError(refusal);
 
     // Attachments are named by id, so files already here are never replaced.
     const sourceAttachments = sourceFile("attachments");
@@ -262,7 +310,9 @@ const make = Effect.gen(function* () {
         yield* fs.copyFile(from, to);
       }
     }
+    yield* fs.rename(partialDatabase, stagedDatabase);
   }).pipe(
+    Effect.onError(() => fs.remove(partialDatabase, { force: true }).pipe(Effect.ignore)),
     Effect.mapError((cause) =>
       isLegacyImportError(cause) ? cause : new LegacyImportError({ operation: "sessions", cause }),
     ),

@@ -33,7 +33,8 @@ const scanAtom = (environmentId: EnvironmentId) => legacyImportScan({ environmen
 
 const SERVER_SHUTDOWN_DELAY_MS = 750;
 const RESTART_POLL_INTERVAL_MS = 300;
-const RESTART_TIMEOUT_MS = 20_000;
+// 数 GB の履歴を取り込んだ最初の起動は、スレッドの後始末に 1 分ほどかかることがある。
+const RESTART_TIMEOUT_MS = 180_000;
 
 const megabytes = (bytes: number) => Math.max(1, Math.round(bytes / (1024 * 1024)));
 
@@ -286,6 +287,13 @@ export function LegacyImportDialog({
                             { size: item.sizeBytes === undefined ? 0 : megabytes(item.sizeBytes) },
                           )
                         : null}
+                      {item.kind === "sessions" ? (
+                        <span className="mt-1 block">
+                          {gt(
+                            "So nothing runs twice, threads still working in T3 Code stop here and scheduled tasks arrive paused. Continue them in this app once you stop using T3 Code.",
+                          )}
+                        </span>
+                      ) : null}
                       {item.kind === "settings"
                         ? gt("Appearance, shortcuts and preferences. Sign-ins and devices stay.")
                         : null}

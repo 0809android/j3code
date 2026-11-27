@@ -6117,6 +6117,7 @@
   "a5e5026e2a80fb37": "Aus T3 Code importieren",
   "6a29c6637efa84f1": "{count, plural, one {{count} Anbieter} other {{count} Anbieter}}",
   "56d1a850db38d0d1": "Ersetzt nach einem Neustart den Verlauf in dieser App. {size} MB. Der aktuelle Verlauf bleibt als Sicherungsdatei erhalten.",
+  "873b565b1ae82669": "Damit nichts doppelt läuft, werden Threads, die in T3 Code noch arbeiten, hier angehalten und geplante Aufgaben pausiert übernommen. Setze sie in dieser App fort, sobald du T3 Code nicht mehr verwendest.",
   "ca3c8995e6535035": "Darstellung, Tastenkürzel und Voreinstellungen. Anmeldungen und Geräte bleiben unberührt.",
   "54488fcdfe691ef0": "Import fehlgeschlagen: {message}",
   "c0fd6bfd0a873fdc": "Importiert.",

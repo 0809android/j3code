@@ -3,96 +3,143 @@ import * as NodeSqlite from "node:sqlite";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 
 import {
   applyStagedLegacyImport,
   DATABASE_FILENAME,
+  hasAppliedLegacyImport,
   hasStagedLegacyImport,
+  runFirstStartAfterLegacyImport,
   STAGING_DIRNAME,
 } from "./stagedImport.ts";
 
+const createDatabase = (file: string, note: string, sessionColumns: ReadonlyArray<string>) => {
+  const database = new NodeSqlite.DatabaseSync(file);
+  try {
+    database.exec("CREATE TABLE notes (value TEXT)");
+    database.prepare("INSERT INTO notes VALUES (?)").run(note);
+    database.exec(`CREATE TABLE auth_sessions (${sessionColumns.join(" TEXT, ")} TEXT)`);
+    database.prepare("INSERT INTO auth_sessions (session_id) VALUES (?)").run(`${note}-sign-in`);
+  } finally {
+    database.close();
+  }
+};
+
+const read = (file: string, sql: string) => {
+  const database = new NodeSqlite.DatabaseSync(file, { readOnly: true });
+  try {
+    return database
+      .prepare(sql)
+      .all()
+      .map((row) => String(Object.values(row)[0]));
+  } finally {
+    database.close();
+  }
+};
+
 it.layer(NodeServices.layer)("stagedImport", (it) => {
-  it.effect("swaps in the staged database and keeps the previous files beside it", () =>
+  it.effect("swaps in the staged database, keeping this install's sign-ins and old files", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const stateDir = yield* fs.makeTempDirectoryScoped({ prefix: "k3-staged-" });
       const dbPath = path.join(stateDir, DATABASE_FILENAME);
-      yield* fs.writeFileString(dbPath, "current");
-      yield* fs.writeFileString(`${dbPath}-wal`, "current-wal");
+      createDatabase(dbPath, "current", ["session_id"]);
+      yield* fs.writeFileString(`${dbPath}-wal`, "");
       yield* fs.makeDirectory(path.join(stateDir, STAGING_DIRNAME));
-      yield* fs.writeFileString(
-        path.join(stateDir, STAGING_DIRNAME, DATABASE_FILENAME),
-        "imported",
-      );
+      createDatabase(path.join(stateDir, STAGING_DIRNAME, DATABASE_FILENAME), "imported", [
+        "session_id",
+      ]);
       assert.isTrue(yield* hasStagedLegacyImport(stateDir));
 
       yield* applyStagedLegacyImport(stateDir, dbPath);
 
-      assert.equal(yield* fs.readFileString(dbPath), "imported");
-      assert.isFalse(yield* fs.exists(`${dbPath}-wal`));
+      assert.deepEqual(read(dbPath, "SELECT value FROM notes"), ["imported"]);
+      assert.deepEqual(read(dbPath, "SELECT session_id FROM auth_sessions"), ["current-sign-in"]);
       assert.isFalse(yield* hasStagedLegacyImport(stateDir));
+      assert.isTrue(yield* hasAppliedLegacyImport(stateDir));
       const names = yield* fs.readDirectory(stateDir);
       const backup = names.find(
         (name) => name.includes(".before-import-") && !name.endsWith("-wal"),
       );
       assert.isDefined(backup);
-      assert.equal(yield* fs.readFileString(path.join(stateDir, backup!)), "current");
+      assert.deepEqual(read(path.join(stateDir, backup!), "SELECT value FROM notes"), ["current"]);
       assert.isTrue(
         names.some((name) => name.includes(".before-import-") && name.endsWith("-wal")),
       );
     }),
   );
 
-  it.effect("keeps this environment's credentials and drops T3 Code's", () =>
+  it.effect("keeps the current database when the staged one cannot take its sign-ins", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const stateDir = yield* fs.makeTempDirectoryScoped({ prefix: "k3-staged-" });
       const dbPath = path.join(stateDir, DATABASE_FILENAME);
-      const stagedPath = path.join(stateDir, STAGING_DIRNAME, DATABASE_FILENAME);
+      createDatabase(dbPath, "current", ["session_id", "proof_key_thumbprint"]);
       yield* fs.makeDirectory(path.join(stateDir, STAGING_DIRNAME));
-      const seed = (file: string, statements: string) => {
-        const database = new NodeSqlite.DatabaseSync(file);
-        database.exec(statements);
-        database.close();
-      };
-      seed(
-        dbPath,
-        `CREATE TABLE auth_sessions (session_id TEXT PRIMARY KEY, subject TEXT, added_later TEXT);
-         INSERT INTO auth_sessions VALUES ('k3-desktop', 'desktop', 'x');
-         CREATE TABLE auth_pairing_links (id TEXT PRIMARY KEY);
-         INSERT INTO auth_pairing_links VALUES ('k3-link');`,
-      );
-      seed(
-        stagedPath,
-        `CREATE TABLE auth_sessions (session_id TEXT PRIMARY KEY, subject TEXT);
-         INSERT INTO auth_sessions VALUES ('t3-desktop', 'desktop');
-         CREATE TABLE auth_pairing_links (id TEXT PRIMARY KEY);
-         INSERT INTO auth_pairing_links VALUES ('t3-link');
-         CREATE TABLE threads (id TEXT);
-         INSERT INTO threads VALUES ('imported-thread');`,
-      );
+      createDatabase(path.join(stateDir, STAGING_DIRNAME, DATABASE_FILENAME), "imported", [
+        "session_id",
+      ]);
 
       yield* applyStagedLegacyImport(stateDir, dbPath);
 
-      const database = new NodeSqlite.DatabaseSync(dbPath, { readOnly: true });
-      const rows = (sql: string) =>
-        database
-          .prepare(sql)
-          .all()
-          .map((row) => ({ ...row }));
-      try {
-        assert.deepEqual(rows("SELECT * FROM auth_sessions"), [
-          { session_id: "k3-desktop", subject: "desktop" },
-        ]);
-        assert.deepEqual(rows("SELECT * FROM auth_pairing_links"), [{ id: "k3-link" }]);
-        assert.deepEqual(rows("SELECT * FROM threads"), [{ id: "imported-thread" }]);
-      } finally {
-        database.close();
-      }
+      assert.deepEqual(read(dbPath, "SELECT value FROM notes"), ["current"]);
+      assert.isFalse(yield* hasAppliedLegacyImport(stateDir));
+    }),
+  );
+
+  it.effect("marks the import before the swap, so a swap cut short still starts as imported", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const stateDir = yield* fs.makeTempDirectoryScoped({ prefix: "k3-staged-" });
+      const dbPath = path.join(stateDir, DATABASE_FILENAME);
+      createDatabase(dbPath, "current", ["session_id"]);
+      yield* fs.makeDirectory(path.join(stateDir, STAGING_DIRNAME));
+      createDatabase(path.join(stateDir, STAGING_DIRNAME, DATABASE_FILENAME), "imported", [
+        "session_id",
+      ]);
+      // テストの時計は 1970 年から動かないので、退避先の名前が決まる。そこを塞いで差し替えを止める。
+      const blocked = `${dbPath}.before-import-1970-01-01T00-00-00.000Z`;
+      yield* fs.makeDirectory(path.join(blocked, "occupied"), { recursive: true });
+
+      yield* applyStagedLegacyImport(stateDir, dbPath);
+
+      assert.deepEqual(read(dbPath, "SELECT value FROM notes"), ["current"]);
+      assert.isTrue(yield* hasStagedLegacyImport(stateDir));
+      assert.isTrue(yield* hasAppliedLegacyImport(stateDir));
+    }),
+  );
+
+  it.effect("clears the import mark only after the first start succeeds", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const stateDir = yield* fs.makeTempDirectoryScoped({ prefix: "k3-staged-" });
+      const seen: boolean[] = [];
+
+      yield* runFirstStartAfterLegacyImport(stateDir, (imported) =>
+        Effect.sync(() => void seen.push(imported)),
+      );
+      yield* fs.makeDirectory(path.join(stateDir, STAGING_DIRNAME));
+      yield* fs.writeFileString(path.join(stateDir, STAGING_DIRNAME, "applied"), "");
+      const failed = yield* Effect.exit(
+        runFirstStartAfterLegacyImport(stateDir, (imported) =>
+          Effect.sync(() => void seen.push(imported)).pipe(Effect.andThen(Effect.fail("crash"))),
+        ),
+      );
+      assert.isTrue(Exit.isFailure(failed));
+      assert.isTrue(yield* hasAppliedLegacyImport(stateDir));
+      yield* runFirstStartAfterLegacyImport(stateDir, (imported) =>
+        Effect.sync(() => void seen.push(imported)),
+      );
+
+      assert.deepEqual(seen, [false, true, true]);
+      assert.isFalse(yield* hasAppliedLegacyImport(stateDir));
     }),
   );
 
