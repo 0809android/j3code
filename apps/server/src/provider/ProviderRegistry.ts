@@ -33,7 +33,11 @@ import * as ProviderLatestVersions from "@t3tools/provider-core/server/ProviderL
 import * as ModelManifest from "./ModelManifest.ts";
 import { applyProviderCompatibility } from "./providerCompatibility.ts";
 import * as ServerConfig from "../config.ts";
-import { refreshPathFromLoginShell, refreshWindowsPath } from "../os-jank.ts";
+import {
+  BACKGROUND_LOGIN_SHELL_TIMEOUT,
+  refreshPathFromLoginShell,
+  refreshWindowsPath,
+} from "../os-jank.ts";
 import * as ProviderInstanceRegistry from "./ProviderInstanceRegistry.ts";
 import * as ProviderInstanceRegistryMutator from "./ProviderInstanceRegistryMutator.ts";
 import {
@@ -66,7 +70,10 @@ export class ProviderRegistry extends Context.Service<
       provider?: ProviderDriverKind,
     ) => Effect.Effect<ReadonlyArray<ServerProvider>>;
 
-    /** Re-reads the host PATH; instances still missing their CLI are rebuilt when it changed. */
+    /**
+     * Re-reads the host PATH in the background, waiting out a slow login shell; instances still
+     * missing their CLI are rebuilt when it changed. Refreshes a user waits on use a shorter wait.
+     */
     readonly refreshHostPath: Effect.Effect<void>;
 
     /** Unknown instance ids return the cached list without error. */
@@ -757,29 +764,40 @@ export const layer = Layer.effect(
     const readHostPath = () => hostEnvironment.PATH ?? hostEnvironment.Path ?? hostEnvironment.path;
     const lastHostPathRef = yield* Ref.make(readHostPath());
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-    const refreshHostPath = yield* refreshWindowsPath().pipe(
-      Effect.andThen(refreshPathFromLoginShell()),
-      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-      Effect.andThen(
-        Effect.suspend(() => {
-          const path = readHostPath();
-          return Ref.getAndSet(lastHostPathRef, path).pipe(Effect.map((last) => last !== path));
-        }),
-      ),
-      Effect.flatMap((changed) =>
-        changed
-          ? Ref.get(providersRef).pipe(
-              Effect.flatMap((providers) =>
-                instanceRegistryMutator.rebuild(
-                  providers
-                    .filter((provider) => provider.enabled && !provider.installed)
-                    .map((provider) => provider.instanceId),
+    // Refreshes someone waits on keep the short login shell timeout; the startup pass, which
+    // nobody waits on, can wait out a slow profile. Both share the PATH comparison above.
+    const makeRefreshHostPath = (loginShellTimeout?: Duration.Duration) =>
+      refreshWindowsPath().pipe(
+        Effect.andThen(
+          refreshPathFromLoginShell(
+            loginShellTimeout === undefined ? undefined : { timeout: loginShellTimeout },
+          ),
+        ),
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        Effect.andThen(
+          Effect.suspend(() => {
+            const path = readHostPath();
+            return Ref.getAndSet(lastHostPathRef, path).pipe(Effect.map((last) => last !== path));
+          }),
+        ),
+        Effect.flatMap((changed) =>
+          changed
+            ? Ref.get(providersRef).pipe(
+                Effect.flatMap((providers) =>
+                  instanceRegistryMutator.rebuild(
+                    providers
+                      .filter((provider) => provider.enabled && !provider.installed)
+                      .map((provider) => provider.instanceId),
+                  ),
                 ),
-              ),
-            )
-          : Effect.void,
-      ),
-      Effect.cachedWithTTL(Duration.seconds(10)),
+              )
+            : Effect.void,
+        ),
+        Effect.cachedWithTTL(Duration.seconds(10)),
+    );
+    const refreshHostPath = yield* makeRefreshHostPath();
+    const refreshHostPathInBackground = yield* makeRefreshHostPath(
+      BACKGROUND_LOGIN_SHELL_TIMEOUT,
     );
     const refreshAllInFlightRef = yield* Ref.make<Option.Option<RefreshAllCompletion>>(
       Option.none(),
@@ -1369,7 +1387,7 @@ export const layer = Layer.effect(
       getProviders: Ref.get(providersRef),
       refresh: (provider?: ProviderDriverKind) =>
         refresh(provider).pipe(Effect.catchCause(recoverRefreshFailure)),
-      refreshHostPath: refreshHostPath.pipe(Effect.ignore),
+      refreshHostPath: refreshHostPathInBackground.pipe(Effect.ignore),
       refreshInstance: (instanceId: ProviderInstanceId) =>
         refreshInstance(instanceId).pipe(Effect.catchCause(recoverRefreshFailure)),
       reloadSecretsAndRefresh: (instanceId?: ProviderInstanceId) =>

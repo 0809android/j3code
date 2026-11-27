@@ -33,7 +33,10 @@ function logPathHydrationWarning(message: string, error?: unknown): void {
 // with the shell's PATH, or `mise x` can rebuild PATH behind a same-named
 // wrapper (`exec mise x claude -- claude`) that then re-runs itself forever.
 const LOGIN_SHELL_ENV_NAMES = ["PATH", "__MISE_DIFF", "JAVA_HOME", "K3CODE_FEATURE_FLAGS"] as const;
-const LOGIN_SHELL_TIMEOUT = Duration.seconds(15);
+// Someone waiting on a refresh (Settings, discovery) gets this; only the background pass at
+// startup, which nobody waits on, can afford the longer wait a slow profile needs.
+export const LOGIN_SHELL_TIMEOUT = Duration.seconds(5);
+export const BACKGROUND_LOGIN_SHELL_TIMEOUT = Duration.seconds(15);
 const SLOW_LOGIN_SHELL_TIMEOUT_MS = 20_000;
 
 function readSlowLoginShellEnvironment(shell: string): Partial<Record<string, string>> {
@@ -161,7 +164,7 @@ export const fixPath = Effect.fn("fixPath")(function* (options?: {
   );
 });
 
-const readLoginShellOutput = Effect.fn("readLoginShellOutput")(
+const captureLoginShellOutput = Effect.fn("captureLoginShellOutput")(
   function* (shell: string) {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const child = yield* spawner.spawn(
@@ -189,20 +192,25 @@ const readLoginShellOutput = Effect.fn("readLoginShellOutput")(
     return "";
   },
   Effect.scoped,
-  Effect.timeoutOption(LOGIN_SHELL_TIMEOUT),
 );
+
+const readLoginShellOutput = (shell: string, timeout: Duration.Duration) =>
+  captureLoginShellOutput(shell).pipe(Effect.timeoutOption(timeout));
 
 // Runs even when the desktop prepared the environment: that capture was taken
 // once at launch. Only the user's own shell counts; a fallback shell's PATH is
 // not their environment. Failure leaves PATH alone.
-export const refreshPathFromLoginShell = Effect.fn("refreshPathFromLoginShell")(function* () {
+export const refreshPathFromLoginShell = Effect.fn("refreshPathFromLoginShell")(function* (options?: {
+  readonly timeout?: Duration.Duration;
+}) {
+  const timeout = options?.timeout ?? LOGIN_SHELL_TIMEOUT;
   const platform = yield* HostProcess.Platform;
   if (platform !== "darwin" && platform !== "linux") return;
   const env = yield* HostProcess.Environment;
   const [shell] = listLoginShellCandidates(platform, env.SHELL);
   if (!shell) return;
 
-  const output = yield* readLoginShellOutput(shell).pipe(
+  const output = yield* readLoginShellOutput(shell, timeout).pipe(
     Effect.catchCause((cause) =>
       Effect.logWarning(`Failed to read PATH from login shell ${shell}.`, cause).pipe(
         Effect.as(Option.some("")),
@@ -211,7 +219,7 @@ export const refreshPathFromLoginShell = Effect.fn("refreshPathFromLoginShell")(
   );
   if (Option.isNone(output)) {
     yield* Effect.logWarning(
-      `Timed out reading PATH from login shell ${shell} after ${Duration.format(LOGIN_SHELL_TIMEOUT)}; PATH is unchanged.`,
+      `Timed out reading PATH from login shell ${shell} after ${Duration.format(timeout)}; PATH is unchanged.`,
     );
     return;
   }
