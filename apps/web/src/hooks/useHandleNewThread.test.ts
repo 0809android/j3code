@@ -222,11 +222,15 @@ vi.mock("../lib/utils", () => ({
   newDraftId: () => "draft-delayed",
   newThreadId: () => "thread-delayed",
 }));
-vi.mock("@t3tools/client-runtime/state/project-grouping", async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
+vi.mock("@t3tools/client-runtime/state/project-grouping", () => ({
   deriveLogicalProjectKeyFromSettings: () => "remote-project",
   getProjectOrderKey: () => "remote-project",
   selectProjectGroupingSettings: () => ({}),
+  // The real helper; a partial import would load the mocked contracts.
+  resolveConnectedDefaultThreadEnvironmentId: (
+    saved: string | null | undefined,
+    connectedEnvironmentIds: ReadonlyArray<string>,
+  ) => (saved != null && connectedEnvironmentIds.includes(saved) ? saved : null),
 }));
 vi.mock("../state/entities", () => {
   const project = {
