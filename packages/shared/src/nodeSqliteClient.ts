@@ -582,7 +582,9 @@ const makeWorkerConnection = Effect.fnUntraced(function* (options: {
           open.worker.postMessage({ type: "close" });
         });
       }
-      if (open.pending.size > 0) void abandon(open.worker);
+      // Only a reader may be left behind: a writer mid-statement or mid-transaction must finish
+      // before the scope closes.
+      if (options.role === "reader" && open.pending.size > 0) void abandon(open.worker);
       else await retire(open.worker);
     }),
   );

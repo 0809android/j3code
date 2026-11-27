@@ -5,6 +5,7 @@ import { assert, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
+import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -14,6 +15,7 @@ import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
+import * as Scope from "effect/Scope";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as SqlError from "effect/sql/SqlError";
 import * as Statement from "effect/sql/Statement";
@@ -1527,5 +1529,45 @@ it.effect("keeps writes moving while an outside reader pins the WAL, then trims 
       assert.isAtMost(yield* walSize, limit);
       assert.deepEqual(yield* sql`SELECT COUNT(*) FROM blobs`.values, [[23]]);
     }).pipe(Effect.provide(SqliteClient.layer({ filename, writerWorker: true })));
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+const closeWhileHeld = (role: "writer" | "reader") =>
+  Effect.gen(function* () {
+    const { filename } = yield* makeTempDatabase;
+    const scope = yield* Scope.make();
+    const context = yield* Layer.buildWithScope(
+      SqliteClient.layer({ filename, writerWorker: true, readerWorker: true }),
+      scope,
+    );
+    const sql = Context.get(context, SqlClient.SqlClient);
+    const statement = "SELECT /* hold */ 1 AS one";
+    yield* holdStatements;
+    const query =
+      role === "reader" ? sql.unsafe(statement).pipe(SqliteClient.readOnly) : sql.unsafe(statement);
+    const running = yield* startRead(query, statement);
+    const closing = yield* Effect.forkChild(Scope.close(scope, Exit.void), {
+      startImmediately: true,
+    });
+    yield* eventLoopTurn;
+    return { running, closing };
+  });
+
+it.effect("waits for a statement still running on the writer before closing", () =>
+  Effect.gen(function* () {
+    const { running, closing } = yield* closeWhileHeld("writer");
+    assert.isUndefined(closing.pollUnsafe(), "the writer is mid-statement");
+
+    yield* releaseStatements;
+    yield* Fiber.join(closing);
+    assert.deepEqual(yield* Fiber.join(running.fiber), [{ one: 1 }]);
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect("does not wait for a statement still running on a reader when closing", () =>
+  Effect.gen(function* () {
+    const { closing } = yield* closeWhileHeld("reader");
+    // The reader's statement is still held; closing must finish without it.
+    yield* Fiber.join(closing);
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
