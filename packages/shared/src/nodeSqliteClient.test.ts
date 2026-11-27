@@ -697,6 +697,18 @@ it.effect("applies the cache and mmap PRAGMAs to readers only, not the writer", 
   ),
 );
 
+it.effect("keeps temp data in memory for readers only, leaving the writer's default", () =>
+  withWriterAndReader((sql) =>
+    Effect.gen(function* () {
+      const tempStore = sql<{ readonly temp_store: number }>`PRAGMA temp_store`;
+      const [reader] = yield* tempStore.pipe(SqliteClient.readOnly);
+      const [writer] = yield* tempStore;
+      assert.equal(reader?.temp_store, 2);
+      assert.equal(writer?.temp_store, 0);
+    }),
+  ),
+);
+
 it.effect("keeps read-only work inside a write transaction on the writer", () =>
   withReaderClient((sql) =>
     sql.withTransaction(
