@@ -5777,7 +5777,7 @@
   "d7dbacd4f129a406": "Etwa {size} an Tool-Ausgaben und Reasoning werden entfernt.",
   "5433c06b8c28c7d1": "Alte Threads auf {label} konnten nicht geprüft werden",
   "81c69c6a704b9ba2": "Threads auf {label} konnten nicht bereinigt werden",
-  "33f5fca0dae9cc80": "Noch nicht bereinigt. Der erste Durchlauf startet einige Minuten nach dem Serverstart.",
+  "8d37e1dd4408a2fe": "Noch nicht bereinigt. Der erste Durchlauf startet einige Minuten nach dem Einschalten der Bereinigung, oder nach dem Serverstart, wenn sie bereits eingeschaltet ist.",
   "18bb2dd8209b1919": "Zuletzt bereinigt: {last}. Der nächste Durchlauf ist fällig.",
   "e2f5de1dcb452026": "Zuletzt bereinigt: {last}. Nächster Durchlauf: {next}.",
   "a3f33b0f3d5430d9": "Zum Ändern der Verlaufsbereinigung ist Wartungszugriff auf diese Umgebung nötig."

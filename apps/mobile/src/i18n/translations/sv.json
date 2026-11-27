@@ -5777,7 +5777,7 @@
   "d7dbacd4f129a406": "Cirka {size} verktygsutdata och resonemang tas bort.",
   "5433c06b8c28c7d1": "Det gick inte att kontrollera gamla trådar på {label}",
   "81c69c6a704b9ba2": "Det gick inte att rensa trådar på {label}",
-  "33f5fca0dae9cc80": "Inte rensat ännu. Den första körningen sker några minuter efter att servern startat.",
+  "8d37e1dd4408a2fe": "Inte rensat ännu. Det första passet körs några minuter efter att rensningen slagits på, eller efter serverstarten om den redan är på.",
   "18bb2dd8209b1919": "Senast rensat: {last}. Nästa körning är försenad.",
   "e2f5de1dcb452026": "Senast rensat: {last}. Nästa körning: {next}.",
   "a3f33b0f3d5430d9": "Att ändra rensningen av trådhistoriken kräver underhållsåtkomst till den här miljön."

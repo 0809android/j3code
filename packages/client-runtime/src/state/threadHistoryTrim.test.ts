@@ -19,7 +19,9 @@ describe("describeThreadHistoryTrimSchedule", () => {
         nowMs: NOW,
         formatDate,
       }),
-    ).toBe("Not trimmed yet. The first pass runs a few minutes after the server starts.");
+    ).toBe(
+      "Not trimmed yet. The first pass runs a few minutes after you turn trimming on, or after the server starts if it is already on.",
+    );
   });
 
   it("names the next pass, and says when it is due", () => {

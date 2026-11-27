@@ -18,7 +18,9 @@ export function describeThreadHistoryTrimSchedule(input: {
   const { lastTrimmedAt, nextTrimAt } = input.status;
   if (lastTrimmedAt === null || nextTrimAt === null) {
     return resolve(
-      msg("Not trimmed yet. The first pass runs a few minutes after the server starts."),
+      msg(
+        "Not trimmed yet. The first pass runs a few minutes after you turn trimming on, or after the server starts if it is already on.",
+      ),
     );
   }
   const last = input.formatDate(lastTrimmedAt);
