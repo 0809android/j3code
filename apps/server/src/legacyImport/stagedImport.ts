@@ -106,13 +106,31 @@ export const applyStagedLegacyImport = Effect.fn("LegacyImport.applyStaged")(
     // 差し替えより先に書く。印がないまま差し替わると、取り込んだ作業がふつうに再開される。
     yield* fs.writeFileString(path.join(stagingDir, APPLIED_MARKER_FILENAME), "");
     const stamp = DateTime.formatIso(yield* DateTime.now).replaceAll(":", "-");
-    for (const suffix of ["", "-wal", "-shm"]) {
-      const current = `${databasePath}${suffix}`;
-      if (yield* fs.exists(current)) {
-        yield* fs.rename(current, `${databasePath}.before-import-${stamp}${suffix}`);
+    const moved: Array<readonly [backup: string, current: string]> = [];
+    yield* Effect.gen(function* () {
+      for (const suffix of ["", "-wal", "-shm"]) {
+        const current = `${databasePath}${suffix}`;
+        if (yield* fs.exists(current)) {
+          const backup = `${databasePath}.before-import-${stamp}${suffix}`;
+          yield* fs.rename(current, backup);
+          moved.push([backup, current]);
+        }
       }
-    }
-    yield* fs.rename(staged, databasePath);
+      yield* fs.rename(staged, databasePath);
+    }).pipe(
+      // 途中で失敗したら退避した今のデータベースを戻す。戻さないと空のデータベースで起動し、
+      // 次の差し替えでサインインの記録も写せなくなる。本体を戻せたときだけ -wal と -shm も戻す。
+      Effect.onError(() =>
+        Effect.gen(function* () {
+          const [main, ...sidecars] = moved;
+          if (main === undefined) return;
+          yield* fs.rename(main[0], main[1]);
+          for (const [backup, current] of sidecars) {
+            yield* fs.rename(backup, current).pipe(Effect.ignoreCause({ log: true }));
+          }
+        }).pipe(Effect.ignoreCause({ log: true })),
+      ),
+    );
     yield* Effect.logInfo("Applied staged T3 Code database import", { databasePath });
   },
   Effect.ignoreCause({ log: true }),

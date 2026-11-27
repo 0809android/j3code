@@ -115,6 +115,30 @@ it.layer(NodeServices.layer)("stagedImport", (it) => {
     }),
   );
 
+  it.effect("puts the current database back when the swap fails after moving it", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const stateDir = yield* fs.makeTempDirectoryScoped({ prefix: "k3-staged-" });
+      const dbPath = path.join(stateDir, DATABASE_FILENAME);
+      createDatabase(dbPath, "current", ["session_id"]);
+      yield* fs.writeFileString(`${dbPath}-wal`, "");
+      yield* fs.makeDirectory(path.join(stateDir, STAGING_DIRNAME));
+      createDatabase(path.join(stateDir, STAGING_DIRNAME, DATABASE_FILENAME), "imported", [
+        "session_id",
+      ]);
+      // 本体は退避できて、-wal の退避先だけ塞がっている。
+      const blocked = `${dbPath}.before-import-1970-01-01T00-00-00.000Z-wal`;
+      yield* fs.makeDirectory(path.join(blocked, "occupied"), { recursive: true });
+
+      yield* applyStagedLegacyImport(stateDir, dbPath);
+
+      assert.deepEqual(read(dbPath, "SELECT value FROM notes"), ["current"]);
+      assert.isTrue(yield* fs.exists(`${dbPath}-wal`));
+      assert.isTrue(yield* hasStagedLegacyImport(stateDir));
+    }),
+  );
+
   it.effect("clears the import mark only after the first start succeeds", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
