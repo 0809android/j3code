@@ -5,7 +5,7 @@ import {
   type ThreadHistoryTrimReport,
   type ThreadHistoryTrimStatus,
   type ThreadId,
-  type TurnItemId,
+  TurnItemId,
 } from "@t3tools/contracts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
@@ -72,7 +72,8 @@ const LIVE_RUN_STATUSES = ["queued", "preparing", "starting", "running", "waitin
 
 type Candidate = {
   readonly threadId: ThreadId;
-  readonly runId: RunId;
+  /** The newest run the timeline still shows; null when every run was rolled back. */
+  readonly noticeRunId: RunId | null;
   readonly runOrdinal: number;
   readonly updatedAt: string;
 };
@@ -173,7 +174,12 @@ const make = Effect.gen(function* () {
     )
     SELECT
       thread.thread_id AS "threadId",
-      run.run_id AS "runId",
+      -- A rolled-back run's items are hidden, and the notice would go with them.
+      (
+        SELECT shown.run_id FROM orchestration_v2_projection_runs AS shown
+        WHERE shown.thread_id = thread.thread_id AND shown.status <> 'rolled_back'
+        ORDER BY shown.ordinal DESC LIMIT 1
+      ) AS "noticeRunId",
       run.ordinal AS "runOrdinal",
       thread.updated_at AS "updatedAt"
     FROM orchestration_v2_projection_threads AS thread
@@ -402,6 +408,12 @@ const make = Effect.gen(function* () {
     } satisfies ThreadHistoryTrimReport;
   });
 
+  // Without a visible run the notice belongs to the thread, and the timeline shows it.
+  const noticeItemId = (candidate: Candidate) =>
+    candidate.noticeRunId === null
+      ? TurnItemId.make(`turn-item:thread:${candidate.threadId}:signal:${NOTICE_SIGNAL}`)
+      : ids.derive.runSignalTurnItem({ runId: candidate.noticeRunId, signal: NOTICE_SIGNAL });
+
   const noticeEvent = Effect.fn("ThreadHistoryTrim.noticeEvent")(function* (
     candidate: Candidate,
     afterDays: number,
@@ -411,14 +423,14 @@ const make = Effect.gen(function* () {
       id: yield* ids.allocate.event({ threadId: candidate.threadId }),
       type: "turn-item.updated",
       threadId: candidate.threadId,
-      runId: candidate.runId,
+      ...(candidate.noticeRunId === null ? {} : { runId: candidate.noticeRunId }),
       // Every event stamps the thread with its time; reusing the thread's own keeps a trimmed
       // thread where it was in lists sorted by activity.
       occurredAt: DateTime.makeUnsafe(candidate.updatedAt),
       payload: {
-        id: ids.derive.runSignalTurnItem({ runId: candidate.runId, signal: NOTICE_SIGNAL }),
+        id: noticeItemId(candidate),
         threadId: candidate.threadId,
-        runId: candidate.runId,
+        runId: candidate.noticeRunId,
         nodeId: null,
         providerThreadId: null,
         providerTurnId: null,
@@ -531,10 +543,7 @@ const make = Effect.gen(function* () {
         );
         if (items.size === 0 && nodes.size === 0) return [];
         removed = { itemIds: items, nodeIds: nodes };
-        const noticeId = ids.derive.runSignalTurnItem({
-          runId: current.runId,
-          signal: NOTICE_SIGNAL,
-        });
+        const noticeId = noticeItemId(current);
         const noticed = yield* sql`
           SELECT 1 FROM orchestration_v2_projection_turn_items WHERE turn_item_id = ${noticeId}
         `;

@@ -69,6 +69,8 @@ type SeedOptions = {
   readonly extraReasoning?: number;
   /** A reasoning row under `command`, written after every other row. */
   readonly commandChild?: boolean;
+  /** A second, newer run that was rolled back, so the newest run by ordinal is hidden. */
+  readonly rolledBackRun?: boolean;
 };
 
 const seedThread = Effect.fn(function* (name: string, options: SeedOptions = {}) {
@@ -181,6 +183,31 @@ const seedThread = Effect.fn(function* (name: string, options: SeedOptions = {})
           contextHandoffId: null,
         },
       }),
+      ...(options.rolledBackRun === true
+        ? [
+            event({
+              type: "run.created",
+              runId: RunId.make(`run:${threadId}:2`),
+              payload: {
+                id: RunId.make(`run:${threadId}:2`),
+                threadId,
+                ordinal: 2,
+                providerInstanceId,
+                modelSelection,
+                providerThreadId: null,
+                userMessageId: MessageId.make(`message:${name}:user-2`),
+                rootNodeId: NodeId.make(`node:${name}:root-2`),
+                activeAttemptId: null,
+                status: "rolled_back",
+                requestedAt: old,
+                startedAt: old,
+                completedAt: old,
+                checkpointId: null,
+                contextHandoffId: null,
+              },
+            }),
+          ]
+        : []),
       node(rootNodeId, "root_turn", null),
       node(commandNodeId, "tool_call", rootNodeId),
       node(editNodeId, "tool_call", rootNodeId),
@@ -435,6 +462,22 @@ it.layer(layerTest(30))("ThreadHistoryTrim", (it) => {
 
       assert.equal((yield* trim).threadCount, 0);
       assert.deepEqual(yield* itemTitles(threadId), trimmedItems);
+    }),
+  );
+
+  it.effect("puts the notice on a run the timeline shows when the newest run was rolled back", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(DateTime.toEpochMillis(now));
+      const store = yield* ProjectionStore.ProjectionStoreV2;
+      const { threadId, runId } = yield* seedThread("rolled-back", { rolledBackRun: true });
+      yield* trim;
+      const { projection } = yield* store.getThreadSnapshot(threadId);
+      const notice = projection.turnItems.find((item) => item.type === "system_notice");
+      assert.equal(notice?.runId, runId);
+      assert.include(
+        projection.visibleTurnItems.map((row) => row.sourceItemId),
+        notice?.id,
+      );
     }),
   );
 
