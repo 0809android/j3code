@@ -123,13 +123,19 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")(
 describe("ElectronUpdater download retry", () => {
   const stubDownload = () => {
     const resolvers: Array<() => void> = [];
-    const spy = vi.spyOn(autoUpdater, "downloadUpdate").mockImplementation(
-      () =>
-        new Promise<Array<string>>((resolve) => {
-          resolvers.push(() => resolve([]));
-        }),
-    );
-    return { spy, resolvers, started: () => resolvers.length };
+    // startSignals[n] completes when electron-updater's downloadUpdate is called for the nth time.
+    const firstStarted = Deferred.makeUnsafe<void>();
+    const retryStarted = Deferred.makeUnsafe<void>();
+    const startSignals = [firstStarted, retryStarted];
+    const spy = vi.spyOn(autoUpdater, "downloadUpdate").mockImplementation(() => {
+      const signal = startSignals[resolvers.length];
+      const settled = new Promise<Array<string>>((resolve) => {
+        resolvers.push(() => resolve([]));
+      });
+      if (signal) Deferred.doneUnsafe(signal, Effect.void);
+      return settled;
+    });
+    return { spy, resolvers, firstStarted, retryStarted, started: () => resolvers.length };
   };
 
   it.effect("waits for the interrupted download to settle before retrying", () =>
@@ -139,8 +145,7 @@ describe("ElectronUpdater download retry", () => {
       const electronUpdater = yield* ElectronUpdater.ElectronUpdater;
 
       const first = yield* electronUpdater.downloadUpdate.pipe(Effect.forkScoped);
-      yield* Effect.yieldNow;
-      assert.equal(download.started(), 1);
+      yield* Deferred.await(download.firstStarted);
       yield* Fiber.interrupt(first);
 
       const retry = yield* electronUpdater.downloadUpdate.pipe(Effect.forkScoped);
@@ -148,7 +153,7 @@ describe("ElectronUpdater download retry", () => {
       assert.equal(download.started(), 1, "retry must not start while the old promise is pending");
 
       download.resolvers[0]?.();
-      yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 0)));
+      yield* Deferred.await(download.retryStarted);
       assert.equal(download.started(), 2);
       download.resolvers[1]?.();
       yield* Fiber.join(retry);
@@ -162,13 +167,14 @@ describe("ElectronUpdater download retry", () => {
       const electronUpdater = yield* ElectronUpdater.ElectronUpdater;
 
       const first = yield* electronUpdater.downloadUpdate.pipe(Effect.forkScoped);
-      yield* Effect.yieldNow;
+      yield* Deferred.await(download.firstStarted);
       yield* Fiber.interrupt(first);
 
       yield* electronUpdater.downloadUpdate.pipe(Effect.forkScoped);
       yield* TestClock.adjust(
         Duration.sum(ElectronUpdater.CANCELLED_DOWNLOAD_SETTLE_TIMEOUT, Duration.millis(1)),
       );
+      yield* Deferred.await(download.retryStarted);
       assert.equal(download.started(), 2);
     }).pipe(Effect.scoped, Effect.provide([ElectronUpdater.layer, TestClock.layer()])),
   );
