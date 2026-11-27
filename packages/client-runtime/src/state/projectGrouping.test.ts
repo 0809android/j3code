@@ -8,6 +8,7 @@ import {
   deriveLogicalProjectKeyFromSettings,
   pickableProjectGroups,
   derivePhysicalProjectKey,
+  resolveConnectedDefaultThreadEnvironmentId,
   resolveDefaultThreadEnvironmentId,
   resolveGroupDefaultProject,
   resolveScratchProjectScopeKey,
@@ -562,6 +563,45 @@ describe("resolveDefaultThreadEnvironmentId", () => {
   it("treats an unset default as Automatic", () => {
     expect(resolveDefaultThreadEnvironmentId(null, isKnown)).toBe(null);
     expect(resolveDefaultThreadEnvironmentId(undefined, isKnown)).toBe(null);
+  });
+});
+
+describe("resolveConnectedDefaultThreadEnvironmentId", () => {
+  const online = EnvironmentId.make("environment:online");
+  const offline = EnvironmentId.make("environment:offline");
+
+  it("keeps a default that is connected", () => {
+    expect(resolveConnectedDefaultThreadEnvironmentId(online, [online])).toBe(online);
+  });
+
+  it("treats a default that is known but offline as Automatic", () => {
+    expect(resolveConnectedDefaultThreadEnvironmentId(offline, [online])).toBe(null);
+  });
+
+  it("treats an unset default as Automatic", () => {
+    expect(resolveConnectedDefaultThreadEnvironmentId(null, [online])).toBe(null);
+  });
+
+  it("keeps the primary preferred for a group's representative when the default is offline", () => {
+    const projects = [
+      makeProject("local-app", "/work/workspace/app-a", {
+        repositoryIdentity: { ...repositoryIdentity, rootPath: "/work/workspace" },
+      }),
+      makeProject("offline-root", "/srv/workspace", {
+        environmentId: offline,
+        repositoryIdentity: { ...repositoryIdentity, rootPath: "/srv/workspace" },
+      }),
+    ];
+    const representative = (connected: EnvironmentId[]) =>
+      buildProjectGroups({
+        projects,
+        settings: settings("repository"),
+        preferredEnvironmentId:
+          resolveConnectedDefaultThreadEnvironmentId(offline, connected) ?? environmentId,
+      })[0]?.representative.id;
+
+    expect(representative([environmentId])).toBe("local-app");
+    expect(representative([environmentId, offline])).toBe("offline-root");
   });
 });
 

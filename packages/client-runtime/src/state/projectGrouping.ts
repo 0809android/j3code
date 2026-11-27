@@ -92,6 +92,16 @@ export function resolveDefaultThreadEnvironmentId(
   return saved != null && isKnownEnvironment(saved) ? saved : null;
 }
 
+/** An offline default machine would open a thread that cannot send, so it reads as Automatic too. */
+export function resolveConnectedDefaultThreadEnvironmentId(
+  saved: EnvironmentId | null | undefined,
+  connectedEnvironmentIds: ReadonlyArray<EnvironmentId>,
+): EnvironmentId | null {
+  return resolveDefaultThreadEnvironmentId(saved, (environmentId) =>
+    connectedEnvironmentIds.includes(environmentId),
+  );
+}
+
 export function derivePhysicalProjectKeyFromPath(environmentId: string, cwd: string): string {
   return `${environmentId}:${normalizeProjectPathForComparison(cwd)}`;
 }

@@ -3,11 +3,15 @@ import { useMessages } from "gt-react";
 import { orderItemsByPreferredIds, sortSidebarV2ProjectGroups } from "../components/Sidebar.logic";
 import {
   getProjectOrderKey,
-  resolveDefaultThreadEnvironmentId,
+  resolveConnectedDefaultThreadEnvironmentId,
   selectProjectGroupingSettings,
 } from "@t3tools/client-runtime/state/project-grouping";
 import { buildSidebarProjectSnapshots } from "../sidebarProjectGrouping";
-import { useEnvironmentIdentities, usePrimaryEnvironmentId } from "../state/environments";
+import {
+  useConnectedEnvironmentIds,
+  useEnvironmentIdentities,
+  usePrimaryEnvironmentId,
+} from "../state/environments";
 import { useDelegatedUnderParent, useProjects, useQuietThreadShells } from "../state/entities";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
 import { useClientSettings } from "./useSettings";
@@ -25,11 +29,11 @@ export function useSidebarProjectGroups() {
   const environments = useEnvironmentIdentities();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const resolve = useMessages();
-  // A default whose connection was removed reads as Automatic, so the primary stays preferred.
-  const defaultEnvironmentId = resolveDefaultThreadEnvironmentId(
+  const connectedEnvironmentIds = useConnectedEnvironmentIds();
+  // A default that is removed or offline reads as Automatic, so the primary stays preferred.
+  const defaultEnvironmentId = resolveConnectedDefaultThreadEnvironmentId(
     defaultThreadEnvironmentId,
-    (environmentId) =>
-      environments.some((environment) => environment.environmentId === environmentId),
+    connectedEnvironmentIds,
   );
   const orderedProjects = orderItemsByPreferredIds({
     items: projects,

@@ -20,7 +20,7 @@ import { createScratchProjectActions } from "../hooks/useScratchProject";
 import { getClientSettings } from "../hooks/useSettings";
 import { startNewThreadFromContext } from "../lib/chatThreadActions";
 import {
-  resolveDefaultThreadEnvironmentId,
+  resolveConnectedDefaultThreadEnvironmentId,
   selectProjectGroupingSettings,
 } from "@t3tools/client-runtime/state/project-grouping";
 import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
@@ -56,10 +56,11 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
     handleNewThread,
   });
 
-  // A default whose connection was removed reads as Automatic.
+  // A default that is removed or offline reads as Automatic.
   const readDefaultThreadEnvironmentId = () =>
-    resolveDefaultThreadEnvironmentId(getClientSettings().defaultThreadEnvironmentId, (id) =>
-      appAtomRegistry.get(environmentPresentations.presentationsAtom).has(id),
+    resolveConnectedDefaultThreadEnvironmentId(
+      getClientSettings().defaultThreadEnvironmentId,
+      appAtomRegistry.get(environmentSummaries.connectedEnvironmentIdsAtom),
     );
 
   const readRouteTarget = () => resolveThreadRouteTarget(router.state.matches.at(-1)?.params ?? {});

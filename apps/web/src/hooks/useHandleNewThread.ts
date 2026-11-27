@@ -26,7 +26,7 @@ import { orderItemsByPreferredIds } from "../components/Sidebar.logic";
 import {
   deriveLogicalProjectKeyFromSettings,
   getProjectOrderKey,
-  resolveDefaultThreadEnvironmentId,
+  resolveConnectedDefaultThreadEnvironmentId,
   resolveGroupDefaultProject,
   selectProjectGroupingSettings,
   type ProjectGroupingSettings,
@@ -482,16 +482,16 @@ export function resolveDefaultProjectRef(
   lastUsedProjectKey: string | null,
   fallbackReady = true,
   groupingSettings?: ProjectGroupingSettings,
-  savedDefaultThreadEnvironmentId: EnvironmentId | null = null,
+  savedDefaultThreadEnvironmentId: EnvironmentId | null | undefined = null,
   connectedEnvironmentIds: ReadonlyArray<EnvironmentId> | undefined = undefined,
 ): ScopedProjectRef | null {
-  // An offline default machine would open a thread that cannot send, so the last used project stands.
   const defaultThreadEnvironmentId =
-    savedDefaultThreadEnvironmentId !== null &&
-    (connectedEnvironmentIds === undefined ||
-      connectedEnvironmentIds.includes(savedDefaultThreadEnvironmentId))
+    connectedEnvironmentIds === undefined
       ? savedDefaultThreadEnvironmentId
-      : null;
+      : resolveConnectedDefaultThreadEnvironmentId(
+          savedDefaultThreadEnvironmentId,
+          connectedEnvironmentIds,
+        );
   const activeProjects = projects.filter((project) => project.archivedAt == null);
   const lastUsed = activeProjects.find(
     (project) =>
@@ -534,13 +534,6 @@ export function resolveDefaultProjectRef(
 export function useHandleNewThread() {
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const savedDefaultThreadEnvironmentId = useClientSettings((s) => s.defaultThreadEnvironmentId);
-  const environments = useAtomValue(environmentSummaries.identitiesAtom);
-  // A default whose connection was removed reads as Automatic.
-  const defaultThreadEnvironmentId = resolveDefaultThreadEnvironmentId(
-    savedDefaultThreadEnvironmentId,
-    (environmentId) =>
-      environments.some((environment) => environment.environmentId === environmentId),
-  );
   const [lastUsedProjectKey] = useLocalStorage(
     LAST_USED_PROJECT_STORAGE_KEY,
     null,
@@ -571,7 +564,7 @@ export function useHandleNewThread() {
     lastUsedProjectKey,
     defaultProjectFallbackReady,
     groupingSettings,
-    defaultThreadEnvironmentId,
+    savedDefaultThreadEnvironmentId,
     connectedEnvironmentIds,
   );
 
