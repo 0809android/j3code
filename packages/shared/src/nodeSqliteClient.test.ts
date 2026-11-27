@@ -1136,7 +1136,6 @@ it.effect("keeps the reader when a read-only transaction is interrupted between 
   ),
 );
 
-
 const withFileClient = <A, E>(
   setup: (
     sql: SqlClient.SqlClient,

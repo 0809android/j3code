@@ -589,8 +589,8 @@ describe("thread history trim settings authorization", () => {
   });
 
   it("keeps other storage cleanup settings on settings write", () => {
-    expect(
-      requiredScopesForServerSettingsPatch({ storageCleanup: { logsAfterDays: 7 } }),
-    ).toEqual([AuthSettingsWriteScope]);
+    expect(requiredScopesForServerSettingsPatch({ storageCleanup: { logsAfterDays: 7 } })).toEqual([
+      AuthSettingsWriteScope,
+    ]);
   });
 });

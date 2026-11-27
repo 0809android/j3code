@@ -468,9 +468,7 @@ it("keeps the thread history switch usable when a selected machine is offline", 
   state.offline = ["env-b"];
   await using screen = await render(panel());
 
-  await expect
-    .element(screen.getByRole("switch", { name: "Trim old threads" }))
-    .not.toBeDisabled();
+  await expect.element(screen.getByRole("switch", { name: "Trim old threads" })).not.toBeDisabled();
 });
 
 it("lets someone without maintenance access turn thread history trimming off, not on", async () => {

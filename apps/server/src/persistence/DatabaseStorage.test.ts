@@ -208,9 +208,7 @@ it("drains a reclaim backlog at 10% duty, but backs off when a pass frees nothin
     failed,
   });
   const delayMs = (result: ReturnType<typeof pass>, elapsedMs: number) =>
-    Duration.toMillis(
-      DatabaseStorage.reclaimDelay(result, BigInt(elapsedMs) * 1_000_000n),
-    );
+    Duration.toMillis(DatabaseStorage.reclaimDelay(result, BigInt(elapsedMs) * 1_000_000n));
   // A quick pass with pages left over keeps the short interval.
   assert.equal(delayMs(pass(1024, 4096), 10), 5_000);
   // A slow pass rests nine times as long as it ran, so reclaiming never exceeds 10% duty.

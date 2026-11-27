@@ -339,7 +339,9 @@ describe("newTaskDestination", () => {
     ];
     expect(
       destination({ useLastProject: true, projects, defaultEnvironmentId: "environment" }),
-    ).toEqual({ draft: { requestId: "request", environmentId: "environment", projectId: "first" } });
+    ).toEqual({
+      draft: { requestId: "request", environmentId: "environment", projectId: "first" },
+    });
     expect(
       destination({
         useLastProject: true,

@@ -158,7 +158,9 @@ export function useUpdateScopedSettings() {
     run(
       options?.onlyEnvironmentIds === undefined
         ? environments
-        : environments.filter(({ environmentId }) => options.onlyEnvironmentIds?.has(environmentId)),
+        : environments.filter(({ environmentId }) =>
+            options.onlyEnvironmentIds?.has(environmentId),
+          ),
       (current) => planScopedSettingsPatch(scope, current, patch, { deviceOnly }),
       options?.onFailed,
     );

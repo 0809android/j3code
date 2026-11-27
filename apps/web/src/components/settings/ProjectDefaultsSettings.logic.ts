@@ -1,10 +1,5 @@
 import { resolveDefaultThreadEnvironmentId } from "@t3tools/client-runtime/state/project-grouping";
-import type {
-  EnvironmentId,
-  ModelSelection,
-  ProjectId,
-  ServerProvider,
-} from "@t3tools/contracts";
+import type { EnvironmentId, ModelSelection, ProjectId, ServerProvider } from "@t3tools/contracts";
 import type { UnifiedSettings } from "@t3tools/contracts/settings";
 import { msg } from "gt-react";
 

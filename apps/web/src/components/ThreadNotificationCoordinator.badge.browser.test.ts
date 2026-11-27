@@ -429,7 +429,11 @@ const delegatedAndChildThreads = (overrides: Partial<typeof thread>) => {
       threads: [
         toV2ThreadShell({ ...thread, ...overrides, id: "root", title: "Root" }),
         child("subagent", "Subagent", {
-          lineage: { rootThreadId: "root", parentThreadId: "root", relationshipToParent: "subagent" },
+          lineage: {
+            rootThreadId: "root",
+            parentThreadId: "root",
+            relationshipToParent: "subagent",
+          },
         }),
         child("side", "Side chat", {
           lineage: {

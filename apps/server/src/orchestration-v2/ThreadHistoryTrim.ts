@@ -350,8 +350,9 @@ const make = Effect.gen(function* () {
             OR COALESCE(recent.completed_at, '') >= ${input.idleBefore}
           )
       )
-      ${"forks" in input
-        ? sql`
+      ${
+        "forks" in input
+          ? sql`
       -- A live fork shows this thread's rows, so its use keeps them too.
       AND NOT EXISTS (
         SELECT 1 FROM forks AS link
@@ -378,7 +379,8 @@ const make = Effect.gen(function* () {
             )
           )
       )`
-        : sql``}
+          : sql``
+      }
       AND (${input.threadId !== undefined ? sql`1` : sql`0`} OR EXISTS (
         SELECT 1 FROM orchestration_v2_projection_turn_items AS item
         WHERE item.thread_id = thread.thread_id
@@ -870,9 +872,7 @@ const make = Effect.gen(function* () {
       idleBefore,
       now,
       forks: yield* Ref.get(forkTableRef),
-    }).pipe(
-      NodeSqliteClient.readOnly,
-    );
+    }).pipe(NodeSqliteClient.readOnly);
     if (mode !== "manual" && candidates.length > 0) {
       yield* Effect.logInfo("Idle thread history due for trimming", {
         threadCount: candidates.length,

@@ -477,24 +477,19 @@ export function NewTaskDraftScreen(props: {
 
     const preferences = appAtomRegistry.get(mobilePreferencesAtom);
     const saved = AsyncResult.isSuccess(preferences) ? preferences.value : undefined;
-    const selection = resolveDraftProjectSelection(
-      selectedProjectKey,
-      projects,
-      projectScopes,
-      {
-        incomingShareId: props.incomingShareId,
-        pickerClosed: initialPickerRef.current === "open" && isFocused,
-        useLastProject: saved?.useLastProjectForNewThreads,
-        lastProject: saved?.lastThreadProject,
-        defaultEnvironmentId: resolveConnectedDefaultThreadEnvironmentId(
-          saved?.defaultThreadEnvironmentId,
-          appAtomRegistry
-            .get(workspaceConnections.environmentsAtom)
-            .filter((environment) => environment.connectionState === "connected")
-            .map((environment) => environment.environmentId),
-        ),
-      },
-    );
+    const selection = resolveDraftProjectSelection(selectedProjectKey, projects, projectScopes, {
+      incomingShareId: props.incomingShareId,
+      pickerClosed: initialPickerRef.current === "open" && isFocused,
+      useLastProject: saved?.useLastProjectForNewThreads,
+      lastProject: saved?.lastThreadProject,
+      defaultEnvironmentId: resolveConnectedDefaultThreadEnvironmentId(
+        saved?.defaultThreadEnvironmentId,
+        appAtomRegistry
+          .get(workspaceConnections.environmentsAtom)
+          .filter((environment) => environment.connectionState === "connected")
+          .map((environment) => environment.environmentId),
+      ),
+    });
     if (selection.kind === "preserve") {
       initialPickerRef.current = null;
       return;

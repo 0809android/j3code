@@ -578,31 +578,30 @@ const make = Effect.gen(function* () {
         Stream.mapArrayEffect((items) =>
           replaceInheritedInvalidations(items, thread.id, currentSnapshot),
         ),
-        Stream.mapEffect(
-          (item): Effect.Effect<ReadonlyArray<GuestStreamEvent>, unknown> =>
-            Effect.gen(function* () {
-              if (item.kind === "fresh") {
-                rememberSent(share.id, item.visibleItems);
-                const replaced: ReadonlyArray<GuestStreamEvent> = [
-                  { type: "thread", item: item.item },
-                ];
-                return replaced;
-              }
-              if (item.kind !== "event") return [];
-              if (endsShare(item.event)) return [ended];
-              if (item.event.type === "turn-item.updated")
-                rememberSent(share.id, [item.event.payload]);
-              const updated = threadOf(item.event);
-              const view = updated === null ? null : viewOf(updated);
-              const sent: ReadonlyArray<GuestStreamEvent> =
-                view === null
-                  ? [{ type: "thread", item }]
-                  : [
-                      { type: "thread", item },
-                      { type: "view", view },
-                    ];
-              return sent;
-            }),
+        Stream.mapEffect((item): Effect.Effect<ReadonlyArray<GuestStreamEvent>, unknown> =>
+          Effect.gen(function* () {
+            if (item.kind === "fresh") {
+              rememberSent(share.id, item.visibleItems);
+              const replaced: ReadonlyArray<GuestStreamEvent> = [
+                { type: "thread", item: item.item },
+              ];
+              return replaced;
+            }
+            if (item.kind !== "event") return [];
+            if (endsShare(item.event)) return [ended];
+            if (item.event.type === "turn-item.updated")
+              rememberSent(share.id, [item.event.payload]);
+            const updated = threadOf(item.event);
+            const view = updated === null ? null : viewOf(updated);
+            const sent: ReadonlyArray<GuestStreamEvent> =
+              view === null
+                ? [{ type: "thread", item }]
+                : [
+                    { type: "thread", item },
+                    { type: "view", view },
+                  ];
+            return sent;
+          }),
         ),
         Stream.flattenIterable,
         // A failed read closes the response without `ended`: the browser reconnects, and
