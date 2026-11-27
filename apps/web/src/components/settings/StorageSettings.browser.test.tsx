@@ -13,6 +13,8 @@ const state = vi.hoisted(() => ({
   run: vi.fn(),
   update: vi.fn(),
   report: null as StorageCleanupReport | null,
+  selected: null as string[] | null,
+  threadHistoryTrim: false,
 }));
 
 vi.mock(import("../../state/server"), async (original) => {
@@ -20,6 +22,11 @@ vi.mock(import("../../state/server"), async (original) => {
   const { Atom } = await import("effect/reactivity");
   const report = Atom.make(() => ({ _tag: "Success", value: state.report, waiting: false }));
   const allowed = Atom.make(true);
+  const trimStatus = Atom.make(() => ({
+    _tag: "Success",
+    value: { lastTrimmedAt: null, nextTrimAt: null },
+    waiting: false,
+  }));
   return {
     ...actual,
     serverEnvironment: {
@@ -29,6 +36,11 @@ vi.mock(import("../../state/server"), async (original) => {
         ...actual.serverEnvironment.runStorageCleanup,
         permissionAtom: () => allowed,
       },
+      trimThreadHistory: {
+        ...actual.serverEnvironment.trimThreadHistory,
+        permissionAtom: () => allowed,
+      },
+      threadHistoryTrim: (() => trimStatus) as never,
     },
   };
 });
@@ -49,6 +61,7 @@ vi.mock(import("./SettingsScopeContext"), async (original) => ({
             storageCleanup: true,
             storageCleanupRun: true,
             settledWorktreeCleanup: true,
+            threadHistoryTrim: state.threadHistoryTrim,
           },
         },
       },
@@ -57,7 +70,9 @@ vi.mock(import("./SettingsScopeContext"), async (original) => ({
       scope: { kind: "all" },
       environments,
       connectedEnvironments: environments,
-      targets: state.targets,
+      targets: state.selected
+        ? state.targets.filter(({ environmentId }) => state.selected?.includes(environmentId))
+        : state.targets,
       target: null,
     };
   }) as never,
@@ -117,6 +132,8 @@ function setup() {
     settings: state.settings,
   }));
   state.report = null;
+  state.selected = null;
+  state.threadHistoryTrim = false;
   state.run.mockReset();
   state.update.mockReset();
 }
@@ -359,4 +376,29 @@ it("settles mixed retention statuses independently across selected machines", as
   await screen.rerender(panel());
   await advance(300);
   await expect.element(screen.getByTestId("logs-retention-status")).not.toBeInTheDocument();
+});
+
+it("trims thread history only on the machines picked in the settings scope", async () => {
+  setup();
+  state.threadHistoryTrim = true;
+  state.settings = {
+    ...state.settings,
+    storageCleanup: { ...state.settings.storageCleanup, threadHistoryAfterDays: 30 },
+  };
+  state.targets = ["env-a", "env-b"].map((environmentId) => ({
+    environmentId,
+    settings: state.settings,
+  }));
+  state.selected = ["env-a"];
+  state.run.mockResolvedValue({
+    _tag: "Success",
+    value: { dryRun: true, afterDays: 30, threadCount: 2, itemCount: 5, estimatedBytes: 1024 },
+  });
+  await using screen = await render(panel());
+  const trimNow = Array.from(screen.container.querySelectorAll("button")).find(
+    (button) => button.textContent === "Trim now",
+  )!;
+  await act(async () => trimNow.click());
+
+  expect(state.run.mock.calls.map(([input]) => input.environmentId)).toEqual(["env-a"]);
 });

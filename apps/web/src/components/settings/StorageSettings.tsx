@@ -137,12 +137,14 @@ function RetentionControl({
   onChange,
   minimum = 1,
   defaultDays = 8,
+  disabled = false,
 }: {
   label: string;
   value: number | null;
   onChange: (value: number | null, onFailed: () => void) => void;
   minimum?: number;
   defaultDays?: number;
+  disabled?: boolean;
 }) {
   const gt = useGT();
   const [draft, setDraft] = useState(value);
@@ -208,6 +210,7 @@ function RetentionControl({
           step={1}
           size="sm"
           className="w-auto"
+          disabled={disabled}
           onValueChange={(next) => {
             setDraft(next);
             setEnabling((current) => (current === "draft" ? "edited" : current));
@@ -271,6 +274,7 @@ function RetentionControl({
       <Switch
         aria-label={label}
         checked={on}
+        disabled={disabled}
         // Keeps focus in the age field, so switching off never commits an edited age first.
         onMouseDown={(event) => event.preventDefault()}
         onCheckedChange={(enabled) => {
@@ -632,8 +636,17 @@ function ThreadHistorySection() {
       ? gt("Mixed across selected machines")
       : undefined;
 
+  const targetIds = new Set(targets.map((target) => target.environmentId));
   const supported = connectedEnvironments.filter(
-    (environment) => environment.serverConfig?.environment.capabilities.threadHistoryTrim === true,
+    (environment) =>
+      targetIds.has(environment.environmentId) &&
+      environment.serverConfig?.environment.capabilities.threadHistoryTrim === true,
+  );
+  const canMaintain = targets.every(
+    (target) =>
+      permissions[
+        connectedEnvironments.findIndex(({ environmentId }) => environmentId === target.environmentId)
+      ] === true,
   );
   const runnable = supported.filter(
     (environment) =>
@@ -654,7 +667,7 @@ function ThreadHistorySection() {
     return [
       {
         environmentId: environment.environmentId,
-        text: connectedEnvironments.length > 1 ? `${label}: ${text}` : text,
+        text: supported.length > 1 ? `${label}: ${text}` : text,
       },
     ];
   });
@@ -748,6 +761,7 @@ function ThreadHistorySection() {
               label={gt("Trim old threads")}
               value={settings.threadHistoryAfterDays}
               defaultDays={SUGGESTED_THREAD_HISTORY_AFTER_DAYS}
+              disabled={!canMaintain}
               onChange={(threadHistoryAfterDays, onFailed) =>
                 update({ threadHistoryAfterDays }, { onFailed })
               }
@@ -792,6 +806,20 @@ function ThreadHistorySection() {
                           "{count, plural, one {Delete tool output and reasoning from {count} unused thread, about {size}? Messages, plans, file changes and attachments are kept. This can't be undone.} other {Delete tool output and reasoning from {count} unused threads, about {size}? Messages, plans, file changes and attachments are kept. This can't be undone.}}",
                           { count: threadCount, size },
                         )}
+                        {(confirming?.length ?? 0) > 1
+                          ? confirming?.map(({ target, report }) => (
+                              <span key={target.environmentId} className="mt-1 block">
+                                {gt(
+                                  "{label}: {count, plural, one {{count} thread} other {{count} threads}}, about {size}",
+                                  {
+                                    label: target.label,
+                                    count: report.threadCount,
+                                    size: formatBytes(report.estimatedBytes),
+                                  },
+                                )}
+                              </span>
+                            ))
+                          : null}
                       </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
