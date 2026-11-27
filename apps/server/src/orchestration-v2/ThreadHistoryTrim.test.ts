@@ -682,7 +682,7 @@ const forkTableReads = () =>
   statements.filter((text) => text.includes("$.forkedFrom.type")).length;
 
 it.layer(countedFixture)("ThreadHistoryTrim fork table", (it) => {
-  it.effect("reads the fork table once per pass, however many threads it trims", () =>
+  it.effect("reads the fork table once per pass when no thread is made meanwhile, however many threads it trims", () =>
     Effect.gen(function* () {
       yield* TestClock.setTime(DateTime.toEpochMillis(now));
       const sources = [
@@ -987,7 +987,7 @@ it.layer(hookedFixture)("ThreadHistoryTrim during a pass", (it) => {
     }),
   );
 
-  it.effect("checks forks before the pages, not in each page's write, and leaves a fork made since to the next pass", () =>
+  it.effect("checks forks before the pages, not in each page's write, and still copies to a fork made since", () =>
     Effect.gen(function* () {
       yield* isolate;
       const source = yield* seedThread("fork-used-between");
@@ -1004,13 +1004,13 @@ it.layer(hookedFixture)("ThreadHistoryTrim during a pass", (it) => {
         },
       }).pipe(Effect.asVoid);
       // The write that removes a page checks the thread's own rows only, so a fork used after the
-      // pass's check does not stop this pass (the next one sees it). The pass read its fork table
-      // before that fork existed, so it is not copied to in this pass either.
+      // pass's check does not stop this pass (the next one sees it); the fork is still told, since
+      // the copy reads the fork table again when a thread has been made since it was read.
       yield* arm(forkUsed);
       yield* trim;
       assert.deepEqual(yield* itemTitles(source.threadId), trimmedItems);
       const waited = (yield* TrimHook).waitedOn;
-      assert.isFalse(
+      assert.isTrue(
         waited.some((threadIds) =>
           threadIds?.includes(ThreadId.make("thread:trim:fork-used-between-fork")) === true,
         ),

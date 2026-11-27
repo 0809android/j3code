@@ -17,6 +17,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
+import * as Ref from "effect/Ref";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
@@ -161,6 +162,8 @@ interface ForkTable {
   >;
   /** The same rows as `[id, parent, deleted]` triples, for a query to join. */
   readonly json: string;
+  /** The thread table's newest rowid when this was read; a larger one means a thread was made since. */
+  readonly maxRowid: number;
 }
 
 function makeForkTable(
@@ -169,6 +172,7 @@ function makeForkTable(
     readonly parent: ThreadId | null;
     readonly deleted: number;
   }>,
+  maxRowid: number,
 ): ForkTable {
   const children = new Map<ThreadId, Array<{ id: ThreadId; deleted: boolean }>>();
   const triples: Array<readonly [ThreadId, ThreadId, number]> = [];
@@ -179,7 +183,7 @@ function makeForkTable(
     children.set(row.parent, siblings);
     triples.push([row.id, row.parent, row.deleted !== 0 ? 1 : 0]);
   }
-  return { children, json: JSON.stringify(triples) };
+  return { children, json: JSON.stringify(triples), maxRowid };
 }
 
 /** Live forks that show this thread's rows, at any depth; a deleted fork still passes them on. */
@@ -225,7 +229,17 @@ const make = Effect.gen(function* () {
   // Every run-fork in the thread table, read once per pass (the table has no index on the
   // parent a fork hangs off, so each read is a full scan). Deleted forks stay in so they pass the
   // link on to their own forks. A fork made after this read is left to the next pass.
+  // The thread table's primary key is text, so it keeps an implicit rowid that grows with each new
+  // thread, and its maximum is one b-tree seek (there is no index on created_at to use instead).
+  // Read before the rows, so a thread made between the two reads counts as new, not as missed.
+  const readMaxThreadRowid = sql<{ readonly maxRowid: number | null }>`
+    SELECT MAX(rowid) AS "maxRowid" FROM orchestration_v2_projection_threads
+  `.pipe(
+    NodeSqliteClient.readOnly,
+    Effect.map((rows) => rows[0]?.maxRowid ?? 0),
+  );
   const readForkTable = Effect.fn("ThreadHistoryTrim.readForkTable")(function* () {
+    const maxRowid = yield* readMaxThreadRowid;
     const rows = yield* sql<{
       readonly id: ThreadId;
       readonly parent: ThreadId | null;
@@ -238,7 +252,7 @@ const make = Effect.gen(function* () {
       WHERE json_extract(fork.payload_json, '$.forkedFrom.type') = 'run'
         AND COALESCE(json_extract(fork.payload_json, '$.lineage.sideChat'), 0) = 0
     `.pipe(NodeSqliteClient.readOnly);
-    return makeForkTable(rows);
+    return makeForkTable(rows, maxRowid);
   });
 
   // The forks of each thread at any depth, from the table read above. Handed to the query as JSON,
@@ -691,11 +705,17 @@ const make = Effect.gen(function* () {
    */
   const copyToForks = Effect.fn("ThreadHistoryTrim.copyToForks")(function* (
     threadId: ThreadId,
-    forkTable: ForkTable,
+    forkTableRef: Ref.Ref<ForkTable>,
   ) {
-    // The forks are those the pass's table knew; one made since waits for the next pass. A fork
-    // may have started a run during the rests between pages, so the write waits for the provider
-    // snapshots queued for each fork, as any write to that thread does.
+    // A fork made since the table was read inherited rows this trim has removed, so it must hear
+    // of it. A newer thread means the table is read again, and the rest of the pass uses that one.
+    let forkTable = yield* Ref.get(forkTableRef);
+    if ((yield* readMaxThreadRowid) !== forkTable.maxRowid) {
+      forkTable = yield* readForkTable();
+      yield* Ref.set(forkTableRef, forkTable);
+    }
+    // A fork may have started a run during the rests between pages, so the write waits for the
+    // provider snapshots queued for each fork, as any write to that thread does.
     const forks = liveForksOf(forkTable, threadId).map((id) => ({ id }));
     if (forks.length === 0) return;
     yield* eventSink.writeBuilt(
@@ -751,7 +771,7 @@ const make = Effect.gen(function* () {
   const trimThread = Effect.fn("ThreadHistoryTrim.trimThread")(function* (
     candidate: Candidate,
     rest: Effect.Effect<void>,
-    forkTable: ForkTable,
+    forkTableRef: Ref.Ref<ForkTable>,
   ) {
     const progress = { removedAny: false };
     return yield* trimPages(candidate, rest, progress).pipe(
@@ -761,7 +781,7 @@ const make = Effect.gen(function* () {
         Effect.suspend(() =>
           !progress.removedAny || (Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause))
             ? Effect.void
-            : copyToForks(candidate.threadId, forkTable).pipe(
+            : copyToForks(candidate.threadId, forkTableRef).pipe(
                 Effect.catchCause((cause) =>
                   Effect.logWarning("Copying a history trim to forks failed", {
                     threadId: candidate.threadId,
@@ -811,10 +831,14 @@ const make = Effect.gen(function* () {
     }
     // The sweep keeps to a 10% duty so a backlog never competes with a turn; a requested trim does not wait.
     const rest = mode === "manual" ? Effect.yieldNow : yield* makeDutyRest;
-    // Read once for the whole pass: the candidate list, each candidate's re-check, and the copies
-    // to forks all use it, instead of scanning the thread table again for each.
-    const forkTable = yield* readForkTable();
-    const candidates = yield* readCandidates({ idleBefore, now, forks: forkTable }).pipe(
+    // Read once for the whole pass (again only if a thread is made before a copy to forks): the
+    // candidate list, each candidate's re-check, and the copies all use it.
+    const forkTableRef = yield* Ref.make(yield* readForkTable());
+    const candidates = yield* readCandidates({
+      idleBefore,
+      now,
+      forks: yield* Ref.get(forkTableRef),
+    }).pipe(
       NodeSqliteClient.readOnly,
     );
     if (mode !== "manual" && candidates.length > 0) {
@@ -832,11 +856,11 @@ const make = Effect.gen(function* () {
         idleBefore,
         now,
         threadId: listed.threadId,
-        forks: forkTable,
+        forks: yield* Ref.get(forkTableRef),
       }).pipe(NodeSqliteClient.readOnly);
       const candidate = current[0];
       if (candidate === undefined) continue;
-      const removed = yield* trimThread(candidate, rest, forkTable).pipe(
+      const removed = yield* trimThread(candidate, rest, forkTableRef).pipe(
         Effect.catchCauseIf(
           (cause) => !Cause.hasInterruptsOnly(cause),
           (cause) =>
