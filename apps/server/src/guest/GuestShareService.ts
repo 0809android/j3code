@@ -51,7 +51,7 @@ import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import { coalesceThreadLiveStream } from "../orchestration-v2/ThreadLiveEventCoalescer.ts";
 import {
   buildBoundedThreadStreamSnapshot,
-  invalidatesInheritedRows,
+  replaceInheritedInvalidations,
 } from "../orchestration-v2/ThreadStream.ts";
 import {
   projectTurnItemForDetail,
@@ -550,12 +550,14 @@ const make = Effect.gen(function* () {
         userTurnLimit: SNAPSHOT_USER_TURN_LIMIT,
       })
       .pipe(
-        Effect.map((fresh) =>
-          buildBoundedThreadStreamSnapshot({
+        Effect.map((fresh) => ({
+          kind: "fresh" as const,
+          item: buildBoundedThreadStreamSnapshot({
             snapshotSequence: fresh.snapshotSequence,
             projection: fresh.projection,
           }),
-        ),
+          visibleItems: fresh.projection.visibleTurnItems.map((row) => row.item),
+        })),
       );
 
     const ended: GuestStreamEvent = { type: "ended" };
@@ -571,21 +573,23 @@ const make = Effect.gen(function* () {
         // Ending the source here flushes what the coalescer holds, so `ended` is not held back.
         Stream.takeUntil((item) => endsShare(item.event)),
         coalesceThreadLiveStream,
+        // Rows this fork inherits were trimmed at their source: send what it shows now, read once
+        // per batch however many copies it holds.
+        Stream.mapArrayEffect((items) =>
+          replaceInheritedInvalidations(items, thread.id, currentSnapshot),
+        ),
         Stream.mapEffect(
           (item): Effect.Effect<ReadonlyArray<GuestStreamEvent>, unknown> =>
             Effect.gen(function* () {
-              if (item.kind !== "event") return [];
-              if (endsShare(item.event)) return [ended];
-              // Rows this fork inherits were trimmed at their source: send what it shows now.
-              if (invalidatesInheritedRows(item.event, thread.id)) {
-                const fresh = yield* currentSnapshot;
-                rememberSent(
-                  share.id,
-                  fresh.projection.visibleTurnItems.map((row) => row.item),
-                );
-                const replaced: ReadonlyArray<GuestStreamEvent> = [{ type: "thread", item: fresh }];
+              if (item.kind === "fresh") {
+                rememberSent(share.id, item.visibleItems);
+                const replaced: ReadonlyArray<GuestStreamEvent> = [
+                  { type: "thread", item: item.item },
+                ];
                 return replaced;
               }
+              if (item.kind !== "event") return [];
+              if (endsShare(item.event)) return [ended];
               if (item.event.type === "turn-item.updated")
                 rememberSent(share.id, [item.event.payload]);
               const updated = threadOf(item.event);

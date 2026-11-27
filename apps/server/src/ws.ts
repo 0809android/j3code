@@ -17,7 +17,6 @@ import * as PeerThreadRelay from "./peer/PeerThreadRelay.ts";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Base64 from "effect/encoding/Base64";
-import * as Arr from "effect/Array";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
@@ -164,6 +163,7 @@ import {
   decideThreadResume,
   invalidatesInheritedRows,
   isThreadReplayRawPayloadSafe,
+  replaceInheritedInvalidations,
   threadReplayEncodedBytes,
   THREAD_RESUME_MAX_REPLAY_EVENTS,
 } from "./orchestration-v2/ThreadStream.ts";
@@ -893,30 +893,10 @@ export const subscribeOrchestrationV2Thread = Effect.fn("ws.orchestrationV2.subs
         .pipe(
           Stream.map(threadStreamEventItem),
           coalesceThreadLiveStream,
-          // Rows this fork inherits were trimmed at their source: send what it shows now.
-          // Per array, so an ordinary batch passes through as one message.
-          Stream.mapArrayEffect(
-            (
-              items,
-            ): Effect.Effect<
-              Arr.NonEmptyReadonlyArray<OrchestrationV2ThreadStreamItem>,
-              OrchestrationV2GetThreadProjectionError
-            > => {
-              const invalidates = (item: OrchestrationV2ThreadStreamItem) =>
-                item.kind === "event" && invalidatesInheritedRows(item.event, input.threadId);
-              if (!items.some(invalidates)) return Effect.succeed(items);
-              return Effect.forEach(
-                items,
-                (
-                  item,
-                ): Effect.Effect<
-                  OrchestrationV2ThreadStreamItem,
-                  OrchestrationV2GetThreadProjectionError
-                > => (invalidates(item) ? loadSnapshotItem() : Effect.succeed(item)),
-              ).pipe(
-                Effect.map((mapped) => (Arr.isReadonlyArrayNonEmpty(mapped) ? mapped : items)),
-              );
-            },
+          // Rows this fork inherits were trimmed at their source: send what it shows now, read
+          // once per array, so an ordinary batch passes through as one message.
+          Stream.mapArrayEffect((items) =>
+            replaceInheritedInvalidations(items, input.threadId, loadSnapshotItem()),
           ),
           Stream.mapError(
             (cause) =>
