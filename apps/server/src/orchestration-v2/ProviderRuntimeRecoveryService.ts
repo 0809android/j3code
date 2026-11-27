@@ -263,6 +263,7 @@ export const make = Effect.gen(function* () {
       trigger: "startup" | "shutdown",
       continueAfterRestart: boolean,
       stoppedThisPass: ReadonlyMap<string, RecoverySession> = new Map(),
+      imported = false,
     ) {
       const now = yield* DateTime.now;
       const projection = yield* rewindUnacceptedRuns(stored);
@@ -599,7 +600,9 @@ export const make = Effect.gen(function* () {
       const limitRecovery = projection.thread.limitRecovery;
       // The unsent resume spent the worker's request id, so a fresh one lets it send again. An
       // untagged resume from an older server stays cancelled: its copy couldn't be hidden.
+      // 取り込んだ直後は、その再開は取り込み元が送るものなので、このコピーは待つのをやめる。
       if (limitRecovery?.autoResume === true && unsentResumeRunIds.length > 0) {
+        const { requestId: _spent, ...withoutRequest } = limitRecovery;
         events.push({
           id: yield* allocateEventId(),
           type: "thread.metadata-updated",
@@ -607,13 +610,15 @@ export const make = Effect.gen(function* () {
           occurredAt: now,
           payload: {
             ...projection.thread,
-            limitRecovery: { ...limitRecovery, requestId: commandId },
+            limitRecovery: imported
+              ? { ...withoutRequest, autoResume: false }
+              : { ...limitRecovery, requestId: commandId },
             updatedAt: now,
           },
         });
       }
-      // The worker sends the auto-resume again, so the unsent copy leaves the transcript the way
-      // cancelled queued input does.
+      // The unsent copy leaves the transcript the way cancelled queued input does: the worker sends
+      // the auto-resume again, or after an import the source install does.
       const unsentResumePrompts =
         unsentResumeRunIds.length === 0
           ? []
@@ -1138,7 +1143,13 @@ export const make = Effect.gen(function* () {
             continueAfterRestart !== null &&
             resolveProjectSettings(continueAfterRestart, projection.thread.projectId).settings
               .continueThreadsAfterServerUpdate;
-          const result = yield* reconcileProjection(projection, trigger, enabled, stoppedThisPass);
+          const result = yield* reconcileProjection(
+            projection,
+            trigger,
+            enabled,
+            stoppedThisPass,
+            options?.neverContinue === true,
+          );
           for (const session of projection.providerSessions) {
             if (session.status !== "stopped" && session.status !== "error") {
               stoppedThisPass.set(session.id, session);
