@@ -70,10 +70,9 @@ function providerNote(entry: ProviderInstanceEntry | undefined, resolve: Message
 }
 
 /** A default removed from the list reads as Automatic; an offline one stays selected. */
-export function resolveDefaultThreadEnvironmentSelection(
-  saved: EnvironmentId | null,
-  environments: ReadonlyArray<{ readonly environmentId: EnvironmentId }>,
-) {
+export function resolveDefaultThreadEnvironmentSelection<
+  Environment extends { readonly environmentId: EnvironmentId },
+>(saved: EnvironmentId | null, environments: ReadonlyArray<Environment>): Environment | null {
   const environmentId = resolveDefaultThreadEnvironmentId(saved, (id) =>
     environments.some((environment) => environment.environmentId === id),
   );
