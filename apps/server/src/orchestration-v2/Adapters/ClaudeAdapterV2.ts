@@ -132,6 +132,9 @@ import {
   type ProviderInstanceId,
   type ProviderRequestKind,
   type ProviderUserInputAnswers,
+  type UserInputAnswerNotes,
+  answeredUserInputNotes,
+  userInputAnswerChoices,
   type ProviderThreadId,
   type RunId,
   type ThreadId,
@@ -4821,11 +4824,11 @@ export function claudeMcpElicitationAcceptance(
 }
 
 const awaitClaudeUserInputAnswers = Effect.fn("awaitClaudeUserInputAnswers")(function* (
-  answers: Deferred.Deferred<ProviderUserInputAnswers>,
+  answers: Deferred.Deferred<ClaudeUserInputResponse>,
   signal: AbortSignal,
 ) {
-  const cancellation = Effect.callback<ProviderUserInputAnswers>((resume) => {
-    const abort = () => resume(Effect.succeed({}));
+  const cancellation = Effect.callback<ClaudeUserInputResponse>((resume) => {
+    const abort = () => resume(Effect.succeed({ answers: {} }));
     signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) abort();
     return Effect.sync(() => signal.removeEventListener("abort", abort));
@@ -5638,8 +5641,30 @@ type PendingClaudeRuntimeRequest =
     }
   | {
       readonly type: "user_input";
-      readonly answers: Deferred.Deferred<ProviderUserInputAnswers, never>;
+      readonly answers: Deferred.Deferred<ClaudeUserInputResponse, never>;
     };
+
+interface ClaudeUserInputResponse {
+  readonly answers: ProviderUserInputAnswers;
+  readonly answerNotes?: UserInputAnswerNotes;
+}
+
+/** AskUserQuestion takes a choice and its note apart, as `answers` and `annotations[].notes`. */
+export function claudeSdkUserInputResponse(response: ClaudeUserInputResponse): {
+  readonly answers: NonNullable<AskUserQuestionInput["answers"]>;
+  readonly annotations?: Record<string, { readonly notes: string }>;
+} {
+  const notes = answeredUserInputNotes(response.answers, response.answerNotes);
+  const answers = claudeSdkUserInputAnswers(userInputAnswerChoices(response.answers, notes));
+  return notes === undefined
+    ? { answers }
+    : {
+        answers,
+        annotations: Object.fromEntries(
+          Object.entries(notes).map(([question, { note }]) => [question, { notes: note }]),
+        ),
+      };
+}
 
 export function claudeUserInputQuestions(
   input: unknown,
@@ -12836,7 +12861,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               requestKind: "user_input",
               questions,
             });
-            const answers = yield* Deferred.make<ProviderUserInputAnswers, never>();
+            const answers = yield* Deferred.make<ClaudeUserInputResponse, never>();
             yield* Ref.update(pendingRuntimeRequests, (current) => {
               const updated = new Map(current);
               updated.set(String(artifacts.request.id), {
@@ -12887,7 +12912,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                   behavior: "allow",
                   updatedInput: {
                     questions: toolInput.questions,
-                    answers: claudeSdkUserInputAnswers(resolvedAnswers),
+                    ...claudeSdkUserInputResponse(resolvedAnswers),
                   },
                   toolUseID: callbackOptions.toolUseID,
                 } satisfies PermissionResult);
@@ -15218,7 +15243,12 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 });
               }
               if (pending.type === "user_input") {
-                yield* Deferred.succeed(pending.answers, requestInput.answers ?? {});
+                yield* Deferred.succeed(pending.answers, {
+                  answers: requestInput.answers ?? {},
+                  ...(requestInput.answerNotes === undefined
+                    ? {}
+                    : { answerNotes: requestInput.answerNotes }),
+                });
                 return;
               }
               if (requestInput.decision === undefined) {

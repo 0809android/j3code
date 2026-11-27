@@ -50,9 +50,23 @@ export const extractOmpElicitationForm: NonNullable<
     return undefined;
   return {
     questions,
-    respond: (answers) => {
+    respond: (answers, answerNotes) => {
       const content: Record<string, string> = {};
       for (const question of questions) {
+        const noted =
+          answerNotes && Object.hasOwn(answerNotes, question.id)
+            ? answerNotes[question.id]
+            : undefined;
+        const choice = noted?.answer;
+        if (
+          noted !== undefined &&
+          typeof choice === "string" &&
+          question.options.some((option) => option.value === choice)
+        ) {
+          content[question.id] = choice;
+          content[`${question.id}__other`] = noted.note;
+          continue;
+        }
         const answer = Object.hasOwn(answers, question.id) ? answers[question.id] : undefined;
         if (typeof answer !== "string" || !answer.trim()) return { action: "cancel" };
         if (question.options.some((option) => option.value === answer))

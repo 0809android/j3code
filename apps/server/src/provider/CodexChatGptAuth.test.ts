@@ -1399,6 +1399,24 @@ it.effect("an expired initial code retains the issued ID for a fresh authorizati
   ),
 );
 
+it.effect("default sign-in registers anew instead of reusing an unverified registration", () =>
+  provision(
+    Effect.gen(function* () {
+      const h = yield* makeHarness;
+      h.setCodeError("invalid_grant");
+      yield* h.signIn;
+      yield* h.phase("failed");
+      h.setCodeError(undefined);
+      yield* h.signIn;
+      yield* h.phase("succeeded");
+      assert.strictEqual(
+        h.authorizationRequests[1]!.searchParams.get("client_id"),
+        "dynamic_agent_client",
+      );
+    }),
+  ),
+);
+
 it.effect.each([false, true])(
   "removes only the selected incomplete connection across restart (authenticated: %s)",
   (authenticated) =>
@@ -1681,6 +1699,36 @@ it.effect("primary handoff reuses the selected registration and ID token hint", 
       yield* h.finishCallback(state);
       const results = yield* Fiber.join(resultFiber);
       assert.strictEqual(results.at(-1)?.phase, "finished");
+    }),
+  ),
+);
+
+it.effect("primary handoff honors an explicitly selected unverified registration", () =>
+  provision(
+    Effect.gen(function* () {
+      const h = yield* makeHarness;
+      h.setCodeError("invalid_grant");
+      yield* h.signIn;
+      yield* h.phase("failed");
+      h.setCodeError(undefined);
+      const profile = yield* h.auth.controller.reconnectProfile!("chatgpt-profile:oaiapp_test");
+      assert.isNull(yield* h.auth.controller.reconnectProfile!("chatgpt"));
+      const waiting = yield* Deferred.make<{ authorizationUrl: string | null }>();
+      const flow = yield* h.handoff(profile).pipe(
+        Stream.tap((state) =>
+          state.phase === "auth" && state.state.phase === "waiting"
+            ? Deferred.succeed(waiting, state.state)
+            : Effect.void,
+        ),
+        Stream.runDrain,
+        Effect.forkChild,
+      );
+      const state = yield* Deferred.await(waiting);
+      assert.strictEqual(
+        new URL(state.authorizationUrl!).searchParams.get("client_id"),
+        "oaiapp_test",
+      );
+      yield* Fiber.interrupt(flow);
     }),
   ),
 );

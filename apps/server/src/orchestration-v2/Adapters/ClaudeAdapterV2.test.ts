@@ -606,6 +606,23 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
       "Which approach?": "Simple, Safe",
       "Deploy now?": "Yes",
     });
+    assert.deepEqual(
+      ClaudeAdapterV2.claudeSdkUserInputResponse({
+        answers: { "Deploy now?": "Yes\nafter the backup", "Which approach?": "Simple" },
+        answerNotes: {
+          "Deploy now?": { answer: "Yes", note: "after the backup" },
+          "Unasked?": { answer: "No", note: "ignored" },
+        },
+      }),
+      {
+        answers: { "Deploy now?": "Yes", "Which approach?": "Simple" },
+        annotations: { "Deploy now?": { notes: "after the backup" } },
+      },
+    );
+    assert.deepEqual(
+      ClaudeAdapterV2.claudeSdkUserInputResponse({ answers: { "Deploy now?": "Yes" } }),
+      { answers: { "Deploy now?": "Yes" } },
+    );
     assert.isTrue(
       ClaudeAdapterV2.ClaudeProviderCapabilitiesV2.planning.supportsStructuredQuestions,
     );

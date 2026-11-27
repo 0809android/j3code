@@ -79,6 +79,46 @@ export type ProviderApprovalOption = typeof ProviderApprovalOption.Type;
 export const ProviderUserInputAnswers = Schema.Record(Schema.String, Schema.Unknown);
 export type ProviderUserInputAnswers = typeof ProviderUserInputAnswers.Type;
 
+/**
+ * A note typed beside a chosen option, keyed by question id. `answers` still carries the
+ * combined text for providers and servers that have no notes field; `answer` is the choice alone.
+ */
+export const UserInputAnswerNotes = Schema.Record(
+  Schema.String,
+  Schema.Struct({
+    answer: Schema.Union([Schema.String, Schema.Array(Schema.String)]),
+    note: Schema.String,
+  }),
+);
+export type UserInputAnswerNotes = typeof UserInputAnswerNotes.Type;
+
+/** The notes for answered questions only, so a stray note cannot add an answer. */
+export function answeredUserInputNotes(
+  answers: ProviderUserInputAnswers,
+  notes: UserInputAnswerNotes | undefined,
+): UserInputAnswerNotes | undefined {
+  if (notes === undefined) return undefined;
+  const entries = Object.entries(notes).filter(([questionId]) =>
+    Object.hasOwn(answers, questionId),
+  );
+  return entries.length === 0 ? undefined : Object.fromEntries(entries);
+}
+
+/** Answers with each noted question's choice in place of its combined text. */
+export function userInputAnswerChoices(
+  answers: ProviderUserInputAnswers,
+  notes: UserInputAnswerNotes | undefined,
+): ProviderUserInputAnswers {
+  const noted = answeredUserInputNotes(answers, notes);
+  if (noted === undefined) return answers;
+  return Object.fromEntries(
+    Object.entries(answers).map(([questionId, answer]) => [
+      questionId,
+      Object.hasOwn(noted, questionId) ? noted[questionId]!.answer : answer,
+    ]),
+  );
+}
+
 export const UserInputAttachments = Schema.Record(
   Schema.String,
   Schema.Array(Schema.Union([ChatImageAttachment, ChatFileAttachment])).pipe(

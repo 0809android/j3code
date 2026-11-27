@@ -79,6 +79,14 @@ describe("parseElicitationForm", () => {
       q0: "Yes",
       q1__other: "Only on Fridays",
     });
+    // A note typed beside a choice fills both fields instead of hiding the choice in the text.
+    assert.deepStrictEqual(
+      form.content(
+        { q0: "Yes\nbut keep SQLite for tests", q1: "No" },
+        { q0: { answer: "Yes", note: "but keep SQLite for tests" } },
+      ),
+      { q0: "Yes", q0__other: "but keep SQLite for tests", q1: "No" },
+    );
 
     // A multi-select answer can carry options and free text together, so both fields stay.
     const multi = parseElicitationForm(

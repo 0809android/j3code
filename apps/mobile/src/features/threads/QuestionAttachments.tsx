@@ -68,7 +68,7 @@ export function QuestionAttachments(props: {
   useEffect(() => () => releaseFocus(), []);
   // A controlled value makes Fabric rebuild the native text on every keystroke, which discards
   // iOS's pending autocorrection. The input owns its text; the only outside write is an option
-  // selection clearing the draft.
+  // selection replacing a suggested answer.
   const inputRef = useRef<TextInputInstance>(null);
   const [initialText] = useState(props.value);
   const nativeText = useRef(props.value);
