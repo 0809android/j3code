@@ -18,7 +18,7 @@ const APP_BUNDLE_ID = isDevelopment
   ? `jp.kinocode.k3code.dev.${devBundleIdSuffix || "local"}`
   : "jp.kinocode.k3code";
 const APP_PROTOCOL_SCHEMES = isDevelopment ? ["k3code-dev"] : ["k3code"];
-const LAUNCHER_VERSION = 20;
+const LAUNCHER_VERSION = 21;
 const developmentMacIconPngPath = NodePath.join(
   repoRoot,
   "assets",
@@ -158,7 +158,7 @@ function writeDevelopmentEnvironmentScript() {
 export function writeDevelopmentLauncherScript(targetBinaryPath, electronBinaryPath) {
   const script = makeDevelopmentLauncherScript({
     electronBinaryPath,
-    mainEntryPath: NodePath.join(desktopDir, "dist-electron", "main.cjs"),
+    mainEntryPath: NodePath.join(desktopDir, "dist-electron", "boot.cjs"),
     desktopRoot: desktopDir,
     environmentFilePath: developmentEnvironmentFilePath,
   });

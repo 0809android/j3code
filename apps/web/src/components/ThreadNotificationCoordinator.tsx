@@ -246,6 +246,8 @@ export function startThreadNotifications(
     const delegatedUnderParent = registry.get(environmentThreadShells.delegatedUnderParentAtom);
     const changed: Array<[NotificationState | undefined, NotificationState]> = [];
     for (const rawThread of threads) {
+      // Children reach the user through their parent, which asks or finishes for them. A
+      // delegated task whose parent this client cannot list is in the lists, so it notifies.
       if (
         isShownUnderParent(
           { environmentId, threadId: rawThread.id },

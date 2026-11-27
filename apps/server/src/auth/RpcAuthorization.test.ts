@@ -111,6 +111,12 @@ describe("RPC authorization scopes", () => {
     expect(requiredScopeForRpcMethod("server.getSettings")).toBe(AuthOrchestrationReadScope);
   });
 
+  it("keeps the thread history preview, which walks every thread, behind maintain scope", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.serverPreviewThreadHistoryTrim)).toBe(
+      AuthEnvironmentMaintainScope,
+    );
+  });
+
   it("rejects unknown RPC method names", () => {
     for (const method of ["server.notRegistered", "toString", "constructor"]) {
       expect(() => requiredScopeForRpcMethod(method)).toThrow(
@@ -546,6 +552,35 @@ describe("settings mutation authorization", () => {
         ).toMatchObject({ requiredPermission: AuthProvidersManageScope });
         expect(handled).toBe(false);
       }),
+  );
+
+  it.effect("does not let a settings grant start a thread history trim", () =>
+    Effect.gen(function* () {
+      let handled = 0;
+      const client = yield* RpcTest.makeClient(group).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            group.toLayerHandler(WS_METHODS.serverUpdateSettings, () =>
+              Effect.sync(() => {
+                handled++;
+                return DEFAULT_SERVER_SETTINGS;
+              }),
+            ),
+            RpcAuthorization.layer([AuthSettingsWriteScope]),
+          ),
+        ),
+      );
+      expect(
+        yield* client[WS_METHODS.serverUpdateSettings]({
+          patch: { storageCleanup: { threadHistoryAfterDays: 30 } },
+        }).pipe(Effect.flip),
+      ).toMatchObject({ requiredPermission: AuthEnvironmentMaintainScope });
+      expect(handled).toBe(0);
+      yield* client[WS_METHODS.serverUpdateSettings]({
+        patch: { storageCleanup: { logsAfterDays: 7 } },
+      });
+      expect(handled).toBe(1);
+    }),
   );
 
   it.effect("does not let a settings grant send a named secret to a gateway it picks", () =>

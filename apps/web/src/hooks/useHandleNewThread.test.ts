@@ -226,6 +226,11 @@ vi.mock("@t3tools/client-runtime/state/project-grouping", () => ({
   deriveLogicalProjectKeyFromSettings: () => "remote-project",
   getProjectOrderKey: () => "remote-project",
   selectProjectGroupingSettings: () => ({}),
+  // The real helper; a partial import would load the mocked contracts.
+  resolveConnectedDefaultThreadEnvironmentId: (
+    saved: string | null | undefined,
+    connectedEnvironmentIds: ReadonlyArray<string>,
+  ) => (saved != null && connectedEnvironmentIds.includes(saved) ? saved : null),
 }));
 vi.mock("../state/entities", () => {
   const project = {
@@ -426,5 +431,66 @@ describe("default project selection", () => {
         "last-used:project",
       ),
     ).toEqual({ environmentId: "first", projectId: "project" });
+    expect(
+      resolveDefaultProjectRef(
+        projects,
+        [],
+        "last-used:project",
+        true,
+        undefined,
+        "first" as EnvironmentId,
+      ),
+    ).toEqual({ environmentId: "first", projectId: "project" });
+    expect(
+      resolveDefaultProjectRef(
+        projects,
+        [],
+        "last-used:project",
+        true,
+        undefined,
+        "missing" as EnvironmentId,
+      ),
+    ).toEqual({ environmentId: "last-used", projectId: "project" });
+    expect(
+      resolveDefaultProjectRef(
+        projects,
+        [],
+        "last-used:project",
+        false,
+        undefined,
+        "first" as EnvironmentId,
+      ),
+    ).toEqual({ environmentId: "last-used", projectId: "project" });
+  });
+
+  it("uses the default machine's project only while that machine is connected", () => {
+    const projects = [
+      { id: "project", environmentId: "first", workspaceRoot: "/first" },
+      { id: "project", environmentId: "last-used", workspaceRoot: "/last-used" },
+    ].map((project) => ({
+      ...project,
+      id: project.id as ProjectId,
+      environmentId: project.environmentId as EnvironmentId,
+      title: project.environmentId,
+      defaultModelSelection: null,
+      scripts: [],
+      createdAt: "2026-11-09T00:00:00.000Z",
+      updatedAt: "2026-11-09T00:00:00.000Z",
+    }));
+    const resolve = (connected: ReadonlyArray<string>) =>
+      resolveDefaultProjectRef(
+        projects,
+        [],
+        "last-used:project",
+        true,
+        undefined,
+        "first" as EnvironmentId,
+        connected as ReadonlyArray<EnvironmentId>,
+      );
+    expect(resolve(["first", "last-used"])).toEqual({
+      environmentId: "first",
+      projectId: "project",
+    });
+    expect(resolve(["last-used"])).toEqual({ environmentId: "last-used", projectId: "project" });
   });
 });

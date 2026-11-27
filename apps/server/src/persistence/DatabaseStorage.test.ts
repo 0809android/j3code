@@ -1,6 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -199,3 +200,32 @@ it.effect(
       yield* Deferred.await(restarted);
     }).pipe(Effect.provide(testConfig.pipe(Layer.provideMerge(NodeServices.layer)))),
 );
+
+it("drains a reclaim backlog at 10% duty, but backs off when a pass frees nothing", () => {
+  const pass = (freedPages: number, remainingPages: number, failed = false) => ({
+    freedPages,
+    remainingPages,
+    failed,
+  });
+  const delayMs = (result: ReturnType<typeof pass>, elapsedMs: number) =>
+    Duration.toMillis(DatabaseStorage.reclaimDelay(result, BigInt(elapsedMs) * 1_000_000n));
+  // A quick pass with pages left over keeps the short interval.
+  assert.equal(delayMs(pass(1024, 4096), 10), 5_000);
+  // A slow pass rests nine times as long as it ran, so reclaiming never exceeds 10% duty.
+  assert.equal(delayMs(pass(1024, 4096), 2_000), 18_000);
+  // Nothing freed (a stuck vacuum, or other writes reusing free pages) is the usual minute.
+  assert.equal(delayMs(pass(0, 4096), 10), 60_000);
+  // A failed pass returns to the minute even if it freed some pages first.
+  assert.equal(delayMs(pass(512, 4096, true), 10), 60_000);
+  // Nothing left is the usual minute.
+  assert.equal(delayMs(pass(1024, 0), 10), 60_000);
+});
+
+it("counts freed pages by the file shrinking, not by the freelist falling", () => {
+  // A concurrent write reusing free pages lowers the freelist but leaves the file as large.
+  assert.equal(DatabaseStorage.pagesShrunk(5_000, 5_000), 0);
+  // A concurrent write that grows the file never counts as negative progress.
+  assert.equal(DatabaseStorage.pagesShrunk(5_000, 5_010), 0);
+  // incremental_vacuum shrinks the file by the pages it returned.
+  assert.equal(DatabaseStorage.pagesShrunk(5_000, 4_999), 1);
+});

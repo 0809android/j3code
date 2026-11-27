@@ -19,8 +19,11 @@ import * as ProjectionMaintenance from "../orchestration-v2/ProjectionMaintenanc
 import * as DatabaseMaintenance from "./DatabaseMaintenance.ts";
 import { forkParked } from "../serverActivation.ts";
 
-// Bound each reclaim pass to one minute of churn.
+// One reclaim pass is a short burst of this many pages. A backlog repeats it only after resting
+// nine times as long as the pass took (see `reclaimDelay`), so reclaiming stays at 10% duty.
 const RECLAIM_PAGES_PER_PASS = 1024;
+const RECLAIM_BACKLOG_MIN_REST_MS = 5_000;
+const RECLAIM_IDLE_REST_MS = 60_000;
 const COMPACTION_INTERVAL = Duration.hours(6);
 
 export class DatabaseStorage extends Context.Service<
@@ -117,25 +120,44 @@ const make = Effect.gen(function* () {
     Effect.catch((cause) => Effect.logWarning("Database storage inspection failed", { cause })),
   );
 
-  const reclaim = Effect.suspend(() => {
+  // The driver steps once per statement; incremental_vacuum frees one page per step. Yield between pages.
+  // Pages freed are counted from the file's page count, which only incremental_vacuum shrinks. The
+  // freelist also falls when a concurrent write reuses a free page and rises when one deletes rows.
+  const reclaimPass = Effect.suspend(() => {
+    const result: ReclaimResult = { freedPages: 0, remainingPages: 0, failed: false };
     let page = 0;
     return Effect.gen(function* () {
-      if (!(yield* readLayout).incrementalVacuum) return;
-      // The driver steps once per statement; incremental_vacuum frees one page per step. Yield between pages.
-      for (; page < RECLAIM_PAGES_PER_PASS; page++) {
+      if (!(yield* readLayout).incrementalVacuum) return result;
+      let previousPageCount: number | null = null;
+      for (;;) {
         const free = yield* sql<{ readonly freelist_count: number }>`PRAGMA freelist_count`;
-        if ((free[0]?.freelist_count ?? 0) === 0) break;
+        const total = yield* sql<{ readonly page_count: number }>`PRAGMA page_count`;
+        const current = free[0]?.freelist_count ?? 0;
+        const pageCount = total[0]?.page_count ?? 0;
+        if (previousPageCount !== null) {
+          result.freedPages += pagesShrunk(previousPageCount, pageCount);
+        }
+        result.remainingPages = current;
+        if (current === 0 || page >= RECLAIM_PAGES_PER_PASS) break;
         yield* sql`PRAGMA incremental_vacuum(1)`;
+        previousPageCount = pageCount;
+        page++;
         yield* Effect.yieldNow;
       }
+      return result;
     }).pipe(
       Effect.ensuring(Effect.suspend(() => Effect.annotateCurrentSpan("db.reclaimed_pages", page))),
-      Effect.catch((cause) => Effect.logWarning("Database space reclamation failed", { cause })),
+      Effect.catch((cause) =>
+        Effect.logWarning("Database space reclamation failed", { cause }).pipe(
+          Effect.as({ ...result, failed: true }),
+        ),
+      ),
       // The pass owns the span; tracing each page's two PRAGMAs floods the server trace.
       Effect.withTracerEnabled(false),
       Effect.withSpan("DatabaseStorage.reclaim"),
     );
   });
+  const reclaim = Effect.asVoid(reclaimPass);
 
   // Even a pass that deletes nothing scans the event store. Persist completion
   // so restarting does not trigger another scan before the six-hour interval.
@@ -186,7 +208,16 @@ const make = Effect.gen(function* () {
     publishStatus.pipe(
       Effect.andThen(Effect.sleep("1 minute")),
       Effect.andThen(
-        reclaim.pipe(Effect.andThen(publishStatus), Effect.repeat(Schedule.spaced("1 minute"))),
+        Effect.gen(function* () {
+          const started = yield* Clock.monotonicTimeNanos;
+          const result = yield* reclaimPass;
+          const elapsed = (yield* Clock.monotonicTimeNanos) - started;
+          yield* publishStatus;
+          return reclaimDelay(result, elapsed);
+        }).pipe(
+          Effect.flatMap((delay) => Effect.sleep(delay)),
+          Effect.forever,
+        ),
       ),
     ),
   );
@@ -243,5 +274,26 @@ const make = Effect.gen(function* () {
     requestReclaim,
   });
 });
+
+/** Pages the file lost between two readings; growth from concurrent writes counts as none. */
+export const pagesShrunk = (previousPageCount: number, pageCount: number) =>
+  Math.max(0, previousPageCount - pageCount);
+
+export type ReclaimResult = {
+  freedPages: number;
+  remainingPages: number;
+  failed: boolean;
+};
+
+// A pass that freed pages and left more behind repeats after resting nine times as long as the
+// pass took (at least five seconds), a 10% duty on WAL writes. A pass that freed nothing (even
+// by a failed `incremental_vacuum`) would repeat forever, so it waits the usual minute, as do
+// failed and finished ones.
+export const reclaimDelay = (result: ReclaimResult, elapsedNanos: bigint) =>
+  !result.failed && result.freedPages > 0 && result.remainingPages > 0
+    ? Duration.millis(
+        Math.max(RECLAIM_BACKLOG_MIN_REST_MS, Math.ceil((Number(elapsedNanos) / 1_000_000) * 9)),
+      )
+    : Duration.millis(RECLAIM_IDLE_REST_MS);
 
 export const layer = Layer.effect(DatabaseStorage, make);

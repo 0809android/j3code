@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import * as Schema from "effect/Schema";
 
+import { AuthEnvironmentMaintainScope, AuthSettingsWriteScope } from "./auth.ts";
 import { type CommandId, ProjectId } from "./baseSchemas.ts";
 import {
   ProviderDriverKind,
@@ -17,6 +18,7 @@ import {
   idleCompactionPatch,
   PROJECT_SCOPED_SERVER_SETTING_KEYS,
   requiredScopesForProjectMutation,
+  requiredScopesForServerSettingsPatch,
   resolveIdleCompaction,
   resolveProjectProviderInstanceEnabled,
   resolveProviderInstanceEnabled,
@@ -67,6 +69,7 @@ describe("storage cleanup settings", () => {
       worktreeKeepWhen: "uncommitted-changes",
       browserArtifactsAfterDays: null,
       logsAfterDays: null,
+      threadHistoryAfterDays: null,
     });
   });
 
@@ -544,6 +547,22 @@ describe("voice settings", () => {
   });
 });
 
+describe("ClientSettings.defaultThreadEnvironmentId", () => {
+  it("defaults to null (automatic) and accepts an environment id or null in patches", () => {
+    expect(decodeClientSettings({}).defaultThreadEnvironmentId).toBeNull();
+    expect(
+      decodeClientSettings({ defaultThreadEnvironmentId: "env-spark" }).defaultThreadEnvironmentId,
+    ).toBe("env-spark");
+    expect(
+      decodeClientSettingsPatch({ defaultThreadEnvironmentId: "env-spark" })
+        .defaultThreadEnvironmentId,
+    ).toBe("env-spark");
+    expect(
+      decodeClientSettingsPatch({ defaultThreadEnvironmentId: null }).defaultThreadEnvironmentId,
+    ).toBeNull();
+  });
+});
+
 describe("server model preferences", () => {
   it("distinguishes unmigrated lists from deliberately cleared lists", () => {
     expect(decodeServerSettings({})).toMatchObject({
@@ -553,5 +572,25 @@ describe("server model preferences", () => {
     const input = { favorites: [], providerModelPreferences: {} };
     expect(encodeServerSettings(decodeServerSettings(input))).toMatchObject(input);
     expect(decodeServerSettingsPatch(input)).toEqual(input);
+  });
+});
+
+describe("thread history trim settings authorization", () => {
+  it("asks for maintain authority when the patch turns threadHistoryAfterDays on", () => {
+    expect(
+      requiredScopesForServerSettingsPatch({ storageCleanup: { threadHistoryAfterDays: 30 } }),
+    ).toEqual([AuthSettingsWriteScope, AuthEnvironmentMaintainScope]);
+  });
+
+  it("lets settings write alone turn threadHistoryAfterDays off", () => {
+    expect(
+      requiredScopesForServerSettingsPatch({ storageCleanup: { threadHistoryAfterDays: null } }),
+    ).toEqual([AuthSettingsWriteScope]);
+  });
+
+  it("keeps other storage cleanup settings on settings write", () => {
+    expect(requiredScopesForServerSettingsPatch({ storageCleanup: { logsAfterDays: 7 } })).toEqual([
+      AuthSettingsWriteScope,
+    ]);
   });
 });

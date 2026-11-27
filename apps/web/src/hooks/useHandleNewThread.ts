@@ -5,6 +5,7 @@ import {
 } from "@t3tools/client-runtime/environment";
 import {
   DEFAULT_SERVER_SETTINGS,
+  type EnvironmentId,
   type ScopedProjectRef,
   type T3ProjectFile,
   type ThreadId,
@@ -25,6 +26,7 @@ import { orderItemsByPreferredIds } from "../components/Sidebar.logic";
 import {
   deriveLogicalProjectKeyFromSettings,
   getProjectOrderKey,
+  resolveConnectedDefaultThreadEnvironmentId,
   resolveGroupDefaultProject,
   selectProjectGroupingSettings,
   type ProjectGroupingSettings,
@@ -480,17 +482,41 @@ export function resolveDefaultProjectRef(
   lastUsedProjectKey: string | null,
   fallbackReady = true,
   groupingSettings?: ProjectGroupingSettings,
+  savedDefaultThreadEnvironmentId: EnvironmentId | null | undefined = null,
+  connectedEnvironmentIds: ReadonlyArray<EnvironmentId> | undefined = undefined,
 ): ScopedProjectRef | null {
-  const lastUsed = projects.find(
+  const defaultThreadEnvironmentId =
+    connectedEnvironmentIds === undefined
+      ? savedDefaultThreadEnvironmentId
+      : resolveConnectedDefaultThreadEnvironmentId(
+          savedDefaultThreadEnvironmentId,
+          connectedEnvironmentIds,
+        );
+  const activeProjects = projects.filter((project) => project.archivedAt == null);
+  const lastUsed = activeProjects.find(
     (project) =>
-      project.archivedAt == null &&
       scopedProjectKey(scopeProjectRef(project.environmentId, project.id)) === lastUsedProjectKey,
   );
-  if (lastUsed) return scopeProjectRef(lastUsed.environmentId, lastUsed.id);
+  // Until the project list is complete, the last used project stands in, whatever its environment.
+  if (
+    lastUsed &&
+    (!fallbackReady ||
+      defaultThreadEnvironmentId === null ||
+      lastUsed.environmentId === defaultThreadEnvironmentId)
+  ) {
+    return scopeProjectRef(lastUsed.environmentId, lastUsed.id);
+  }
   if (!fallbackReady) return null;
-  const liveProjects = projects.filter((project) => project.archivedAt == null);
+  const preferredPool =
+    defaultThreadEnvironmentId !== null
+      ? activeProjects.filter((project) => project.environmentId === defaultThreadEnvironmentId)
+      : [];
+  const candidatePool = preferredPool.length > 0 ? preferredPool : activeProjects;
+  if (preferredPool.length === 0 && lastUsed) {
+    return scopeProjectRef(lastUsed.environmentId, lastUsed.id);
+  }
   const [firstProject] = orderItemsByPreferredIds({
-    items: liveProjects,
+    items: candidatePool,
     preferredIds: projectOrder,
     getId: getProjectOrderKey,
     getPreferenceIds: (project) => [
@@ -500,18 +526,20 @@ export function resolveDefaultProjectRef(
   });
   if (!firstProject) return null;
   const defaultProject = groupingSettings
-    ? resolveGroupDefaultProject(firstProject, liveProjects, groupingSettings)
+    ? resolveGroupDefaultProject(firstProject, activeProjects, groupingSettings)
     : firstProject;
   return scopeProjectRef(defaultProject.environmentId, defaultProject.id);
 }
 
 export function useHandleNewThread() {
   const projectOrder = useUiStateStore((store) => store.projectOrder);
+  const savedDefaultThreadEnvironmentId = useClientSettings((s) => s.defaultThreadEnvironmentId);
   const [lastUsedProjectKey] = useLocalStorage(
     LAST_USED_PROJECT_STORAGE_KEY,
     null,
     lastUsedProjectKeySchema,
   );
+  const connectedEnvironmentIds = useAtomValue(environmentSummaries.connectedEnvironmentIdsAtom);
   const defaultProjectFallbackReady = useAtomValue(
     defaultProjectFallbackReadyAtom(lastUsedProjectKey),
   );
@@ -536,6 +564,8 @@ export function useHandleNewThread() {
     lastUsedProjectKey,
     defaultProjectFallbackReady,
     groupingSettings,
+    savedDefaultThreadEnvironmentId,
+    connectedEnvironmentIds,
   );
 
   return {

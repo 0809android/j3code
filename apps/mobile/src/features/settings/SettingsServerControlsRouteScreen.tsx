@@ -1,8 +1,13 @@
+import { useAtomValue } from "@effect/atom-react";
+import { AsyncResult } from "effect/reactivity";
 import { msg, T, useGT, useMessages, Var } from "gt-react-native";
 import { useNavigation } from "@react-navigation/native";
 import { SettingsRow } from "./components/SettingsRow";
-import { AuthSettingsWriteScope } from "@t3tools/contracts";
+import { AuthSettingsWriteScope, type EnvironmentId } from "@t3tools/contracts";
 import { readEnvironmentScope, useEnvironmentsWithScope } from "../../state/session";
+import { useEnvironments } from "../../state/environments";
+import { mobilePreferencesAtom, saveMobilePreferences } from "../../state/preferences";
+import { useAtomCommand } from "../../state/use-atom-command";
 import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
 import { AppText as Text } from "../../components/ui/AppText";
 import {
@@ -26,6 +31,7 @@ import { SettingsScreen } from "./components/SettingsScreen";
 import { useSettingsEnvironmentMenu } from "./components/SettingsEnvironmentFilterHeader";
 import { BranchNamingSettings } from "./components/BranchNamingSettings";
 import { DatabaseStorageNotice } from "./components/DatabaseStorageNotice";
+import { ThreadHistoryTrimSection } from "./components/ThreadHistoryTrimSection";
 import { ListChoiceRow as SettingsChoiceRow } from "../../components/ui/ListChoiceRow";
 import { SettingsSection } from "./components/SettingsSection";
 import { SettingsSwitchRow } from "./components/SettingsSwitchRow";
@@ -43,6 +49,7 @@ import {
   type ScopedMobileSettingsTarget,
 } from "./settings-scoped-server";
 import { PullRequestGlyph } from "../pull-requests/pullRequestGlyphs";
+import { resolveDefaultThreadEnvironmentId } from "@t3tools/client-runtime/state/project-grouping";
 import { AutoSettleSettingsRows } from "./ThreadSettingsSections";
 import { supportsSharedSettingsSync } from "@t3tools/client-runtime/state/shared-settings";
 
@@ -190,6 +197,19 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const { selectedTargets, projectGroups, selectedProjectKey } = useSettingsEnvironmentFilter();
+  const { environments } = useEnvironments();
+  const preferencesResult = useAtomValue(mobilePreferencesAtom);
+  const defaultThreadEnvironmentId = resolveDefaultThreadEnvironmentId(
+    AsyncResult.isSuccess(preferencesResult)
+      ? preferencesResult.value.defaultThreadEnvironmentId
+      : null,
+    (environmentId) =>
+      environments.some((environment) => environment.environmentId === environmentId),
+  );
+  const savePreferences = useAtomCommand(saveMobilePreferences);
+  const setDefaultThreadEnvironmentId = (environmentId: EnvironmentId | null) => {
+    void savePreferences({ defaultThreadEnvironmentId: environmentId });
+  };
   const selectedProject = projectGroups.find((group) => group.key === selectedProjectKey);
   const writableEnvironments = useEnvironmentsWithScope(selectedTargets, AuthSettingsWriteScope);
   const projectSelected = selectedProjectKey !== null;
@@ -324,6 +344,26 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
             ) : null}
             {props.page === "threads" ? (
               <>
+                {!projectSelected && environments.length > 0 ? (
+                  <SettingsSection title={gt("Default environment")}>
+                    <SettingsChoiceRow
+                      label={gt("Automatic")}
+                      description={gt("Use your last used or primary environment.")}
+                      selected={defaultThreadEnvironmentId === null}
+                      separated={false}
+                      onPress={() => setDefaultThreadEnvironmentId(null)}
+                    />
+                    {environments.map((environment) => (
+                      <SettingsChoiceRow
+                        key={environment.environmentId}
+                        label={environment.label}
+                        selected={defaultThreadEnvironmentId === environment.environmentId}
+                        separated
+                        onPress={() => setDefaultThreadEnvironmentId(environment.environmentId)}
+                      />
+                    ))}
+                  </SettingsSection>
+                ) : null}
                 <SettingsSection
                   title={gt("Default workspace")}
                   footer={managed("defaultThreadEnvMode")}
@@ -532,6 +572,7 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
                     )}
                   />
                 ) : null}
+                {!projectSelected ? <ThreadHistoryTrimSection targets={selectedTargets} /> : null}
                 {!projectSelected ? (
                   <SettingsSection title={gt("Manage environments")}>
                     {selectedTargets.map((target) => (

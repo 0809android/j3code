@@ -1,7 +1,10 @@
-import type {
-  StorageCleanupReport,
-  StorageCleanupSettings,
-  WorktreeCleanupRules,
+import {
+  SUGGESTED_THREAD_HISTORY_AFTER_DAYS,
+  type EnvironmentId,
+  type StorageCleanupReport,
+  type StorageCleanupSettings,
+  type ThreadHistoryTrimReport,
+  type WorktreeCleanupRules,
 } from "@t3tools/contracts";
 import { resolvePastedPath } from "@t3tools/shared/path";
 import { resolveWorktreeCleanup } from "@t3tools/shared/projectSettings";
@@ -11,6 +14,11 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
+import {
+  describeThreadHistoryTrimSchedule,
+  isThreadHistoryTrimDisabled,
+  sumThreadHistoryTrimReports,
+} from "@t3tools/client-runtime/state/threadHistoryTrim";
 import { formatBytes } from "../../lib/formatBytes";
 import { environmentAtomList, environmentIdsKey } from "../../state/environmentAtomList";
 import { serverEnvironment } from "../../state/server";
@@ -19,6 +27,15 @@ import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { useNowMinute } from "../../hooks/useNowMinute";
 import { useDebouncedValue } from "../../state/queries";
 import { AnimatedHeight } from "../AnimatedHeight";
+import {
+  AlertDialog,
+  AlertDialogClose,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogPopup,
+  AlertDialogTitle,
+} from "../ui/alert-dialog";
 import { Button } from "../ui/button";
 import { toastManager } from "../ui/toast";
 import { msg, T, useGT, useMessages, Var } from "gt-react";
@@ -120,11 +137,18 @@ function RetentionControl({
   value,
   onChange,
   minimum = 1,
+  defaultDays = 8,
+  disabled = false,
+  allowSwitchOff = false,
 }: {
   label: string;
   value: number | null;
   onChange: (value: number | null, onFailed: () => void) => void;
   minimum?: number;
+  defaultDays?: number;
+  disabled?: boolean;
+  /** Keeps the switch usable for turning a rule that is on off, while the age stays locked. */
+  allowSwitchOff?: boolean;
 }) {
   const gt = useGT();
   const [draft, setDraft] = useState(value);
@@ -190,6 +214,7 @@ function RetentionControl({
           step={1}
           size="sm"
           className="w-auto"
+          disabled={disabled}
           onValueChange={(next) => {
             setDraft(next);
             setEnabling((current) => (current === "draft" ? "edited" : current));
@@ -253,11 +278,12 @@ function RetentionControl({
       <Switch
         aria-label={label}
         checked={on}
+        disabled={disabled && !(allowSwitchOff && on)}
         // Keeps focus in the age field, so switching off never commits an edited age first.
         onMouseDown={(event) => event.preventDefault()}
         onCheckedChange={(enabled) => {
           if (enabled) {
-            setDraft(8);
+            setDraft(defaultDays);
             setEnabling("draft");
           } else switchOff();
         }}
@@ -557,6 +583,284 @@ function CleanupSection() {
           )}
         </FoldedSettingsSection>
       )}
+    </SettingsSection>
+  );
+}
+
+const threadHistoryTrimPermissionsAtom = environmentAtomList(
+  "web-thread-history-trim-permissions",
+  serverEnvironment.trimThreadHistory.permissionAtom,
+);
+const threadHistoryTrimStatusAtom = environmentAtomList(
+  "web-thread-history-trim-status",
+  (environmentId) => serverEnvironment.threadHistoryTrim({ environmentId, input: {} }),
+);
+
+const formatTrimDate = (iso: string) =>
+  new Date(iso).toLocaleDateString(undefined, { dateStyle: "medium" });
+
+const hasThreadHistoryTrim = (environment: {
+  readonly serverConfig?: {
+    readonly environment: { readonly capabilities: { readonly threadHistoryTrim?: boolean } };
+  } | null;
+}) => environment.serverConfig?.environment.capabilities.threadHistoryTrim === true;
+
+interface TrimTarget {
+  readonly environmentId: EnvironmentId;
+  readonly label: string;
+}
+
+function ThreadHistorySection() {
+  const gt = useGT();
+  const resolve = useMessages();
+  const setting = useSearchableSetting();
+  const { environments, connectedEnvironments, targets } = useSettingsScope();
+  const scopedSettings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  const settings = scopedSettings.storageCleanup;
+  const preview = useAtomCommand(serverEnvironment.previewThreadHistoryTrim);
+  const trim = useAtomCommand(serverEnvironment.trimThreadHistory);
+  const nowMinute = useNowMinute();
+  const nowMs = Date.parse(`${nowMinute}:00.000Z`);
+  // An older server has no such method, so it gets neither a subscription nor a write.
+  const capable = connectedEnvironments.filter(hasThreadHistoryTrim);
+  const environmentIds = environmentIdsKey(capable.map(({ environmentId }) => environmentId));
+  const permissions = useAtomValue(threadHistoryTrimPermissionsAtom(environmentIds));
+  const statuses = useAtomValue(threadHistoryTrimStatusAtom(environmentIds));
+  const writableIds = new Set(
+    environments.filter(hasThreadHistoryTrim).map(({ environmentId }) => environmentId),
+  );
+  const [pending, setPending] = useState<"preview" | "trim" | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirming, setConfirming] = useState<ReadonlyArray<{
+    readonly target: TrimTarget;
+    readonly report: ThreadHistoryTrimReport;
+  }> | null>(null);
+  const targetIdsKey = environmentIdsKey(targets.map((target) => target.environmentId).sort());
+  const mixed =
+    targets.length > 1 &&
+    targets.some(
+      (target) =>
+        target.settings.storageCleanup.threadHistoryAfterDays !== settings.threadHistoryAfterDays,
+    );
+  const settledMixed = useDebouncedValue(`${targetIdsKey}:${mixed}`, 300);
+  const mixedStatus =
+    targets.length > 1 && settledMixed === `${targetIdsKey}:true`
+      ? gt("Mixed across selected machines")
+      : undefined;
+
+  const targetIds = new Set(targets.map((target) => target.environmentId));
+  const supported = capable.filter((environment) => targetIds.has(environment.environmentId));
+  const canMaintain =
+    supported.length > 0 &&
+    supported.every((environment) => permissions[capable.indexOf(environment)] === true);
+  const runnable = supported.filter(
+    (environment) =>
+      permissions[capable.indexOf(environment)] === true &&
+      environment.serverConfig?.settings.storageCleanup.threadHistoryAfterDays != null,
+  );
+  const schedule = supported.flatMap((environment) => {
+    const query = statuses[capable.indexOf(environment)];
+    if (query?._tag !== "Success") return [];
+    if (environment.serverConfig?.settings.storageCleanup.threadHistoryAfterDays == null) return [];
+    const text = describeThreadHistoryTrimSchedule({
+      status: query.value,
+      nowMs,
+      formatDate: formatTrimDate,
+      resolve,
+    });
+    const label = settingsScopeEnvironmentLabel(environment, connectedEnvironments);
+    return [
+      {
+        environmentId: environment.environmentId,
+        text: supported.length > 1 ? `${label}: ${text}` : text,
+      },
+    ];
+  });
+
+  const runOn = async (
+    command: typeof trim,
+    list: ReadonlyArray<TrimTarget>,
+    failureTitle: (label: string) => string,
+  ) => {
+    const results = await Promise.all(
+      list.map(async (target) => {
+        const result = await command({ environmentId: target.environmentId, input: {} });
+        if (result._tag === "Success") return { target, report: result.value };
+        if (!isAtomCommandInterrupted(result)) {
+          const failure = squashAtomCommandFailure(result);
+          toastManager.add({
+            type: "error",
+            title: failureTitle(target.label),
+            description: isThreadHistoryTrimDisabled(failure)
+              ? gt("Thread history trimming is turned off.")
+              : String(failure),
+          });
+        }
+        return null;
+      }),
+    );
+    return results.filter((result) => result !== null);
+  };
+  const runnableTargets = runnable.map((environment) => ({
+    environmentId: environment.environmentId,
+    label: environment.label,
+  }));
+
+  const checkTrim = async () => {
+    setPending("preview");
+    const results = await runOn(preview, runnableTargets, (label) =>
+      gt("Could not check old threads on {label}", { label }),
+    ).finally(() => setPending(null));
+    if (results.length === 0) return;
+    setConfirming(results);
+    setConfirmOpen(true);
+  };
+
+  const confirmTrim = async () => {
+    const list = (confirming ?? [])
+      .filter(({ report }) => report.threadCount > 0)
+      .map(({ target }) => target);
+    setConfirmOpen(false);
+    setPending("trim");
+    const results = await runOn(trim, list, (label) =>
+      gt("Could not trim threads on {label}", { label }),
+    ).finally(() => setPending(null));
+    if (results.length === 0) return;
+    // The server queues the pass without estimating again, so the size is the preview's.
+    const previewed = results.flatMap(
+      ({ target }) =>
+        confirming?.filter((entry) => entry.target.environmentId === target.environmentId) ?? [],
+    );
+    const { threadCount: count, estimatedBytes } = sumThreadHistoryTrimReports(
+      previewed.map(({ report }) => report),
+    );
+    toastManager.add({
+      type: "success",
+      title: gt("{count, plural, one {Trimming {count} thread} other {Trimming {count} threads}}", {
+        count,
+      }),
+      description: gt("About {size} of tool output and reasoning is being removed.", {
+        size: formatBytes(estimatedBytes),
+      }),
+    });
+  };
+
+  const confirmingTotals = sumThreadHistoryTrimReports(
+    (confirming ?? []).map(({ report }) => report),
+  );
+  const threadCount = confirmingTotals.threadCount;
+  const size = formatBytes(confirmingTotals.estimatedBytes);
+  const update = (patch: Partial<StorageCleanupSettings>, options: SaveOptions) =>
+    updateSettings({ storageCleanup: patch }, { ...options, onlyEnvironmentIds: writableIds });
+
+  return (
+    <SettingsSection id="storage-thread-history" title={gt("Thread history")}>
+      <AnimatedHeight>
+        <SettingsRow
+          title={setting("storage-thread-history").title}
+          status={mixedStatus}
+          managedPaths={["storageCleanup.threadHistoryAfterDays"]}
+          description={gt(
+            "After this many days without use, a thread's finished tool output and reasoning are deleted to save space. Messages, plans, file changes and attachments stay, and you can still search and continue the thread. Running, pinned and snoozed threads and threads with an open pull request are skipped.",
+          )}
+          serverScoped
+          control={
+            <RetentionControl
+              label={gt("Trim old threads")}
+              value={settings.threadHistoryAfterDays}
+              defaultDays={SUGGESTED_THREAD_HISTORY_AFTER_DAYS}
+              disabled={!canMaintain}
+              allowSwitchOff
+              onChange={(threadHistoryAfterDays, onFailed) =>
+                update({ threadHistoryAfterDays }, { onFailed })
+              }
+            />
+          }
+        />
+      </AnimatedHeight>
+      <SettingsRow
+        title={gt("Trim now")}
+        description={
+          <>
+            {gt("Shows how many threads qualify, then deletes their old output once you confirm.")}
+            {schedule.map(({ environmentId, text }) => (
+              <span key={environmentId} className="block">
+                {text}
+              </span>
+            ))}
+          </>
+        }
+        control={
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={pending !== null || runnable.length === 0}
+              onClick={() => void checkTrim()}
+            >
+              {pending === "preview"
+                ? gt("Checking…")
+                : pending === "trim"
+                  ? gt("Trimming…")
+                  : gt("Trim now")}
+            </Button>
+            <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+              <AlertDialogPopup>
+                {threadCount > 0 ? (
+                  <>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>{gt("Trim old threads?")}</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        {gt(
+                          "{count, plural, one {Delete tool output and reasoning from {count} unused thread, about {size}? Messages, plans, file changes and attachments are kept. This can't be undone.} other {Delete tool output and reasoning from {count} unused threads, about {size}? Messages, plans, file changes and attachments are kept. This can't be undone.}}",
+                          { count: threadCount, size },
+                        )}
+                        {(confirming?.length ?? 0) > 1
+                          ? confirming?.map(({ target, report }) => (
+                              <span key={target.environmentId} className="mt-1 block">
+                                {gt(
+                                  "{label}: {count, plural, one {{count} thread} other {{count} threads}}, about {size}",
+                                  {
+                                    label: target.label,
+                                    count: report.threadCount,
+                                    size: formatBytes(report.estimatedBytes),
+                                  },
+                                )}
+                              </span>
+                            ))
+                          : null}
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogClose render={<Button variant="outline" />}>
+                        {gt("Cancel")}
+                      </AlertDialogClose>
+                      <Button variant="destructive" onClick={() => void confirmTrim()}>
+                        {gt("Trim threads")}
+                      </Button>
+                    </AlertDialogFooter>
+                  </>
+                ) : (
+                  <>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>{gt("Nothing to trim")}</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        {gt("No threads have gone unused long enough yet.")}
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogClose render={<Button variant="outline" />}>
+                        {gt("Close")}
+                      </AlertDialogClose>
+                    </AlertDialogFooter>
+                  </>
+                )}
+              </AlertDialogPopup>
+            </AlertDialog>
+          </>
+        }
+      />
     </SettingsSection>
   );
 }
@@ -912,10 +1216,19 @@ export function StorageCleanupSections() {
       )}
     />
   );
+  const targetEnvironmentIds = new Set(targets.map((target) => target.environmentId));
+  const threadHistory = connectedEnvironments.some(
+    (environment) =>
+      targetEnvironmentIds.has(environment.environmentId) &&
+      environment.serverConfig?.environment.capabilities.threadHistoryTrim === true,
+  ) ? (
+    <ThreadHistorySection />
+  ) : null;
   if (!supportsStorageCleanup(connectedEnvironments)) {
     return (
       <>
         {databaseStorageNotice}
+        {threadHistory}
         <SettingsSection id="storage-artifacts" title={gt("Artifacts and logs")} variant="plain">
           <StorageCleanupScopeNotice />
         </SettingsSection>
@@ -926,6 +1239,7 @@ export function StorageCleanupSections() {
   return (
     <>
       {databaseStorageNotice}
+      {threadHistory}
       <SettingsSection id="storage-artifacts" title={gt("Artifacts and logs")}>
         <AnimatedHeight>
           <SettingsRow

@@ -1,7 +1,12 @@
 import type {
+  OrchestrationV2DomainEvent,
   OrchestrationV2ThreadProjection,
   OrchestrationV2ThreadStreamItem,
+  ThreadId,
 } from "@t3tools/contracts";
+
+import * as Arr from "effect/Array";
+import * as Effect from "effect/Effect";
 
 import { omitLocalVisibleTurnItems } from "@t3tools/shared/orchestrationV2BoundedSnapshot";
 import { dedupeSnapshotBodies } from "@t3tools/shared/orchestrationV2DedupedBodies";
@@ -115,4 +120,39 @@ export function decideThreadResume(input: {
     afterSequence: input.afterSequence,
     throughSequence: input.highWater,
   };
+}
+
+/** A fork's copy of its source's history trim, which names no rows: read a fresh snapshot. */
+export function invalidatesInheritedRows(
+  event: OrchestrationV2DomainEvent,
+  threadId: ThreadId,
+): boolean {
+  return event.type === "thread.history-trimmed" && event.payload.sourceThreadId !== threadId;
+}
+
+/**
+ * A batch can hold several copies of a source's trim, and only a snapshot read after the last one
+ * means anything: read it once, in the last copy's place, and drop the earlier copies.
+ */
+export function replaceInheritedInvalidations<
+  Item extends OrchestrationV2ThreadStreamItem,
+  Fresh,
+  E,
+  R,
+>(
+  items: Arr.NonEmptyReadonlyArray<Item>,
+  threadId: ThreadId,
+  loadFresh: Effect.Effect<Fresh, E, R>,
+): Effect.Effect<Arr.NonEmptyReadonlyArray<Item | Fresh>, E, R> {
+  const invalidates = (item: Item) =>
+    item.kind === "event" && invalidatesInheritedRows(item.event, threadId);
+  const last = items.findLastIndex(invalidates);
+  if (last === -1) return Effect.succeed(items);
+  return Effect.map(loadFresh, (fresh) => {
+    const replaced = items.flatMap((item, index): ReadonlyArray<Item | Fresh> => {
+      if (index === last) return [fresh];
+      return invalidates(item) ? [] : [item];
+    });
+    return Arr.isReadonlyArrayNonEmpty(replaced) ? replaced : [fresh];
+  });
 }

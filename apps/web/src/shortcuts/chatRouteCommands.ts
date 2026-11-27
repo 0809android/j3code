@@ -19,13 +19,16 @@ import {
 import { createScratchProjectActions } from "../hooks/useScratchProject";
 import { getClientSettings } from "../hooks/useSettings";
 import { startNewThreadFromContext } from "../lib/chatThreadActions";
-import { selectProjectGroupingSettings } from "@t3tools/client-runtime/state/project-grouping";
+import {
+  resolveConnectedDefaultThreadEnvironmentId,
+  selectProjectGroupingSettings,
+} from "@t3tools/client-runtime/state/project-grouping";
 import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { buildSidebarProjectSnapshots } from "../sidebarProjectGrouping";
 import { readProjects, readThreadShell } from "../state/entities";
 import { defaultProjectFallbackReadyAtom } from "../state/projects";
-import { environmentPresentations } from "../state/presentation";
+import { environmentPresentations, environmentSummaries } from "../state/presentation";
 import { primaryEnvironmentIdAtom } from "../state/primaryEnvironment";
 import { readEnvironmentScope } from "../state/session";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
@@ -52,6 +55,13 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
     registry: appAtomRegistry,
     handleNewThread,
   });
+
+  // A default that is removed or offline reads as Automatic.
+  const readDefaultThreadEnvironmentId = () =>
+    resolveConnectedDefaultThreadEnvironmentId(
+      getClientSettings().defaultThreadEnvironmentId,
+      appAtomRegistry.get(environmentSummaries.connectedEnvironmentIdsAtom),
+    );
 
   const readRouteTarget = () => resolveThreadRouteTarget(router.state.matches.at(-1)?.params ?? {});
   const readRouteThreadRef = () => {
@@ -83,6 +93,7 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
         ? drafts.getDraftThread(target.threadRef)
         : drafts.getDraftSession(target.draftId)
       : null;
+    const clientSettings = getClientSettings();
     return {
       activeDraftThread,
       activeThread: activeThread ?? undefined,
@@ -91,20 +102,26 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
         useUiStateStore.getState().projectOrder,
         lastUsedProjectKey,
         appAtomRegistry.get(defaultProjectFallbackReadyAtom(lastUsedProjectKey)),
-        selectProjectGroupingSettings(getClientSettings()),
+        selectProjectGroupingSettings(clientSettings),
+        readDefaultThreadEnvironmentId(),
+        appAtomRegistry.get(environmentSummaries.connectedEnvironmentIdsAtom),
       ),
       handleNewThread,
     };
   };
   // Grouped like the sidebar, so the shortcut and the New thread button agree.
-  const readProjectGroups = () =>
-    buildSidebarProjectSnapshots({
+  const readProjectGroups = () => {
+    const clientSettings = getClientSettings();
+    const primaryEnvironmentId = appAtomRegistry.get(primaryEnvironmentIdAtom);
+    return buildSidebarProjectSnapshots({
       projects: readProjects(),
       groupScratchProjects: true,
-      settings: selectProjectGroupingSettings(getClientSettings()),
-      primaryEnvironmentId: appAtomRegistry.get(primaryEnvironmentIdAtom),
+      settings: selectProjectGroupingSettings(clientSettings),
+      primaryEnvironmentId,
+      preferredEnvironmentId: readDefaultThreadEnvironmentId() ?? primaryEnvironmentId,
       resolveEnvironmentLabel: () => null,
     });
+  };
   const canOperatePreview = (environmentId: EnvironmentId) =>
     readEnvironmentScope(environmentId, AuthPreviewOperateScope);
 

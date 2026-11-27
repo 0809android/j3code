@@ -3,10 +3,15 @@ import { useMessages } from "gt-react";
 import { orderItemsByPreferredIds, sortSidebarV2ProjectGroups } from "../components/Sidebar.logic";
 import {
   getProjectOrderKey,
+  resolveConnectedDefaultThreadEnvironmentId,
   selectProjectGroupingSettings,
 } from "@t3tools/client-runtime/state/project-grouping";
 import { buildSidebarProjectSnapshots } from "../sidebarProjectGrouping";
-import { useEnvironmentIdentities, usePrimaryEnvironmentId } from "../state/environments";
+import {
+  useConnectedEnvironmentIds,
+  useEnvironmentIdentities,
+  usePrimaryEnvironmentId,
+} from "../state/environments";
 import { useDelegatedUnderParent, useProjects, useQuietThreadShells } from "../state/entities";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
 import { useClientSettings } from "./useSettings";
@@ -20,9 +25,16 @@ export function useSidebarProjectGroups() {
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const sortOrder = useClientSettings((s) => s.sidebarProjectSortOrder);
   const groupingSettings = useClientSettings(selectProjectGroupingSettings);
+  const defaultThreadEnvironmentId = useClientSettings((s) => s.defaultThreadEnvironmentId);
   const environments = useEnvironmentIdentities();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const resolve = useMessages();
+  const connectedEnvironmentIds = useConnectedEnvironmentIds();
+  // A default that is removed or offline reads as Automatic, so the primary stays preferred.
+  const defaultEnvironmentId = resolveConnectedDefaultThreadEnvironmentId(
+    defaultThreadEnvironmentId,
+    connectedEnvironmentIds,
+  );
   const orderedProjects = orderItemsByPreferredIds({
     items: projects,
     preferredIds: projectOrder,
@@ -41,6 +53,7 @@ export function useSidebarProjectGroups() {
       groupScratchProjects: true,
       settings: groupingSettings,
       primaryEnvironmentId,
+      preferredEnvironmentId: defaultEnvironmentId ?? primaryEnvironmentId,
       resolveEnvironmentLabel: (environmentId) => labels.get(environmentId) ?? null,
     },
     resolve,

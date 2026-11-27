@@ -1,6 +1,7 @@
 import { managedRuntimeModeDenial } from "@t3tools/client-runtime/contract-labels";
 import {
   DEFAULT_SERVER_SETTINGS,
+  type EnvironmentId,
   type ModelSelection,
   type WorktreeSubmodules,
 } from "@t3tools/contracts";
@@ -9,7 +10,7 @@ import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { useNavigate } from "@tanstack/react-router";
 import { T, useGT, useMessages } from "gt-react";
 
-import { useClientSettings } from "../../hooks/useSettings";
+import { updateClientSettings, useClientSettings } from "../../hooks/useSettings";
 import {
   defaultModelSelectionsAreMixed,
   getCustomModelOptionsByInstance,
@@ -26,7 +27,10 @@ import { TraitsPicker } from "../chat/TraitsPicker";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { toastManager } from "../ui/toast";
 import { Switch } from "../ui/switch";
-import { resolveDefaultModelSettingsPresentation } from "./ProjectDefaultsSettings.logic";
+import {
+  resolveDefaultModelSettingsPresentation,
+  resolveDefaultThreadEnvironmentSelection,
+} from "./ProjectDefaultsSettings.logic";
 import type { ProjectSettingsCategory } from "./ProjectSettingsPanel";
 import { useSearchableSetting } from "./settingsSearch";
 import { useSettingsScope } from "./SettingsScopeContext";
@@ -350,6 +354,62 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
     />
   ) : null;
 
+  const selectedDefaultEnvironment = resolveDefaultThreadEnvironmentSelection(
+    clientSettings.defaultThreadEnvironmentId,
+    environments,
+  );
+  const defaultThreadEnvironmentId = selectedDefaultEnvironment?.environmentId ?? null;
+  const environmentRow = !isProjectScope ? (
+    <SettingsRow
+      {...searchableSetting("default-thread-environment")}
+      description={gt(
+        "Default environment for new threads. Automatic uses your last used or primary environment.",
+      )}
+      resetAction={
+        defaultThreadEnvironmentId !== null ? (
+          <SettingResetButton
+            ariaLabel={gt("Reset default environment to automatic")}
+            onClick={() => void updateClientSettings({ defaultThreadEnvironmentId: null })}
+          />
+        ) : null
+      }
+      control={
+        <Select
+          value={defaultThreadEnvironmentId ?? "automatic"}
+          onValueChange={(value) => {
+            if (value === "automatic") {
+              void updateClientSettings({ defaultThreadEnvironmentId: null });
+            } else if (value) {
+              void updateClientSettings({
+                defaultThreadEnvironmentId: value as EnvironmentId,
+              });
+            }
+          }}
+        >
+          <SelectTrigger size="sm" aria-label={gt("Default thread environment")}>
+            <SelectValue>
+              {(value: string | null) =>
+                value === null || value === "automatic"
+                  ? gt("Automatic")
+                  : selectedDefaultEnvironment?.label
+              }
+            </SelectValue>
+          </SelectTrigger>
+          <SelectPopup align="end" alignItemWithTrigger={false}>
+            <SelectItem value="automatic">
+              <T>Automatic</T>
+            </SelectItem>
+            {environments.map((environment) => (
+              <SelectItem key={environment.environmentId} value={environment.environmentId}>
+                {environment.label}
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
+      }
+    />
+  ) : null;
+
   return (
     <SettingsSection
       id={category === "source-control" ? "source-control-defaults" : "project-defaults"}
@@ -363,6 +423,7 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
         </>
       ) : category === "general" ? (
         <>
+          {environmentRow}
           {modelRow}
           {fallbackRow}
           <SettingsRow

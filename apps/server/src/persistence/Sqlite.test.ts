@@ -149,6 +149,7 @@ it.effect("upgrades an existing database on a read-write worker connection", () 
     assert.deepInclude(workerData.slice(startedBefore), {
       filename: dbPath,
       readOnly: false,
+      role: "writer",
       requireWal: false,
       allowExtension: false,
       prepareCacheSize: 200,

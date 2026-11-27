@@ -24,6 +24,7 @@ import {
 import {
   commandlessCommandLabel,
   contextCompactionLabel,
+  systemNoticeText,
   liveThoughtLine,
   toolItemForDisplay,
   workEntryDisplayIndicatesToolFailure,
@@ -659,7 +660,7 @@ function itemSummary(
   resolve: MessageResolver,
 ): string {
   if (item.type === "notification") return item.summary;
-  if (item.type === "system_notice") return item.message;
+  if (item.type === "system_notice") return systemNoticeText(item, resolve);
   if (item.type === "compaction") return contextCompactionLabel(item, resolve);
   const title =
     (item.type === "dynamic_tool"
@@ -769,7 +770,7 @@ function itemPreview(item: OrchestrationV2TurnItem, resolve: MessageResolver): s
     case "run_interrupt_request":
     case "run_interrupt_result":
     case "system_notice":
-      return item.message || null;
+      return systemNoticeText(item, resolve) || null;
     case "error":
       return item.failure.message;
     case "compaction":

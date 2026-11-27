@@ -2,6 +2,7 @@ import { EasDeviceHostConfigs, SimlockDeviceHostConfigs, SshDeviceHostConfigs } 
 import {
   AuthOrchestrationOperateScope,
   AuthAccessWriteScope,
+  AuthEnvironmentMaintainScope,
   AuthRelayConfigureScope,
   AuthSettingsWriteScope,
   AuthProvidersManageScope,
@@ -615,6 +616,10 @@ export const ClientSettingsSchema = Schema.Struct({
   // Opt-in TeX typesetting in rendered Markdown. Off keeps math parsing and
   // KaTeX out of the render path entirely.
   mathRenderingEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  // Preferred environment for new threads. Null selects automatically (last used or primary).
+  defaultThreadEnvironmentId: Schema.NullOr(EnvironmentId).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
 });
 export type ClientSettings = typeof ClientSettingsSchema.Type;
 
@@ -1364,6 +1369,37 @@ export const StorageCleanupReport = Schema.Struct({
 });
 export type StorageCleanupReport = typeof StorageCleanupReport.Type;
 
+/** Deleting history cannot be undone, so it starts only once someone sets days; this is the first value offered. */
+export const SUGGESTED_THREAD_HISTORY_AFTER_DAYS = 30;
+
+/** What a thread-history trim pass removes, or would remove when `dryRun`. */
+export const ThreadHistoryTrimReport = Schema.Struct({
+  dryRun: Schema.Boolean,
+  afterDays: Schema.Int,
+  threadCount: Schema.Int,
+  itemCount: Schema.Int,
+  /** Stored size of the removed rows; the file shrinks by about this once free pages are reclaimed. */
+  estimatedBytes: Schema.Number,
+});
+export type ThreadHistoryTrimReport = typeof ThreadHistoryTrimReport.Type;
+
+/** Trimming was asked for while the setting is off, so nothing was queued. */
+export class ThreadHistoryTrimDisabledError extends Schema.TaggedError<ThreadHistoryTrimDisabledError>()(
+  "ThreadHistoryTrimDisabledError",
+  {},
+) {
+  override get message() {
+    return "Thread history trimming is turned off.";
+  }
+}
+
+/** ISO times. A pass runs every 30 days; both are null until the first one finishes. */
+export const ThreadHistoryTrimStatus = Schema.Struct({
+  lastTrimmedAt: Schema.NullOr(Schema.String),
+  nextTrimAt: Schema.NullOr(Schema.String),
+});
+export type ThreadHistoryTrimStatus = typeof ThreadHistoryTrimStatus.Type;
+
 export const StorageCleanupSettings = Schema.Struct({
   worktreeKeepWhen: WorktreeKeepWhen.pipe(
     Schema.withDecodingDefault(Effect.succeed("uncommitted-changes")),
@@ -1379,6 +1415,10 @@ export const StorageCleanupSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
   logsAfterDays: StorageRetentionDays.pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  /** Days a thread goes unused before its finished tool output and reasoning are deleted; null, the default, leaves it off. */
+  threadHistoryAfterDays: StorageRetentionDays.pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
 });
 export type StorageCleanupSettings = typeof StorageCleanupSettings.Type;
 
@@ -1898,6 +1938,7 @@ export const ServerSettingsPatch = Schema.Struct({
       worktreeUnchanged: Schema.optionalKey(Schema.Boolean),
       browserArtifactsAfterDays: Schema.optionalKey(StorageRetentionDays),
       logsAfterDays: Schema.optionalKey(StorageRetentionDays),
+      threadHistoryAfterDays: Schema.optionalKey(StorageRetentionDays),
     }),
   ),
   worktreesDirectory: Schema.optionalKey(TrimmedString),
@@ -2061,6 +2102,10 @@ export function requiredScopesForServerSettingsPatch(
   let changesSettings = false;
   let changesAccess = false;
   let changesRelay = false;
+  // Turning the trim on starts deleting history without waiting out the 30 days, so a settings
+  // write alone must not be able to do it. Turning it off deletes nothing.
+  const threadHistoryAfterDays = patch.storageCleanup?.threadHistoryAfterDays;
+  const changesThreadHistoryTrim = threadHistoryAfterDays != null;
   for (const [key, value] of Object.entries(patch)) {
     if (value === undefined) continue;
     if (key === "relay") {
@@ -2093,6 +2138,7 @@ export function requiredScopesForServerSettingsPatch(
       : []),
     ...(changesProviders ? [AuthProvidersManageScope] : []),
     ...(changesAccess ? [AuthAccessWriteScope] : []),
+    ...(changesThreadHistoryTrim ? [AuthEnvironmentMaintainScope] : []),
     // The relay opens this host to devices elsewhere, as linking T3 Connect does.
     ...(changesRelay ? [AuthRelayConfigureScope] : []),
   ];
@@ -2202,5 +2248,6 @@ export const ClientSettingsPatch = Schema.Struct({
   snapShotAnimations: Schema.optionalKey(Schema.Boolean),
   wordWrap: Schema.optionalKey(Schema.Boolean),
   mathRenderingEnabled: Schema.optionalKey(Schema.Boolean),
+  defaultThreadEnvironmentId: Schema.optionalKey(Schema.NullOr(EnvironmentId)),
 });
 export type ClientSettingsPatch = typeof ClientSettingsPatch.Type;

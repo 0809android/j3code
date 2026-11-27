@@ -86,6 +86,23 @@ export function contextCompactionLabel(
     : resolve(msg("Context compacted"));
 }
 
+/** A notice's text in the user's language; rows without a kind, such as saved ones, show `message`. */
+export function systemNoticeText(
+  item: {
+    readonly message: string;
+    readonly historyTrim?: { readonly afterDays: number } | undefined;
+  },
+  resolve: MFunctionType = mFallback,
+): string {
+  if (item.historyTrim === undefined) return item.message;
+  return resolve(
+    msg(
+      "Tool output and reasoning above this point were removed to save space after {afterDays, plural, one {{afterDays} day} other {{afterDays} days}} without use. Messages, plans and file changes are kept.",
+      { afterDays: item.historyTrim.afterDays },
+    ),
+  );
+}
+
 export interface WorkLogPresentationEntry {
   readonly questionAnswer?: import("@t3tools/contracts").UserInputAttachmentAnswerPayload;
   readonly id: string;

@@ -12,8 +12,10 @@ import {
   type OrchestrationV2ThreadProjection,
   type OrchestrationV2TurnItem,
 } from "@t3tools/contracts";
+import { it as effectIt } from "@effect/vitest";
 import { describe, expect, it } from "vite-plus/test";
 import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { boundedSnapshotProjection } from "@t3tools/shared/orchestrationV2BoundedSnapshot";
 
@@ -21,6 +23,7 @@ import {
   buildBoundedThreadStreamSnapshot,
   decideThreadResume,
   isThreadReplayRawPayloadSafe,
+  replaceInheritedInvalidations,
   threadReplayEncodedBytes,
   THREAD_RESUME_MAX_RAW_PAYLOAD_BYTES,
   THREAD_RESUME_MAX_REPLAY_ENCODED_BYTES,
@@ -308,4 +311,72 @@ describe("compact bounded snapshots", () => {
     }
     expect(boundedSnapshotProjection(decodedCompact)).toEqual(decodedFull.projection);
   });
+});
+
+describe("replaceInheritedInvalidations", () => {
+  const copy = (sequence: number) =>
+    ({
+      kind: "event",
+      sequence,
+      event: {
+        type: "thread.history-trimmed",
+        threadId: THREAD_ID,
+        payload: {
+          sourceThreadId: ThreadId.make("thread-stream-source"),
+          turnItemIds: [],
+          nodeIds: [],
+        },
+      },
+    }) as unknown as OrchestrationV2ThreadStreamItem;
+  const other = (sequence: number) =>
+    ({
+      kind: "event",
+      sequence,
+      event: { type: "thread.visited", threadId: THREAD_ID },
+    }) as unknown as OrchestrationV2ThreadStreamItem;
+  const run = Effect.fn("ThreadStreamTest.run")(function* (
+    items: Parameters<typeof replaceInheritedInvalidations>[0],
+  ) {
+    let loads = 0;
+    const fresh = Effect.sync(() => ({ kind: "fresh" as const, load: ++loads }));
+    const result = yield* replaceInheritedInvalidations(items, THREAD_ID, fresh);
+    return { result, loads: () => loads };
+  });
+
+  effectIt.effect("reads one snapshot for several copies, in place of the last one", () =>
+    Effect.gen(function* () {
+      const first = other(1);
+      const between = other(3);
+      const { result, loads } = yield* run([first, copy(2), between, copy(4), other(5)]);
+      expect(loads()).toBe(1);
+      expect(result.map((item) => item.kind)).toEqual(["event", "event", "fresh", "event"]);
+      expect(result[0]).toBe(first);
+      expect(result[1]).toBe(between);
+    }),
+  );
+
+  effectIt.effect("passes a batch without copies through without reading", () =>
+    Effect.gen(function* () {
+      const items = [other(1), other(2)] as const;
+      const { result, loads } = yield* run(items);
+      expect(loads()).toBe(0);
+      expect(result).toBe(items);
+    }),
+  );
+
+  effectIt.effect("ignores a trim of the thread's own rows", () =>
+    Effect.gen(function* () {
+      const own = {
+        kind: "event",
+        sequence: 1,
+        event: {
+          type: "thread.history-trimmed",
+          threadId: THREAD_ID,
+          payload: { sourceThreadId: THREAD_ID, turnItemIds: [], nodeIds: [] },
+        },
+      } as unknown as OrchestrationV2ThreadStreamItem;
+      const { loads } = yield* run([own]);
+      expect(loads()).toBe(0);
+    }),
+  );
 });

@@ -270,6 +270,26 @@ describe("resolveDraftProjectSelection", () => {
       kind: "pick",
     });
   });
+
+  it("starts a share draft on the connected default machine, ahead of the last project", () => {
+    const projects = [makeProject("remembered", "other-environment"), makeProject("here")];
+    const scopes = [makeScope([projects[0]!]), makeScope([projects[1]!])];
+    const shareDraft = {
+      incomingShareId: "share",
+      pickerClosed: false,
+      lastProject: { environmentId: "other-environment", projectId: "remembered" },
+    };
+    expect(
+      resolveDraftProjectSelection(null, projects, scopes, {
+        ...shareDraft,
+        defaultEnvironmentId: EnvironmentId.make("environment"),
+      }),
+    ).toEqual({ kind: "select", project: projects[1] });
+    expect(resolveDraftProjectSelection(null, projects, scopes, shareDraft)).toEqual({
+      kind: "select",
+      project: projects[0],
+    });
+  });
 });
 
 describe("newTaskDestination", () => {
@@ -281,6 +301,10 @@ describe("newTaskDestination", () => {
     readonly current?: EnvironmentProject;
     readonly filtered?: EnvironmentProject;
     readonly last?: { readonly environmentId: string; readonly projectId: string };
+    readonly defaultEnvironmentId?: string;
+    /** Defaults to the default machine alone being connected. */
+    readonly connected?: ReadonlyArray<string>;
+    readonly projectGroups?: Parameters<typeof newTaskDestination>[0]["projectGroups"];
   }) {
     return newTaskDestination({
       projects: options.projects,
@@ -294,9 +318,210 @@ describe("newTaskDestination", () => {
         environmentId: options.filtered.environmentId,
         projectId: options.filtered.id,
       },
+      defaultEnvironmentId: options.defaultEnvironmentId
+        ? EnvironmentId.make(options.defaultEnvironmentId)
+        : null,
+      connectedEnvironmentIds: new Set(
+        (
+          options.connected ?? (options.defaultEnvironmentId ? [options.defaultEnvironmentId] : [])
+        ).map((id) => EnvironmentId.make(id)),
+      ),
+      projectGroups: options.projectGroups,
       lastProject: options.last,
     });
   }
+
+  it("starts on the default machine without a thread-list filter", () => {
+    const projects = [
+      makeProject("elsewhere", "other-environment"),
+      makeProject("first", "environment"),
+      makeProject("second", "environment"),
+    ];
+    expect(
+      destination({ useLastProject: true, projects, defaultEnvironmentId: "environment" }),
+    ).toEqual({
+      draft: { requestId: "request", environmentId: "environment", projectId: "first" },
+    });
+    expect(
+      destination({
+        useLastProject: true,
+        projects,
+        defaultEnvironmentId: "environment",
+        last: { environmentId: "environment", projectId: "second" },
+      }),
+    ).toEqual({
+      draft: { requestId: "request", environmentId: "environment", projectId: "second" },
+    });
+  });
+
+  it("starts on the first project of the user's order on the default machine", () => {
+    const projects = [
+      makeProject("elsewhere", "other-environment"),
+      makeProject("first-in-list", "environment"),
+      makeProject("first-in-order", "environment"),
+    ];
+    const group = (projectId: string, environmentId: string) => ({
+      memberProjectRefs: [
+        {
+          environmentId: EnvironmentId.make(environmentId),
+          projectId: ProjectId.make(projectId),
+        },
+      ],
+      pinned: false,
+      archived: false,
+    });
+    expect(
+      destination({
+        useLastProject: true,
+        projects,
+        defaultEnvironmentId: "environment",
+        projectGroups: [
+          group("elsewhere", "other-environment"),
+          group("first-in-order", "environment"),
+          group("first-in-list", "environment"),
+        ],
+      }),
+    ).toEqual({
+      draft: { requestId: "request", environmentId: "environment", projectId: "first-in-order" },
+    });
+  });
+
+  it("starts on the remembered project when every default machine project is in an archived group", () => {
+    const projects = [makeProject("remembered", "other-environment"), makeProject("old")];
+    const ref = (project: EnvironmentProject) => ({
+      environmentId: project.environmentId,
+      projectId: project.id,
+    });
+    expect(
+      destination({
+        useLastProject: true,
+        projects,
+        defaultEnvironmentId: "environment",
+        last: { environmentId: "other-environment", projectId: "remembered" },
+        projectGroups: [
+          { memberProjectRefs: [ref(projects[1]!)], pinned: false, archived: true },
+          { memberProjectRefs: [ref(projects[0]!)], pinned: false, archived: false },
+        ],
+      }),
+    ).toEqual({
+      draft: { requestId: "request", environmentId: "other-environment", projectId: "remembered" },
+    });
+  });
+
+  it("does not start on the remembered project when it is in an archived group", () => {
+    const projects = [makeProject("remembered", "other-environment"), makeProject("here")];
+    const ref = (project: EnvironmentProject) => ({
+      environmentId: project.environmentId,
+      projectId: project.id,
+    });
+    expect(
+      destination({
+        useLastProject: true,
+        projects: [projects[0]!],
+        last: { environmentId: "other-environment", projectId: "remembered" },
+        projectGroups: [{ memberProjectRefs: [ref(projects[0]!)], pinned: false, archived: true }],
+      }),
+    ).toEqual({ draft: { requestId: "request" } });
+  });
+
+  it("starts on the repository root, not a subfolder, within the first group", () => {
+    const repositoryKey = "github.com/t3tools/t3code";
+    const projects = [
+      makeProject("subfolder", "environment", {
+        workspaceRoot: "/work/repo/packages/app",
+        repositoryKey,
+      }),
+      makeProject("root", "environment", { workspaceRoot: "/work/repo", repositoryKey }),
+    ].map((project) => ({
+      ...project,
+      repositoryIdentity: { ...project.repositoryIdentity!, rootPath: "/work/repo" },
+    }));
+    expect(
+      destination({
+        useLastProject: true,
+        projects,
+        defaultEnvironmentId: "environment",
+        projectGroups: [
+          {
+            memberProjectRefs: projects.map((project) => ({
+              environmentId: project.environmentId,
+              projectId: project.id,
+            })),
+            pinned: false,
+            archived: false,
+          },
+        ],
+      }),
+    ).toEqual({ draft: { requestId: "request", environmentId: "environment", projectId: "root" } });
+  });
+
+  it("prefers the default machine over a remembered project on another machine", () => {
+    const projects = [makeProject("remembered", "other-environment"), makeProject("here")];
+    expect(
+      destination({
+        useLastProject: true,
+        projects,
+        defaultEnvironmentId: "environment",
+        last: { environmentId: "other-environment", projectId: "remembered" },
+      }),
+    ).toEqual({ draft: { requestId: "request", environmentId: "environment", projectId: "here" } });
+  });
+
+  it("starts on the default machine when it is connected", () => {
+    const projects = [makeProject("remembered", "other-environment"), makeProject("here")];
+    expect(
+      destination({
+        useLastProject: true,
+        projects,
+        defaultEnvironmentId: "environment",
+        connected: ["environment", "other-environment"],
+        last: { environmentId: "other-environment", projectId: "remembered" },
+      }),
+    ).toEqual({ draft: { requestId: "request", environmentId: "environment", projectId: "here" } });
+  });
+
+  it("starts on the remembered project when the default machine is not connected", () => {
+    const projects = [makeProject("remembered", "other-environment"), makeProject("here")];
+    expect(
+      destination({
+        useLastProject: true,
+        projects,
+        defaultEnvironmentId: "environment",
+        connected: ["other-environment"],
+        last: { environmentId: "other-environment", projectId: "remembered" },
+      }),
+    ).toEqual({
+      draft: { requestId: "request", environmentId: "other-environment", projectId: "remembered" },
+    });
+  });
+
+  it("keeps the current project ahead of the default machine", () => {
+    const projects = [makeProject("default"), makeProject("current", "other-environment")];
+    expect(
+      destination({
+        useLastProject: true,
+        projects,
+        current: projects[1],
+        defaultEnvironmentId: "environment",
+      }),
+    ).toEqual({
+      draft: { requestId: "request", environmentId: "other-environment", projectId: "current" },
+    });
+  });
+
+  it("falls back to the remembered project when the default machine has no open project", () => {
+    const projects = [makeProject("remembered", "other-environment")];
+    expect(
+      destination({
+        useLastProject: true,
+        projects,
+        defaultEnvironmentId: "environment",
+        last: { environmentId: "other-environment", projectId: "remembered" },
+      }),
+    ).toEqual({
+      draft: { requestId: "request", environmentId: "other-environment", projectId: "remembered" },
+    });
+  });
 
   it("starts in the current thread's project ahead of the filtered and remembered ones", () => {
     const projects = [makeProject("remembered"), makeProject("current", "other-environment")];

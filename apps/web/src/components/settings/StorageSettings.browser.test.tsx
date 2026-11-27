@@ -1,6 +1,11 @@
 import { act, fakeTimers, render, type Screen } from "../../../test/render";
 import { RegistryProvider } from "@effect/atom-react";
-import { DEFAULT_SERVER_SETTINGS, type StorageCleanupReport } from "@t3tools/contracts";
+import {
+  DEFAULT_SERVER_SETTINGS,
+  ThreadHistoryTrimDisabledError,
+  type StorageCleanupReport,
+} from "@t3tools/contracts";
+import * as Cause from "effect/Cause";
 import { type ReactNode } from "react";
 import { expect, it, vi } from "vite-plus/test";
 import { userEvent } from "vite-plus/test/browser";
@@ -13,6 +18,13 @@ const state = vi.hoisted(() => ({
   run: vi.fn(),
   update: vi.fn(),
   report: null as StorageCleanupReport | null,
+  selected: null as string[] | null,
+  threadHistoryTrim: false,
+  /** When set, only these machines report the capability. */
+  threadHistoryTrimOn: null as string[] | null,
+  offline: [] as string[],
+  maintainDenied: false,
+  statusSubscriptions: [] as string[],
 }));
 
 vi.mock(import("../../state/server"), async (original) => {
@@ -20,6 +32,12 @@ vi.mock(import("../../state/server"), async (original) => {
   const { Atom } = await import("effect/reactivity");
   const report = Atom.make(() => ({ _tag: "Success", value: state.report, waiting: false }));
   const allowed = Atom.make(true);
+  const denied = Atom.make(false);
+  const trimStatus = Atom.make(() => ({
+    _tag: "Success",
+    value: { lastTrimmedAt: null, nextTrimAt: null },
+    waiting: false,
+  }));
   return {
     ...actual,
     serverEnvironment: {
@@ -29,6 +47,14 @@ vi.mock(import("../../state/server"), async (original) => {
         ...actual.serverEnvironment.runStorageCleanup,
         permissionAtom: () => allowed,
       },
+      trimThreadHistory: {
+        ...actual.serverEnvironment.trimThreadHistory,
+        permissionAtom: () => (state.maintainDenied ? denied : allowed),
+      },
+      threadHistoryTrim: ((args: { environmentId: string }) => {
+        state.statusSubscriptions.push(args.environmentId);
+        return trimStatus;
+      }) as never,
     },
   };
 });
@@ -49,6 +75,9 @@ vi.mock(import("./SettingsScopeContext"), async (original) => ({
             storageCleanup: true,
             storageCleanupRun: true,
             settledWorktreeCleanup: true,
+            threadHistoryTrim:
+              state.threadHistoryTrim &&
+              (state.threadHistoryTrimOn?.includes(environmentId) ?? true),
           },
         },
       },
@@ -56,8 +85,12 @@ vi.mock(import("./SettingsScopeContext"), async (original) => ({
     return {
       scope: { kind: "all" },
       environments,
-      connectedEnvironments: environments,
-      targets: state.targets,
+      connectedEnvironments: environments.filter(
+        ({ environmentId }) => !state.offline.includes(environmentId),
+      ),
+      targets: state.selected
+        ? state.targets.filter(({ environmentId }) => state.selected?.includes(environmentId))
+        : state.targets,
       target: null,
     };
   }) as never,
@@ -94,6 +127,7 @@ vi.mock(import("../ui/toast"), async (original) => {
   return { ...actual, toastManager: { ...actual.toastManager, add: vi.fn() } };
 });
 
+import { toastManager } from "../ui/toast";
 import { StorageCleanupSections } from "./StorageSettings";
 
 function setup() {
@@ -108,6 +142,7 @@ function setup() {
       worktreeUnchanged: false,
       browserArtifactsAfterDays: null,
       logsAfterDays: null,
+      threadHistoryAfterDays: null,
     },
     projectSettingsOverrides: {},
   };
@@ -116,6 +151,11 @@ function setup() {
     settings: state.settings,
   }));
   state.report = null;
+  state.selected = null;
+  state.threadHistoryTrim = false;
+  state.threadHistoryTrimOn = null;
+  state.offline = [];
+  state.maintainDenied = false;
   state.run.mockReset();
   state.update.mockReset();
 }
@@ -358,4 +398,126 @@ it("settles mixed retention statuses independently across selected machines", as
   await screen.rerender(panel());
   await advance(300);
   await expect.element(screen.getByTestId("logs-retention-status")).not.toBeInTheDocument();
+});
+
+it("trims thread history only on the machines picked in the settings scope", async () => {
+  setup();
+  state.threadHistoryTrim = true;
+  state.settings = {
+    ...state.settings,
+    storageCleanup: { ...state.settings.storageCleanup, threadHistoryAfterDays: 30 },
+  };
+  state.targets = ["env-a", "env-b"].map((environmentId) => ({
+    environmentId,
+    settings: state.settings,
+  }));
+  state.selected = ["env-a"];
+  state.run.mockResolvedValue({
+    _tag: "Success",
+    value: { dryRun: true, afterDays: 30, threadCount: 2, itemCount: 5, estimatedBytes: 1024 },
+  });
+  await using screen = await render(panel());
+  const trimNow = Array.from(screen.container.querySelectorAll("button")).find(
+    (button) => button.textContent === "Trim now",
+  )!;
+  await act(async () => trimNow.click());
+
+  expect(state.run.mock.calls.map(([input]) => input.environmentId)).toEqual(["env-a"]);
+});
+
+it("shows an error, not the trimming toast, when the server says trimming was turned off", async () => {
+  setup();
+  state.threadHistoryTrim = true;
+  state.settings = {
+    ...state.settings,
+    storageCleanup: { ...state.settings.storageCleanup, threadHistoryAfterDays: 30 },
+  };
+  state.targets = [{ environmentId: "env-a", settings: state.settings }];
+  state.run
+    .mockResolvedValueOnce({
+      _tag: "Success",
+      value: { dryRun: true, afterDays: 30, threadCount: 2, itemCount: 5, estimatedBytes: 1024 },
+    })
+    .mockResolvedValueOnce({
+      _tag: "Failure",
+      cause: Cause.fail(new ThreadHistoryTrimDisabledError()),
+    });
+  vi.mocked(toastManager.add).mockClear();
+  await using screen = await render(panel());
+  const clickButton = (label: string) =>
+    act(async () =>
+      Array.from(document.querySelectorAll("button"))
+        .find((button) => button.textContent === label)!
+        .click(),
+    );
+  await clickButton("Trim now");
+  await clickButton("Trim threads");
+
+  expect(screen.container).toBeTruthy();
+  const toasts = vi.mocked(toastManager.add).mock.calls.map(([toast]) => toast);
+  expect(toasts).toHaveLength(1);
+  expect(toasts[0]).toMatchObject({
+    type: "error",
+    description: "Thread history trimming is turned off.",
+  });
+});
+
+it("keeps the thread history switch usable when a selected machine is offline", async () => {
+  setup();
+  state.threadHistoryTrim = true;
+  state.offline = ["env-b"];
+  await using screen = await render(panel());
+
+  await expect.element(screen.getByRole("switch", { name: "Trim old threads" })).not.toBeDisabled();
+});
+
+it("lets someone without maintenance access turn thread history trimming off, not on", async () => {
+  setup();
+  state.threadHistoryTrim = true;
+  state.maintainDenied = true;
+  state.settings = {
+    ...state.settings,
+    storageCleanup: { ...state.settings.storageCleanup, threadHistoryAfterDays: 30 },
+  };
+  state.targets = ["env-a", "env-b"].map((environmentId) => ({
+    environmentId,
+    settings: state.settings,
+  }));
+  await using screen = await render(panel());
+  const trimSwitch = screen.getByRole("switch", { name: "Trim old threads" });
+
+  await expect.element(trimSwitch).not.toBeDisabled();
+  await expect.element(screen.getByLabelText("Trim old threads in days")).toBeDisabled();
+  await userEvent.click(trimSwitch);
+  expect(saves()).toEqual([{ threadHistoryAfterDays: null }]);
+});
+
+it("shows thread history when only some selected machines support it", async () => {
+  setup();
+  state.threadHistoryTrim = true;
+  state.threadHistoryTrimOn = ["env-a"];
+  await using screen = await render(panel());
+
+  await expect.element(screen.getByRole("switch", { name: "Trim old threads" })).toBeVisible();
+});
+
+it("sends neither the status subscription nor the setting to a machine that lacks thread history", async () => {
+  setup();
+  state.threadHistoryTrim = true;
+  state.threadHistoryTrimOn = ["env-x"];
+  state.statusSubscriptions = [];
+  state.settings = {
+    ...state.settings,
+    storageCleanup: { ...state.settings.storageCleanup, threadHistoryAfterDays: 30 },
+  };
+  state.targets = ["env-x", "env-y"].map((environmentId) => ({
+    environmentId,
+    settings: state.settings,
+  }));
+  await using screen = await render(panel());
+
+  await userEvent.click(screen.getByRole("switch", { name: "Trim old threads" }));
+
+  expect(state.statusSubscriptions).toEqual(["env-x"]);
+  expect([...(state.update.mock.calls[0]?.[1]?.onlyEnvironmentIds ?? [])]).toEqual(["env-x"]);
 });

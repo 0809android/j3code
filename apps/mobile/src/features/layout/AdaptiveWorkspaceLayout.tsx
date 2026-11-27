@@ -54,6 +54,7 @@ import {
   isWorkspaceListPath,
   nativeInspectorColumnWidth,
 } from "../../lib/layout";
+import { resolveDefaultThreadEnvironmentId } from "@t3tools/client-runtime/state/project-grouping";
 import type { ThreadListFilters } from "../../persistence/mobile-preferences";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { useProjects } from "../../state/entities";
@@ -85,8 +86,12 @@ import {
 } from "./workspace/workspace-detail-selection";
 import { startOpeningDetail } from "./workspace/useSelectWorkspaceDetail";
 import { useWorkspaceTabs } from "./workspace/WorkspaceTabsContext";
-import { HomeListOptionsProvider } from "../home/home-list-options";
-import { buildHomeProjectScopes, resolveHomeProjectFilterScope } from "../home/homeThreadList";
+import { createHomeListOptionsAtom, HomeListOptionsProvider } from "../home/home-list-options";
+import {
+  buildHomeProjectScopes,
+  resolveHomeProjectFilterScope,
+  sortHomeProjectScopes,
+} from "../home/homeThreadList";
 import { newTaskDestination, newTaskFilteredProject } from "../threads/new-task-project-selection";
 import { RenderErrorBoundary, RenderFailureView } from "../../components/RenderErrorBoundary";
 import { PaneContext } from "../../components/ui/Pane";
@@ -265,6 +270,9 @@ function AdaptiveWorkspaceLayoutContent(
   const gt = useGT();
   const floatingTabsEnabled = useAndroidFloatingTabs();
   const projectGroupingMode = props.projectGroupingMode;
+  const [homeListOptionsAtom] = useState(() =>
+    createHomeListOptionsAtom(props.savedThreadListFilters),
+  );
   const nativeWorkspace = use(NativeWorkspaceModeContext);
   const usesPresentationHost = use(WorkspacePresentationHostContext);
   const windowDimensions = useWindowDimensions();
@@ -626,6 +634,10 @@ function AdaptiveWorkspaceLayoutContent(
       appAtomRegistry.get(savedConnectionsByIdAtom)[listFilters.environmentId] !== undefined
         ? listFilters.environmentId
         : null;
+    const defaultEnvironmentId = resolveDefaultThreadEnvironmentId(
+      saved?.defaultThreadEnvironmentId,
+      (id) => appAtomRegistry.get(savedConnectionsByIdAtom)[id] !== undefined,
+    );
     const filteredScope = resolveHomeProjectFilterScope(
       buildHomeProjectScopes({ projects, environmentId: listEnvironmentId, projectGroupingMode }),
       projects,
@@ -646,11 +658,24 @@ function AdaptiveWorkspaceLayoutContent(
         filteredProject: filteredScope
           ? newTaskFilteredProject(
               filteredScope,
-              listEnvironmentId,
+              listEnvironmentId ?? defaultEnvironmentId,
               connectedEnvironmentIds,
               saved?.lastThreadProject,
             )
           : undefined,
+        defaultEnvironmentId,
+        connectedEnvironmentIds,
+        // The sidebar's order, so the default machine's first project matches what the list shows.
+        projectGroups: sortHomeProjectScopes({
+          scopes: buildHomeProjectScopes({ projects, environmentId: null, projectGroupingMode }),
+          threads: appAtomRegistry.get(environmentThreadShells.threadShellsAtom),
+          pendingTasks: [],
+          projectSortOrder: appAtomRegistry.get(homeListOptionsAtom).projectSortOrder,
+        }).map((scope) => ({
+          memberProjectRefs: scope.projectRefs,
+          pinned: scope.pinned,
+          archived: scope.archived,
+        })),
         lastProject: saved?.lastThreadProject,
       }),
     );
@@ -987,6 +1012,7 @@ function AdaptiveWorkspaceLayoutContent(
       <HomeListOptionsProvider
         projectGroupingMode={projectGroupingMode}
         savedFilters={props.savedThreadListFilters}
+        optionsAtom={homeListOptionsAtom}
       >
         <AdaptiveWorkspaceContext value={contextValue}>
           <WorkspacePaneStateContext value={paneState}>
@@ -1183,6 +1209,7 @@ function AdaptiveWorkspaceLayoutContent(
     <HomeListOptionsProvider
       projectGroupingMode={projectGroupingMode}
       savedFilters={props.savedThreadListFilters}
+      optionsAtom={homeListOptionsAtom}
     >
       <AdaptiveWorkspaceContext value={contextValue}>
         <WorkspacePaneStateContext value={paneState}>
