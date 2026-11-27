@@ -710,6 +710,18 @@ const make = Effect.gen(function* () {
     return { outcome, removed };
   });
 
+  // A fork made since the table was read inherited rows this trim removes, and may already be in
+  // use. A newer thread means the table is read again, and the rest of the pass uses that one.
+  const currentForkTable = Effect.fn("ThreadHistoryTrim.currentForkTable")(function* (
+    forkTableRef: Ref.Ref<ForkTable>,
+  ) {
+    const known = yield* Ref.get(forkTableRef);
+    if ((yield* readMaxThreadRowid) === known.maxRowid) return known;
+    const fresh = yield* readForkTable();
+    yield* Ref.set(forkTableRef, fresh);
+    return fresh;
+  });
+
   /**
    * Moves each live fork's revision once per thread, after its last page: every copy makes a
    * subscribed fork re-read and resend its whole snapshot, so one per page would repeat that.
@@ -718,13 +730,7 @@ const make = Effect.gen(function* () {
     threadId: ThreadId,
     forkTableRef: Ref.Ref<ForkTable>,
   ) {
-    // A fork made since the table was read inherited rows this trim has removed, so it must hear
-    // of it. A newer thread means the table is read again, and the rest of the pass uses that one.
-    let forkTable = yield* Ref.get(forkTableRef);
-    if ((yield* readMaxThreadRowid) !== forkTable.maxRowid) {
-      forkTable = yield* readForkTable();
-      yield* Ref.set(forkTableRef, forkTable);
-    }
+    const forkTable = yield* currentForkTable(forkTableRef);
     // A fork may have started a run during the rests between pages, so the write waits for the
     // provider snapshots queued for each fork, as any write to that thread does.
     const forks = liveForksOf(forkTable, threadId).map((id) => ({ id }));
@@ -888,15 +894,14 @@ const make = Effect.gen(function* () {
       }).pipe(NodeSqliteClient.readOnly);
       const candidate = current[0];
       if (candidate === undefined) continue;
-      // Outside any write, with this pass's fork table: the same check that listed the thread.
-      const stillIdle = Effect.suspend(() =>
-        Ref.get(forkTableRef).pipe(
-          Effect.flatMap((forks) =>
-            readCandidates({ idleBefore, now, threadId: listed.threadId, forks }),
+      // Outside any write, with the fork table refreshed if a thread was made: as when listing.
+      const stillIdle = currentForkTable(forkTableRef).pipe(
+        Effect.flatMap((forks) =>
+          readCandidates({ idleBefore, now, threadId: listed.threadId, forks }).pipe(
+            NodeSqliteClient.readOnly,
           ),
-          NodeSqliteClient.readOnly,
-          Effect.map((rows) => rows.length > 0),
         ),
+        Effect.map((rows) => rows.length > 0),
       );
       const removed = yield* trimThread(candidate, rest, forkTableRef, stillIdle).pipe(
         Effect.catchCauseIf(

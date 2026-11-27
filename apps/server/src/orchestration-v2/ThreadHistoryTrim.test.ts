@@ -1178,6 +1178,37 @@ it.layer(hookedFixture)("ThreadHistoryTrim during a pass", (it) => {
     }),
   );
 
+  it.effect("stops a thread's later pages when a fork made mid-pass starts being used", () =>
+    Effect.gen(function* () {
+      yield* isolate;
+      const source = yield* seedThread("fork-made-mid-pass", { extraReasoning: 250 });
+      // Made and used after the pass read its fork table, before the first page's write.
+      const madeAndUsed: Hook = seedThread("fork-made-mid-pass-fork", {
+        userMessageAt: recent,
+        thread: {
+          pinnedAt: old,
+          lineage: {
+            parentThreadId: source.threadId,
+            relationshipToParent: "fork",
+            rootThreadId: source.threadId,
+          },
+          forkedFrom: { type: "run", threadId: source.threadId, runId: source.runId },
+        },
+      }).pipe(Effect.asVoid);
+      yield* arm(madeAndUsed);
+      yield* trim;
+      assert.lengthOf(yield* itemTitles(source.threadId), everyItem.length + 250 - 200 + 1);
+      const forkId = ThreadId.make("thread:trim:fork-made-mid-pass-fork");
+      const forkEvents = yield* Stream.runCollect(
+        (yield* EventStore.EventStoreV2).read({ threadId: forkId, afterSequence: 0 }),
+      );
+      assert.lengthOf(
+        Array.from(forkEvents).filter((stored) => invalidatesInheritedRows(stored.event, forkId)),
+        1,
+      );
+    }),
+  );
+
   it.effect("keeps a row that gains a child after the pass chose it", () =>
     Effect.gen(function* () {
       yield* isolate;
