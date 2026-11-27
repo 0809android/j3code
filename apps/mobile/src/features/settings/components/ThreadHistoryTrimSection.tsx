@@ -156,8 +156,13 @@ export function ThreadHistoryTrimSection({
       (label) => gt("Could not trim threads on {label}", { label }),
     ).finally(() => setPending(null));
     if (results.length === 0) return;
+    // The server queues the pass without estimating again, so the size is the preview's.
     const { threadCount, estimatedBytes } = sumThreadHistoryTrimReports(
-      results.map(({ report }) => report),
+      confirming
+        .filter(({ target }) =>
+          results.some((result) => result.target.environmentId === target.environmentId),
+        )
+        .map(({ report }) => report),
     );
     Dialog.alert(
       gt("{count, plural, one {Trimming {count} thread} other {Trimming {count} threads}}", {
@@ -246,7 +251,7 @@ export function ThreadHistoryTrimSection({
             gt("Shows how many threads qualify, then deletes their old output once you confirm."),
             ...schedule,
           ].join("\n")}
-          disabled={pending !== null || runnable.length === 0 || !canMaintain}
+          disabled={pending !== null || runnable.length === 0}
           loading={pending !== null}
           onPress={() => void checkTrim()}
         />
