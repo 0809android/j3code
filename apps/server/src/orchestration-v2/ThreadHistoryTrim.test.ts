@@ -1147,6 +1147,37 @@ it.layer(hookedFixture)("ThreadHistoryTrim during a pass", (it) => {
     }),
   );
 
+  it.effect("stops a thread's later pages when a fork starts being used between pages, and still tells the fork", () =>
+    Effect.gen(function* () {
+      yield* isolate;
+      const source = yield* seedThread("fork-used-mid-pass", { extraReasoning: 250 });
+      yield* seedThread("fork-used-mid-pass-fork", {
+        thread: {
+          pinnedAt: old,
+          lineage: {
+            parentThreadId: source.threadId,
+            relationshipToParent: "fork",
+            rootThreadId: source.threadId,
+          },
+          forkedFrom: { type: "run", threadId: source.threadId, runId: source.runId },
+        },
+      });
+      // Runs before the first page, so the pass's own check has already passed; the second page
+      // must see the fork's visit from the pass's fork table, outside the page's write.
+      yield* arm(updateThread("fork-used-mid-pass-fork", "thread.visited", { lastVisitedAt: now }));
+      yield* trim;
+      assert.lengthOf(yield* itemTitles(source.threadId), everyItem.length + 250 - 200 + 1);
+      const forkId = ThreadId.make("thread:trim:fork-used-mid-pass-fork");
+      const forkEvents = yield* Stream.runCollect(
+        (yield* EventStore.EventStoreV2).read({ threadId: forkId, afterSequence: 0 }),
+      );
+      assert.lengthOf(
+        Array.from(forkEvents).filter((stored) => invalidatesInheritedRows(stored.event, forkId)),
+        1,
+      );
+    }),
+  );
+
   it.effect("keeps a row that gains a child after the pass chose it", () =>
     Effect.gen(function* () {
       yield* isolate;
@@ -1357,6 +1388,40 @@ const clockWithWallJump = (monotonicStepNanos: bigint, pauses: Array<number>) =>
     };
   });
 
+// The candidate query still lists a thread whose rows are gone by the time they are selected.
+const rowsVanishSql = Layer.effect(
+  SqlClient.SqlClient,
+  Effect.map(
+    SqlClient.SqlClient,
+    (client) =>
+      new Proxy(client, {
+        apply: (target, thisArg, args) => {
+          const text: unknown = args[0];
+          const statement = Array.isArray(text) ? text.join("?") : String(text);
+          return statement.includes("AS removable") || statement.includes("AS settled")
+            ? Effect.succeed([])
+            : Reflect.apply(target, thisArg, args);
+        },
+      }),
+  ),
+);
+const rowsVanishFixture = Layer.mergeAll(
+  ThreadHistoryTrim.layer.pipe(Layer.provide(rowsVanishSql)),
+  Layer.effectDiscard(createProject),
+).pipe(Layer.provideMerge(dependencies(30)));
+
+it.layer(rowsVanishFixture)("ThreadHistoryTrim preview", (it) => {
+  it.effect("does not count a thread that has nothing to remove", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(DateTime.toEpochMillis(now));
+      yield* seedThread("nothing-to-remove");
+      const report = yield* (yield* ThreadHistoryTrim.ThreadHistoryTrim).preview;
+      assert.equal(report.threadCount, 0);
+      assert.equal(report.itemCount, 0);
+    }),
+  );
+});
+
 it.effect("rests nine times the monotonic slice, whatever the wall clock does", () =>
   Effect.gen(function* () {
     const pauses: Array<number> = [];
@@ -1386,8 +1451,21 @@ it.layer(layerTest(0))("ThreadHistoryTrim turned off", (it) => {
     Effect.gen(function* () {
       yield* TestClock.setTime(DateTime.toEpochMillis(now));
       const { threadId } = yield* seedThread("off");
-      assert.equal((yield* (yield* ThreadHistoryTrim.ThreadHistoryTrim).preview).threadCount, 0);
-      yield* trim;
+      const service = yield* ThreadHistoryTrim.ThreadHistoryTrim;
+      assert.equal((yield* service.preview).threadCount, 0);
+      yield* service.drain;
+      assert.deepEqual(yield* itemTitles(threadId), everyItem);
+    }),
+  );
+
+  it.effect("trimNow fails with a typed error instead of queueing a pass", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(DateTime.toEpochMillis(now));
+      const service = yield* ThreadHistoryTrim.ThreadHistoryTrim;
+      const { threadId } = yield* seedThread("off-trim-now");
+      const error = yield* Effect.flip(service.trimNow);
+      assert.equal(error._tag, "ThreadHistoryTrimDisabledError");
+      yield* service.drain;
       assert.deepEqual(yield* itemTitles(threadId), everyItem);
     }),
   );

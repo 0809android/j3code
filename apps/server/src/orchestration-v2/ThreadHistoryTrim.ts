@@ -3,6 +3,7 @@ import {
   type OrchestrationV2DomainEvent,
   type RunId,
   type ThreadHistoryTrimReport,
+  ThreadHistoryTrimDisabledError,
   type ThreadHistoryTrimStatus,
   type ThreadId,
   TurnItemId,
@@ -24,6 +25,7 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 import * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
 
 import * as ServerSettingsModule from "../serverSettings.ts";
 import { forkParked } from "../serverActivation.ts";
@@ -46,8 +48,12 @@ export class ThreadHistoryTrim extends Context.Service<
     /**
      * Queues a pass and returns at once. The counts are zero: estimating again would scan every
      * candidate once more, and a client that wants them already has them from `preview`.
+     * Fails when the setting is off, since the pass would return without removing anything.
      */
-    readonly trimNow: Effect.Effect<ThreadHistoryTrimReport, ThreadHistoryTrimError>;
+    readonly trimNow: Effect.Effect<
+      ThreadHistoryTrimReport,
+      ThreadHistoryTrimError | ThreadHistoryTrimDisabledError
+    >;
     /** When the last pass finished and when the next one is due. */
     readonly status: Stream.Stream<ThreadHistoryTrimStatus>;
     readonly drain: Effect.Effect<void>;
@@ -504,10 +510,13 @@ const make = Effect.gen(function* () {
       afterDays <= 0
         ? []
         : yield* readCandidates({ idleBefore, now, forks: yield* readForkTable() });
+    let threadCount = 0;
     let itemCount = 0;
     let estimatedBytes = 0;
     for (const candidate of candidates) {
       const selection = yield* select(candidate);
+      // A candidate with nothing to remove is not counted, as a pass skips it.
+      if (selection.items.length > 0 || selection.nodes.length > 0) threadCount += 1;
       itemCount += selection.items.length;
       estimatedBytes += sumBytes(selection.items) + sumBytes(selection.nodes);
       yield* Effect.yieldNow;
@@ -515,7 +524,7 @@ const make = Effect.gen(function* () {
     return {
       dryRun,
       afterDays,
-      threadCount: candidates.length,
+      threadCount,
       itemCount,
       estimatedBytes,
     } satisfies ThreadHistoryTrimReport;
@@ -743,6 +752,7 @@ const make = Effect.gen(function* () {
     candidate: Candidate,
     rest: Effect.Effect<void>,
     progress: { removedAny: boolean },
+    stillIdle: Effect.Effect<boolean, SqlError>,
   ) {
     const selection = yield* select(candidate).pipe(NodeSqliteClient.readOnly);
     const rows = [
@@ -753,6 +763,10 @@ const make = Effect.gen(function* () {
     let bytes = 0;
     for (let offset = 0; offset < rows.length; offset += DELETE_PAGE_SIZE) {
       const page = rows.slice(offset, offset + DELETE_PAGE_SIZE);
+      // A fork may have been used during the rest after the last page; the write below skips forks.
+      if (offset > 0 && !(yield* stillIdle)) {
+        return { outcome: "thread-in-use" as const, itemCount, bytes };
+      }
       const { outcome, removed } = yield* trimPage(candidate.threadId, {
         itemIds: page.flatMap((row) => (row.kind === "item" ? [row.id] : [])),
         nodeIds: page.flatMap((row) => (row.kind === "node" ? [row.id] : [])),
@@ -774,9 +788,10 @@ const make = Effect.gen(function* () {
     candidate: Candidate,
     rest: Effect.Effect<void>,
     forkTableRef: Ref.Ref<ForkTable>,
+    stillIdle: Effect.Effect<boolean, SqlError>,
   ) {
     const progress = { removedAny: false };
-    return yield* trimPages(candidate, rest, progress).pipe(
+    return yield* trimPages(candidate, rest, progress, stillIdle).pipe(
       // A later page can fail after earlier ones removed rows, and a fork's subscribers would
       // keep those rows. The failure itself still reaches the caller; a failed copy only logs.
       Effect.onExit((exit) =>
@@ -873,7 +888,17 @@ const make = Effect.gen(function* () {
       }).pipe(NodeSqliteClient.readOnly);
       const candidate = current[0];
       if (candidate === undefined) continue;
-      const removed = yield* trimThread(candidate, rest, forkTableRef).pipe(
+      // Outside any write, with this pass's fork table: the same check that listed the thread.
+      const stillIdle = Effect.suspend(() =>
+        Ref.get(forkTableRef).pipe(
+          Effect.flatMap((forks) =>
+            readCandidates({ idleBefore, now, threadId: listed.threadId, forks }),
+          ),
+          NodeSqliteClient.readOnly,
+          Effect.map((rows) => rows.length > 0),
+        ),
+      );
+      const removed = yield* trimThread(candidate, rest, forkTableRef, stillIdle).pipe(
         Effect.catchCauseIf(
           (cause) => !Cause.hasInterruptsOnly(cause),
           (cause) =>
@@ -958,7 +983,8 @@ const make = Effect.gen(function* () {
   return ThreadHistoryTrim.of({
     preview: estimate(true).pipe(NodeSqliteClient.readOnly, mapError("preview")),
     trimNow: Effect.gen(function* () {
-      const { afterDays } = yield* window;
+      const { afterDays } = yield* window.pipe(mapError("trim"));
+      if (afterDays <= 0) return yield* new ThreadHistoryTrimDisabledError();
       yield* Ref.update(manualPendingRef, (pending) => pending + 1).pipe(
         Effect.andThen(manualQueued.open),
         Effect.andThen(worker.enqueue("manual")),
@@ -971,7 +997,7 @@ const make = Effect.gen(function* () {
         itemCount: 0,
         estimatedBytes: 0,
       } satisfies ThreadHistoryTrimReport;
-    }).pipe(mapError("trim")),
+    }),
     status: SubscriptionRef.changes(statusRef),
     drain: worker.drain,
   });
