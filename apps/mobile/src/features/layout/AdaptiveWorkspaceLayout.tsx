@@ -86,7 +86,11 @@ import {
 import { startOpeningDetail } from "./workspace/useSelectWorkspaceDetail";
 import { useWorkspaceTabs } from "./workspace/WorkspaceTabsContext";
 import { HomeListOptionsProvider } from "../home/home-list-options";
-import { buildHomeProjectScopes, resolveHomeProjectFilterScope } from "../home/homeThreadList";
+import {
+  buildHomeProjectScopes,
+  resolveHomeProjectFilterScope,
+  sortHomeProjectScopes,
+} from "../home/homeThreadList";
 import { newTaskDestination, newTaskFilteredProject } from "../threads/new-task-project-selection";
 import { RenderErrorBoundary, RenderFailureView } from "../../components/RenderErrorBoundary";
 import { PaneContext } from "../../components/ui/Pane";
@@ -652,6 +656,17 @@ function AdaptiveWorkspaceLayoutContent(
             )
           : undefined,
         defaultEnvironmentId: saved?.defaultThreadEnvironmentId ?? null,
+        // The sidebar's order, so the default machine's first project matches what the list shows.
+        projectGroups: sortHomeProjectScopes({
+          scopes: buildHomeProjectScopes({ projects, environmentId: null, projectGroupingMode }),
+          threads: appAtomRegistry.get(environmentThreadShells.threadShellsAtom),
+          pendingTasks: [],
+          projectSortOrder: "updated_at",
+        }).map((scope) => ({
+          memberProjectRefs: scope.projectRefs,
+          pinned: scope.pinned,
+          archived: scope.archived,
+        })),
         lastProject: saved?.lastThreadProject,
       }),
     );
