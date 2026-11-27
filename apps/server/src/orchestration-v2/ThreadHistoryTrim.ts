@@ -157,6 +157,20 @@ const make = Effect.gen(function* () {
     readonly now: string;
     readonly threadId?: ThreadId;
   }) => sql<Candidate>`
+    -- Run-forks of each thread at any depth, deleted ones included so they pass the link on (see readForks).
+    WITH RECURSIVE forks(root_id, thread_id, deleted) AS (
+      SELECT json_extract(fork.payload_json, '$.forkedFrom.threadId'), fork.thread_id,
+        fork.deleted_at IS NOT NULL
+      FROM orchestration_v2_projection_threads AS fork
+      WHERE json_extract(fork.payload_json, '$.forkedFrom.type') = 'run'
+        AND COALESCE(json_extract(fork.payload_json, '$.lineage.sideChat'), 0) = 0
+      UNION
+      SELECT forks.root_id, fork.thread_id, fork.deleted_at IS NOT NULL
+      FROM orchestration_v2_projection_threads AS fork
+      JOIN forks ON json_extract(fork.payload_json, '$.forkedFrom.threadId') = forks.thread_id
+      WHERE json_extract(fork.payload_json, '$.forkedFrom.type') = 'run'
+        AND COALESCE(json_extract(fork.payload_json, '$.lineage.sideChat'), 0) = 0
+    )
     SELECT
       thread.thread_id AS "threadId",
       run.run_id AS "runId",
@@ -201,6 +215,32 @@ const make = Effect.gen(function* () {
             recent.status IN ${sql.in(LIVE_RUN_STATUSES)}
             OR recent.requested_at >= ${input.idleBefore}
             OR COALESCE(recent.completed_at, '') >= ${input.idleBefore}
+          )
+      )
+      -- A live fork shows this thread's rows, so its use keeps them too.
+      AND NOT EXISTS (
+        SELECT 1 FROM forks AS link
+        JOIN orchestration_v2_projection_threads AS fork ON fork.thread_id = link.thread_id
+        WHERE link.root_id IN (thread.thread_id, anchor.thread_id)
+          AND link.deleted = 0
+          AND (
+            fork.created_at >= ${input.idleBefore}
+            OR COALESCE(json_extract(fork.payload_json, '$.lastVisitedAt'), '') >= ${input.idleBefore}
+            OR EXISTS (
+              SELECT 1 FROM orchestration_v2_projection_messages AS message
+              WHERE message.thread_id = fork.thread_id
+                AND message.role = 'user'
+                AND message.updated_at >= ${input.idleBefore}
+            )
+            OR EXISTS (
+              SELECT 1 FROM orchestration_v2_projection_runs AS recent
+              WHERE recent.thread_id = fork.thread_id
+                AND (
+                  recent.status IN ${sql.in(LIVE_RUN_STATUSES)}
+                  OR recent.requested_at >= ${input.idleBefore}
+                  OR COALESCE(recent.completed_at, '') >= ${input.idleBefore}
+                )
+            )
           )
       )
       AND (${input.threadId !== undefined ? sql`1` : sql`0`} OR EXISTS (
