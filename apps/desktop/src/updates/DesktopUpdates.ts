@@ -406,6 +406,9 @@ export const make = Effect.gen(function* () {
   const updaterConfiguredRef = yield* Ref.make(false);
   const lastLoggedDownloadMilestoneRef = yield* Ref.make(-1);
   const lastDownloadProgressAtRef = yield* Ref.make(0);
+  // A download that stopped making progress is retried without the differential (blockmap) path:
+  // electron-updater cannot cancel that path, so the retry would otherwise stall in the same place.
+  const lastDownloadStalledRef = yield* Ref.make(false);
   const notAppliedVersionRef = yield* Ref.make(Option.none<string>());
   // The release a track switch's database check cleared. A build crosses to another track only
   // through such a switch, and never below that release: version order alone cannot tell whether
@@ -664,6 +667,7 @@ export const make = Effect.gen(function* () {
     while (true) {
       const idleMs = (yield* Clock.currentTimeMillis) - (yield* Ref.get(lastDownloadProgressAtRef));
       if (idleMs >= timeoutMs) {
+        yield* Ref.set(lastDownloadStalledRef, true);
         return yield* new ElectronUpdater.ElectronUpdaterDownloadUpdateError({
           channel: state.channel,
           cause: new Error(
@@ -727,13 +731,15 @@ export const make = Effect.gen(function* () {
       }
       yield* setState(reduceDesktopUpdateStateOnDownloadStart(state));
       yield* electronUpdater.setDisableDifferentialDownload(
-        isArm64HostRunningIntelBuild(environment.runtimeInfo),
+        isArm64HostRunningIntelBuild(environment.runtimeInfo) ||
+          (yield* Ref.get(lastDownloadStalledRef)),
       );
       yield* logUpdaterInfo("downloading update");
       yield* Ref.set(lastDownloadProgressAtRef, yield* Clock.currentTimeMillis);
       // electron-updater has no time limit of its own. Losing the race cancels its download, so a
       // retry starts a fresh one instead of joining the stalled one.
       yield* electronUpdater.downloadUpdate.pipe(Effect.raceFirst(failWhenDownloadStalls(state)));
+      yield* Ref.set(lastDownloadStalledRef, false);
       return { accepted: true, completed: true };
     }).pipe(
       Effect.catchTags({

@@ -52,6 +52,7 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
   let downloadCount = 0;
   let allowDowngrade = false;
   const checkAllowedDowngrade: boolean[] = [];
+  const differentialDownloadDisabled: boolean[] = [];
   let fullChangelog = false;
   const feedUrls: ElectronUpdater.ElectronUpdaterFeedUrl[] = [];
   const listeners = new Map<string, Set<(...args: readonly unknown[]) => void>>();
@@ -93,7 +94,10 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
       Effect.sync(() => {
         fullChangelog = value;
       }),
-    setDisableDifferentialDownload: () => options.setDisableDifferentialDownload ?? Effect.void,
+    setDisableDifferentialDownload: (value) =>
+      Effect.sync(() => {
+        differentialDownloadDisabled.push(value);
+      }).pipe(Effect.andThen(options.setDisableDifferentialDownload ?? Effect.void)),
     checkForUpdates: Effect.sync(() => {
       checkCount += 1;
       checkAllowedDowngrade.push(allowDowngrade);
@@ -326,6 +330,7 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
     fullChangelog: () => fullChangelog,
     /** Whether each feed check could offer an older release, and the flag now. */
     checkAllowedDowngrade,
+    differentialDownloadDisabled,
     allowDowngrade: () => allowDowngrade,
     listenerCount: () =>
       Array.from(listeners.values()).reduce(

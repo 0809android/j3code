@@ -2,9 +2,12 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import * as TestClock from "effect/testing/TestClock";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { autoUpdater } from "electron-updater";
 import type * as NodeChildProcess from "node:child_process";
@@ -116,3 +119,57 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")(
     );
   },
 );
+
+describe("ElectronUpdater download retry", () => {
+  const stubDownload = () => {
+    const resolvers: Array<() => void> = [];
+    const spy = vi.spyOn(autoUpdater, "downloadUpdate").mockImplementation(
+      () =>
+        new Promise<Array<string>>((resolve) => {
+          resolvers.push(() => resolve([]));
+        }),
+    );
+    return { spy, resolvers, started: () => resolvers.length };
+  };
+
+  it.effect("waits for the interrupted download to settle before retrying", () =>
+    Effect.gen(function* () {
+      const download = stubDownload();
+      yield* Effect.addFinalizer(() => Effect.sync(() => download.spy.mockRestore()));
+      const electronUpdater = yield* ElectronUpdater.ElectronUpdater;
+
+      const first = yield* electronUpdater.downloadUpdate.pipe(Effect.forkScoped);
+      yield* Effect.yieldNow;
+      assert.equal(download.started(), 1);
+      yield* Fiber.interrupt(first);
+
+      const retry = yield* electronUpdater.downloadUpdate.pipe(Effect.forkScoped);
+      yield* Effect.yieldNow;
+      assert.equal(download.started(), 1, "retry must not start while the old promise is pending");
+
+      download.resolvers[0]?.();
+      yield* Effect.promise(() => new Promise((resolve) => setTimeout(resolve, 0)));
+      assert.equal(download.started(), 2);
+      download.resolvers[1]?.();
+      yield* Fiber.join(retry);
+    }).pipe(Effect.scoped, Effect.provide([ElectronUpdater.layer, TestClock.layer()])),
+  );
+
+  it.effect("retries after the limit when the interrupted download never settles", () =>
+    Effect.gen(function* () {
+      const download = stubDownload();
+      yield* Effect.addFinalizer(() => Effect.sync(() => download.spy.mockRestore()));
+      const electronUpdater = yield* ElectronUpdater.ElectronUpdater;
+
+      const first = yield* electronUpdater.downloadUpdate.pipe(Effect.forkScoped);
+      yield* Effect.yieldNow;
+      yield* Fiber.interrupt(first);
+
+      yield* electronUpdater.downloadUpdate.pipe(Effect.forkScoped);
+      yield* TestClock.adjust(
+        Duration.sum(ElectronUpdater.CANCELLED_DOWNLOAD_SETTLE_TIMEOUT, Duration.millis(1)),
+      );
+      assert.equal(download.started(), 2);
+    }).pipe(Effect.scoped, Effect.provide([ElectronUpdater.layer, TestClock.layer()])),
+  );
+});

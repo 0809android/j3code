@@ -555,6 +555,35 @@ describe("DesktopUpdates", () => {
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
 
+  it.effect("retries a stalled download without the differential download", () => {
+    let downloads = 0;
+    const harness = makeHarness({
+      downloadUpdate: Effect.suspend(() => {
+        downloads += 1;
+        return downloads === 1
+          ? Effect.never
+          : Effect.sync(() => harness.emit("update-downloaded", { version: "1.2.4" }));
+      }),
+    });
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+        harness.emit("update-available", { version: "1.2.4" });
+        yield* flushCallbacks;
+        const configured = harness.differentialDownloadDisabled.length;
+
+        const download = yield* updates.download.pipe(Effect.forkScoped);
+        yield* TestClock.adjust(Duration.minutes(5));
+        assert.isFalse((yield* Fiber.join(download)).completed);
+        assert.isTrue((yield* updates.download).completed);
+
+        assert.deepEqual(harness.differentialDownloadDisabled.slice(configured), [false, true]);
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
   it.effect("downloads the newest release published since the last check", () => {
     // electron-updater downloads the release its last checkForUpdates found.
     let published = "1.2.4";
