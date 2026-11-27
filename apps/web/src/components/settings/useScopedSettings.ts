@@ -144,10 +144,21 @@ function useRunScopedPlan() {
 export function useUpdateScopedSettings() {
   const { scope, environments, deviceOnly } = useSettingsScope();
   const run = useRunScopedPlan();
-  /** `onFailed` runs when any target rejects or drops the patch, so a draft can fall back. */
-  return (patch: ScopedSettingsPatch, options?: { readonly onFailed?: () => void }) =>
+  /**
+   * `onFailed` runs when any target rejects or drops the patch, so a draft can fall back.
+   * `onlyEnvironmentIds` leaves out the machines that do not know the setting.
+   */
+  return (
+    patch: ScopedSettingsPatch,
+    options?: {
+      readonly onFailed?: () => void;
+      readonly onlyEnvironmentIds?: ReadonlySet<EnvironmentId>;
+    },
+  ) =>
     run(
-      environments,
+      options?.onlyEnvironmentIds === undefined
+        ? environments
+        : environments.filter(({ environmentId }) => options.onlyEnvironmentIds?.has(environmentId)),
       (current) => planScopedSettingsPatch(scope, current, patch, { deviceOnly }),
       options?.onFailed,
     );

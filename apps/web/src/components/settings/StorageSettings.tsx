@@ -598,6 +598,12 @@ const threadHistoryTrimStatusAtom = environmentAtomList(
 const formatTrimDate = (iso: string) =>
   new Date(iso).toLocaleDateString(undefined, { dateStyle: "medium" });
 
+const hasThreadHistoryTrim = (environment: {
+  readonly serverConfig?: {
+    readonly environment: { readonly capabilities: { readonly threadHistoryTrim?: boolean } };
+  } | null;
+}) => environment.serverConfig?.environment.capabilities.threadHistoryTrim === true;
+
 interface TrimTarget {
   readonly environmentId: EnvironmentId;
   readonly label: string;
@@ -607,7 +613,7 @@ function ThreadHistorySection() {
   const gt = useGT();
   const resolve = useMessages();
   const setting = useSearchableSetting();
-  const { connectedEnvironments, targets } = useSettingsScope();
+  const { environments, connectedEnvironments, targets } = useSettingsScope();
   const scopedSettings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
   const settings = scopedSettings.storageCleanup;
@@ -615,11 +621,14 @@ function ThreadHistorySection() {
   const trim = useAtomCommand(serverEnvironment.trimThreadHistory);
   const nowMinute = useNowMinute();
   const nowMs = Date.parse(`${nowMinute}:00.000Z`);
-  const environmentIds = environmentIdsKey(
-    connectedEnvironments.map(({ environmentId }) => environmentId),
-  );
+  // An older server has no such method, so it gets neither a subscription nor a write.
+  const capable = connectedEnvironments.filter(hasThreadHistoryTrim);
+  const environmentIds = environmentIdsKey(capable.map(({ environmentId }) => environmentId));
   const permissions = useAtomValue(threadHistoryTrimPermissionsAtom(environmentIds));
   const statuses = useAtomValue(threadHistoryTrimStatusAtom(environmentIds));
+  const writableIds = new Set(
+    environments.filter(hasThreadHistoryTrim).map(({ environmentId }) => environmentId),
+  );
   const [pending, setPending] = useState<"preview" | "trim" | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirming, setConfirming] = useState<ReadonlyArray<{
@@ -640,23 +649,17 @@ function ThreadHistorySection() {
       : undefined;
 
   const targetIds = new Set(targets.map((target) => target.environmentId));
-  const supported = connectedEnvironments.filter(
-    (environment) =>
-      targetIds.has(environment.environmentId) &&
-      environment.serverConfig?.environment.capabilities.threadHistoryTrim === true,
-  );
+  const supported = capable.filter((environment) => targetIds.has(environment.environmentId));
   const canMaintain =
     supported.length > 0 &&
-    supported.every(
-      (environment) => permissions[connectedEnvironments.indexOf(environment)] === true,
-    );
+    supported.every((environment) => permissions[capable.indexOf(environment)] === true);
   const runnable = supported.filter(
     (environment) =>
-      permissions[connectedEnvironments.indexOf(environment)] === true &&
+      permissions[capable.indexOf(environment)] === true &&
       environment.serverConfig?.settings.storageCleanup.threadHistoryAfterDays != null,
   );
   const schedule = supported.flatMap((environment) => {
-    const query = statuses[connectedEnvironments.indexOf(environment)];
+    const query = statuses[capable.indexOf(environment)];
     if (query?._tag !== "Success") return [];
     if (environment.serverConfig?.settings.storageCleanup.threadHistoryAfterDays == null) return [];
     const text = describeThreadHistoryTrimSchedule({
@@ -745,7 +748,7 @@ function ThreadHistorySection() {
   const threadCount = confirmingTotals.threadCount;
   const size = formatBytes(confirmingTotals.estimatedBytes);
   const update = (patch: Partial<StorageCleanupSettings>, options: SaveOptions) =>
-    updateSettings({ storageCleanup: patch }, options);
+    updateSettings({ storageCleanup: patch }, { ...options, onlyEnvironmentIds: writableIds });
 
   return (
     <SettingsSection id="storage-thread-history" title={gt("Thread history")}>

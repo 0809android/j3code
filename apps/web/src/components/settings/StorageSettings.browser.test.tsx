@@ -19,6 +19,7 @@ const state = vi.hoisted(() => ({
   threadHistoryTrimOn: null as string[] | null,
   offline: [] as string[],
   maintainDenied: false,
+  statusSubscriptions: [] as string[],
 }));
 
 vi.mock(import("../../state/server"), async (original) => {
@@ -45,7 +46,10 @@ vi.mock(import("../../state/server"), async (original) => {
         ...actual.serverEnvironment.trimThreadHistory,
         permissionAtom: () => (state.maintainDenied ? denied : allowed),
       },
-      threadHistoryTrim: (() => trimStatus) as never,
+      threadHistoryTrim: ((args: { environmentId: string }) => {
+        state.statusSubscriptions.push(args.environmentId);
+        return trimStatus;
+      }) as never,
     },
   };
 });
@@ -454,4 +458,25 @@ it("shows thread history when only some selected machines support it", async () 
   await using screen = await render(panel());
 
   await expect.element(screen.getByRole("switch", { name: "Trim old threads" })).toBeVisible();
+});
+
+it("sends neither the status subscription nor the setting to a machine that lacks thread history", async () => {
+  setup();
+  state.threadHistoryTrim = true;
+  state.threadHistoryTrimOn = ["env-x"];
+  state.statusSubscriptions = [];
+  state.settings = {
+    ...state.settings,
+    storageCleanup: { ...state.settings.storageCleanup, threadHistoryAfterDays: 30 },
+  };
+  state.targets = ["env-x", "env-y"].map((environmentId) => ({
+    environmentId,
+    settings: state.settings,
+  }));
+  await using screen = await render(panel());
+
+  await userEvent.click(screen.getByRole("switch", { name: "Trim old threads" }));
+
+  expect(state.statusSubscriptions).toEqual(["env-x"]);
+  expect([...(state.update.mock.calls[0]?.[1]?.onlyEnvironmentIds ?? [])]).toEqual(["env-x"]);
 });
