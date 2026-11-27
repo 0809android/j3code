@@ -450,6 +450,10 @@ it.layer(layerTest(30))("ThreadHistoryTrim", (it) => {
         notice?.type === "system_notice" ? notice.message : "",
         "removed to save space after 30 days",
       );
+      // Clients word the notice from this, in the user's language.
+      assert.deepEqual(notice?.type === "system_notice" ? notice.historyTrim : undefined, {
+        afterDays: 30,
+      });
       const history = yield* store.getTurnStartHistory(threadId);
       assert.deepEqual(
         history.map((entry) => entry.type),

@@ -13079,5 +13079,6 @@
   "33f5fca0dae9cc80": "Noch nicht bereinigt. Der erste Durchlauf startet einige Minuten nach dem Serverstart.",
   "18bb2dd8209b1919": "Zuletzt bereinigt: {last}. Der nächste Durchlauf ist fällig.",
   "e2f5de1dcb452026": "Zuletzt bereinigt: {last}. Nächster Durchlauf: {next}.",
-  "1516b350d03fab25": "Speicher Festplatte Datenbank Platz Verlauf Tool-Ausgabe Reasoning inaktiv ungenutzt Tage bereinigen jetzt löschen"
+  "1516b350d03fab25": "Speicher Festplatte Datenbank Platz Verlauf Tool-Ausgabe Reasoning inaktiv ungenutzt Tage bereinigen jetzt löschen",
+  "92b3bb64ec1bd8be": "Werkzeugausgaben und Überlegungen oberhalb dieser Stelle wurden nach {afterDays, plural, one {{afterDays} Tag} other {{afterDays} Tagen}} ohne Nutzung entfernt, um Speicherplatz zu sparen. Nachrichten, Pläne und Dateiänderungen bleiben erhalten."
 }

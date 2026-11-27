@@ -5753,5 +5753,6 @@
   "8d545d54c0a9e950": "Oculta los comandos, ediciones y búsquedas que ejecutan los agentes. Ocultar las correctas mantiene los fallos. Zen solo muestra las respuestas finales. Las aprobaciones, preguntas y errores siempre se muestran.",
   "515f8ffb80cca95b": "Entorno predeterminado",
   "e88c9d8769544731": "Automático",
-  "fbf24a7de4675ac3": "Usar tu último entorno usado o el principal."
+  "fbf24a7de4675ac3": "Usar tu último entorno usado o el principal.",
+  "92b3bb64ec1bd8be": "Se eliminaron la salida de herramientas y el razonamiento anteriores a este punto para ahorrar espacio tras {afterDays, plural, one {{afterDays} día} other {{afterDays} días}} sin uso. Se conservan los mensajes, los planes y los cambios de archivos."
 }

@@ -1766,6 +1766,13 @@ const OrchestrationV2SystemNoticeLevel = Schema.Literals(["info", "warning", "er
 /** A notice about an MCP server that a sign-in from the thread would fix. */
 const OrchestrationV2McpSignIn = Schema.Struct({ server: Schema.String });
 
+/**
+ * Marks the notice left where a thread's old tool output and reasoning were trimmed. Clients word
+ * it in the user's language from `afterDays`; `message` stays as the English text for clients
+ * and rows that predate this field.
+ */
+const OrchestrationV2HistoryTrimNotice = Schema.Struct({ afterDays: NonNegativeInt });
+
 /** A same-harness model or effort change that took effect with this message. */
 export const OrchestrationV2ModelSwitch = Schema.Struct({
   from: ModelSelection,
@@ -2041,6 +2048,7 @@ export const OrchestrationV2TurnItem = Schema.Union([
     message: Schema.String,
     level: Schema.optional(OrchestrationV2SystemNoticeLevel),
     mcpSignIn: Schema.optional(OrchestrationV2McpSignIn),
+    historyTrim: Schema.optional(OrchestrationV2HistoryTrimNotice),
   }),
   Schema.Struct({
     ...OrchestrationV2TurnItemBaseFields,
@@ -2943,6 +2951,7 @@ export const OrchestrationV2TurnItemJson = Schema.Union([
     message: Schema.String,
     level: Schema.optional(OrchestrationV2SystemNoticeLevel),
     mcpSignIn: Schema.optional(OrchestrationV2McpSignIn),
+    historyTrim: Schema.optional(OrchestrationV2HistoryTrimNotice),
   }),
   Schema.Struct({
     ...OrchestrationV2TurnItemJsonBaseFields,

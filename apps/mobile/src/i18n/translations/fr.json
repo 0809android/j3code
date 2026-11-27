@@ -5753,5 +5753,6 @@
   "8d545d54c0a9e950": "Masque les commandes, modifications et recherches lancées par les agents. Masquer les réussis garde les échecs. Zen n’affiche que les réponses finales. Les approbations, questions et erreurs s’affichent toujours.",
   "515f8ffb80cca95b": "Environnement par défaut",
   "e88c9d8769544731": "Automatique",
-  "fbf24a7de4675ac3": "Utiliser le dernier environnement utilisé ou l'environnement principal."
+  "fbf24a7de4675ac3": "Utiliser le dernier environnement utilisé ou l'environnement principal.",
+  "92b3bb64ec1bd8be": "La sortie des outils et le raisonnement au-dessus de ce point ont été supprimés pour économiser de l’espace après {afterDays, plural, one {{afterDays} jour} other {{afterDays} jours}} sans utilisation. Les messages, les plans et les modifications de fichiers sont conservés."
 }

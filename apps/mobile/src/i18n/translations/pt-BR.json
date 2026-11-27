@@ -5753,5 +5753,6 @@
   "8d545d54c0a9e950": "Oculta os comandos, edições e pesquisas que os agentes executam. \"Ocultar bem-sucedidas\" mantém as falhas. Zen mostra só as respostas finais. Aprovações, perguntas e erros sempre aparecem.",
   "515f8ffb80cca95b": "Ambiente padrão",
   "e88c9d8769544731": "Automático",
-  "fbf24a7de4675ac3": "Usar o último ambiente utilizado ou o ambiente principal."
+  "fbf24a7de4675ac3": "Usar o último ambiente utilizado ou o ambiente principal.",
+  "92b3bb64ec1bd8be": "A saída de ferramentas e o raciocínio acima deste ponto foram removidos para economizar espaço após {afterDays, plural, one {{afterDays} dia} other {{afterDays} dias}} sem uso. Mensagens, planos e alterações de arquivos foram mantidos."
 }
