@@ -77,7 +77,9 @@ type Candidate = {
   readonly runOrdinal: number;
   readonly updatedAt: string;
 };
-type Mode = "background" | "manual";
+// "enabled" is a pass the setting asked for by turning trimming on or shortening the window, so
+// the 30-day wait since the last pass does not apply; it still keeps to the background duty.
+type Mode = "background" | "enabled" | "manual";
 
 const sumBytes = (rows: ReadonlyArray<{ readonly bytes: number }>) =>
   rows.reduce((total, row) => total + row.bytes, 0);
@@ -691,7 +693,7 @@ const make = Effect.gen(function* () {
     const candidates = yield* readCandidates({ idleBefore, now }).pipe(
       NodeSqliteClient.readOnly,
     );
-    if (mode === "background" && candidates.length > 0) {
+    if (mode !== "manual" && candidates.length > 0) {
       yield* Effect.logInfo("Idle thread history due for trimming", {
         threadCount: candidates.length,
       });
@@ -754,21 +756,22 @@ const make = Effect.gen(function* () {
   );
 
   // The check above ends at once while the setting is off, so turning it on later would wait up to
-  // six hours for the next one. A switch from off to on queues one pass, as the start does.
+  // six hours for the next one. A switch from off to on, or to a shorter window, queues one pass,
+  // as the start does; the 30-day wait would otherwise hold back a window that now reaches more threads.
   const changes = yield* settingsService.subscribeChanges;
   const initial = yield* settingsService.getSettings.pipe(Effect.orDie);
-  let enabled = (initial.storageCleanup.threadHistoryAfterDays ?? 0) > 0;
+  let days = initial.storageCleanup.threadHistoryAfterDays ?? 0;
   yield* forkParked(
     changes.pipe(
       Stream.filter((settings) => {
-        const next = (settings.storageCleanup.threadHistoryAfterDays ?? 0) > 0;
-        const turnedOn = next && !enabled;
-        enabled = next;
-        return turnedOn;
+        const next = settings.storageCleanup.threadHistoryAfterDays ?? 0;
+        const widened = next > 0 && (days <= 0 || next < days);
+        days = next;
+        return widened;
       }),
       Stream.switchMap(() =>
         Stream.fromEffect(
-          Effect.sleep("5 minutes").pipe(Effect.andThen(worker.enqueue("background"))),
+          Effect.sleep("5 minutes").pipe(Effect.andThen(worker.enqueue("enabled"))),
         ),
       ),
       Stream.runDrain,

@@ -1146,4 +1146,33 @@ it.layer(dependenciesWhoseSettingsChange)("ThreadHistoryTrim turned on while run
       }).pipe(whileRunning);
     }),
   );
+
+  it.effect("runs a pass at once when it comes back on or the window shrinks", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(DateTime.toEpochMillis(now));
+      const settings = yield* ServerSettings.ServerSettingsService;
+      const setDays = (days: number | null) =>
+        settings
+          .updateSettings({ storageCleanup: { threadHistoryAfterDays: days } })
+          .pipe(Effect.andThen(Effect.yieldNow));
+      const { threadId: turnedBackOn } = yield* seedThread("turned-back-on");
+      const { threadId: shortened } = yield* seedThread("window-shortened", {
+        userMessageAt: DateTime.subtract(now, { days: 20 }),
+      });
+
+      yield* Effect.gen(function* () {
+        // An earlier pass in this test's database is dated after `now`, so a scheduled one would skip.
+        assert.isNotNull(yield* lastTrimmedAt);
+        yield* setDays(null);
+        yield* setDays(30);
+        yield* afterWaiting("5 minutes");
+        assert.deepEqual(yield* itemTitles(turnedBackOn), trimmedItems);
+        assert.deepEqual(yield* itemTitles(shortened), everyItem);
+
+        yield* setDays(10);
+        yield* afterWaiting("5 minutes");
+        assert.deepEqual(yield* itemTitles(shortened), trimmedItems);
+      }).pipe(whileRunning);
+    }),
+  );
 });
