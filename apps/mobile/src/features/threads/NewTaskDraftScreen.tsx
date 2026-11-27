@@ -19,7 +19,7 @@ import * as Dialog from "../../components/ui/Dialog";
 import { useAtomValue } from "@effect/atom-react";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/reactivity";
-import { pickableProjectGroups } from "@t3tools/client-runtime/state/project-grouping";
+import { resolveConnectedDefaultThreadEnvironmentId } from "@t3tools/client-runtime/state/project-grouping";
 import { settlePromise, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import {
   CommonActions,
@@ -98,6 +98,7 @@ import { newTaskFlowKey } from "./new-task-flow-state";
 import { EnvironmentMachineSymbol } from "../../components/EnvironmentMachineSymbol";
 import { ConnectionStatusDot } from "../connection/ConnectionStatusDot";
 import { appAtomRegistry } from "../../state/atom-registry";
+import { workspaceConnections } from "../../state/workspace";
 import { mobilePreferencesAtom } from "../../state/preferences";
 
 import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
@@ -479,12 +480,19 @@ export function NewTaskDraftScreen(props: {
     const selection = resolveDraftProjectSelection(
       selectedProjectKey,
       projects,
-      pickableProjectGroups(projectScopes),
+      projectScopes,
       {
         incomingShareId: props.incomingShareId,
         pickerClosed: initialPickerRef.current === "open" && isFocused,
         useLastProject: saved?.useLastProjectForNewThreads,
         lastProject: saved?.lastThreadProject,
+        defaultEnvironmentId: resolveConnectedDefaultThreadEnvironmentId(
+          saved?.defaultThreadEnvironmentId,
+          appAtomRegistry
+            .get(workspaceConnections.environmentsAtom)
+            .filter((environment) => environment.connectionState === "connected")
+            .map((environment) => environment.environmentId),
+        ),
       },
     );
     if (selection.kind === "preserve") {

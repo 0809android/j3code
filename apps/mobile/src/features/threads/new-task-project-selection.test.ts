@@ -270,6 +270,26 @@ describe("resolveDraftProjectSelection", () => {
       kind: "pick",
     });
   });
+
+  it("starts a share draft on the connected default machine, ahead of the last project", () => {
+    const projects = [makeProject("remembered", "other-environment"), makeProject("here")];
+    const scopes = [makeScope([projects[0]!]), makeScope([projects[1]!])];
+    const shareDraft = {
+      incomingShareId: "share",
+      pickerClosed: false,
+      lastProject: { environmentId: "other-environment", projectId: "remembered" },
+    };
+    expect(
+      resolveDraftProjectSelection(null, projects, scopes, {
+        ...shareDraft,
+        defaultEnvironmentId: EnvironmentId.make("environment"),
+      }),
+    ).toEqual({ kind: "select", project: projects[1] });
+    expect(resolveDraftProjectSelection(null, projects, scopes, shareDraft)).toEqual({
+      kind: "select",
+      project: projects[0],
+    });
+  });
 });
 
 describe("newTaskDestination", () => {
@@ -361,6 +381,28 @@ describe("newTaskDestination", () => {
       }),
     ).toEqual({
       draft: { requestId: "request", environmentId: "environment", projectId: "first-in-order" },
+    });
+  });
+
+  it("starts on the remembered project when every default machine project is in an archived group", () => {
+    const projects = [makeProject("remembered", "other-environment"), makeProject("old")];
+    const ref = (project: EnvironmentProject) => ({
+      environmentId: project.environmentId,
+      projectId: project.id,
+    });
+    expect(
+      destination({
+        useLastProject: true,
+        projects,
+        defaultEnvironmentId: "environment",
+        last: { environmentId: "other-environment", projectId: "remembered" },
+        projectGroups: [
+          { memberProjectRefs: [ref(projects[1]!)], pinned: false, archived: true },
+          { memberProjectRefs: [ref(projects[0]!)], pinned: false, archived: false },
+        ],
+      }),
+    ).toEqual({
+      draft: { requestId: "request", environmentId: "other-environment", projectId: "remembered" },
     });
   });
 
