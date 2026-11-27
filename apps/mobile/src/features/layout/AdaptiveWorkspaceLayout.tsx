@@ -86,7 +86,7 @@ import {
 } from "./workspace/workspace-detail-selection";
 import { startOpeningDetail } from "./workspace/useSelectWorkspaceDetail";
 import { useWorkspaceTabs } from "./workspace/WorkspaceTabsContext";
-import { HomeListOptionsProvider } from "../home/home-list-options";
+import { createHomeListOptionsAtom, HomeListOptionsProvider } from "../home/home-list-options";
 import {
   buildHomeProjectScopes,
   resolveHomeProjectFilterScope,
@@ -270,6 +270,9 @@ function AdaptiveWorkspaceLayoutContent(
   const gt = useGT();
   const floatingTabsEnabled = useAndroidFloatingTabs();
   const projectGroupingMode = props.projectGroupingMode;
+  const [homeListOptionsAtom] = useState(() =>
+    createHomeListOptionsAtom(props.savedThreadListFilters),
+  );
   const nativeWorkspace = use(NativeWorkspaceModeContext);
   const usesPresentationHost = use(WorkspacePresentationHostContext);
   const windowDimensions = useWindowDimensions();
@@ -666,7 +669,7 @@ function AdaptiveWorkspaceLayoutContent(
           scopes: buildHomeProjectScopes({ projects, environmentId: null, projectGroupingMode }),
           threads: appAtomRegistry.get(environmentThreadShells.threadShellsAtom),
           pendingTasks: [],
-          projectSortOrder: "updated_at",
+          projectSortOrder: appAtomRegistry.get(homeListOptionsAtom).projectSortOrder,
         }).map((scope) => ({
           memberProjectRefs: scope.projectRefs,
           pinned: scope.pinned,
@@ -1008,6 +1011,7 @@ function AdaptiveWorkspaceLayoutContent(
       <HomeListOptionsProvider
         projectGroupingMode={projectGroupingMode}
         savedFilters={props.savedThreadListFilters}
+        optionsAtom={homeListOptionsAtom}
       >
         <AdaptiveWorkspaceContext value={contextValue}>
           <WorkspacePaneStateContext value={paneState}>
@@ -1204,6 +1208,7 @@ function AdaptiveWorkspaceLayoutContent(
     <HomeListOptionsProvider
       projectGroupingMode={projectGroupingMode}
       savedFilters={props.savedThreadListFilters}
+      optionsAtom={homeListOptionsAtom}
     >
       <AdaptiveWorkspaceContext value={contextValue}>
         <WorkspacePaneStateContext value={paneState}>

@@ -30,6 +30,11 @@ function defaultHomeListOptions(filters?: ThreadListFilters): HomeListOptions {
   };
 }
 
+/** The list's options live in an atom the layout can own, so New task reads the same sort order. */
+export function createHomeListOptionsAtom(filters?: ThreadListFilters) {
+  return Atom.make(defaultHomeListOptions(filters));
+}
+
 interface HomeListOptionsContextValue {
   readonly options: HomeListOptions;
   readonly updateOptions: (patch: Partial<HomeListOptions>) => void;
@@ -42,12 +47,16 @@ export function HomeListOptionsProvider({
   children,
   projectGroupingMode,
   savedFilters,
+  optionsAtom: providedOptionsAtom,
 }: PropsWithChildren<{
   readonly projectGroupingMode: SidebarProjectGroupingMode;
   readonly savedFilters?: ThreadListFilters | undefined;
+  readonly optionsAtom?: ReturnType<typeof createHomeListOptionsAtom> | undefined;
 }>) {
   const registry = useContext(RegistryContext);
-  const [optionsAtom] = useState(() => Atom.make(defaultHomeListOptions(savedFilters)));
+  const [optionsAtom] = useState(
+    () => providedOptionsAtom ?? createHomeListOptionsAtom(savedFilters),
+  );
   const options = useAtomValue(optionsAtom);
   const savePreferences = useAtomCommand(saveMobilePreferences);
   // Only the scope persists; the sort order is per session. Updates read the

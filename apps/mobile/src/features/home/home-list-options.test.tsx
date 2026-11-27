@@ -1,4 +1,6 @@
+import { RegistryContext } from "@effect/atom-react";
 import type { EnvironmentId } from "@t3tools/contracts";
+import { AtomRegistry } from "effect/reactivity";
 import { act, useLayoutEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vite-plus/test";
@@ -13,7 +15,11 @@ vi.mock("../../state/use-atom-command", () => ({
   },
 }));
 
-import { HomeListOptionsProvider, useHomeListOptions } from "./home-list-options";
+import {
+  createHomeListOptionsAtom,
+  HomeListOptionsProvider,
+  useHomeListOptions,
+} from "./home-list-options";
 
 const ENVIRONMENT = "env-1" as EnvironmentId;
 const AVAILABLE = new Set([ENVIRONMENT]);
@@ -48,4 +54,33 @@ it("saves the scope from every update made in one event", async () => {
   expect(controls!.options.selectedEnvironmentId).toBe(ENVIRONMENT);
   expect(controls!.options.selectedProjectKey).toBe("env-1:project-1");
   act(() => root.unmount());
+});
+
+it("shares the sort order with the layout through the options atom", async () => {
+  const registry = AtomRegistry.make();
+  const optionsAtom = createHomeListOptionsAtom();
+  let controls: ReturnType<typeof useHomeListOptions> | undefined;
+  function Probe() {
+    const result = useHomeListOptions(AVAILABLE);
+    useLayoutEffect(() => {
+      controls = result;
+    });
+    return null;
+  }
+
+  const root = createRoot(document.createElement("div"));
+  await act(async () =>
+    root.render(
+      <RegistryContext.Provider value={registry}>
+        <HomeListOptionsProvider projectGroupingMode="repository" optionsAtom={optionsAtom}>
+          <Probe />
+        </HomeListOptionsProvider>
+      </RegistryContext.Provider>,
+    ),
+  );
+  act(() => controls!.setProjectSortOrder("created_at"));
+
+  expect(registry.get(optionsAtom).projectSortOrder).toBe("created_at");
+  act(() => root.unmount());
+  registry.dispose();
 });
