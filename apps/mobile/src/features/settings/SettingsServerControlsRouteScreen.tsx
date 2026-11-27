@@ -48,6 +48,7 @@ import {
   type ScopedMobileSettingsTarget,
 } from "./settings-scoped-server";
 import { PullRequestGlyph } from "../pull-requests/pullRequestGlyphs";
+import { resolveDefaultThreadEnvironmentId } from "./defaultThreadEnvironment";
 import { AutoSettleSettingsRows } from "./ThreadSettingsSections";
 import { supportsSharedSettingsSync } from "@t3tools/client-runtime/state/shared-settings";
 
@@ -197,9 +198,13 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
   const { selectedTargets, projectGroups, selectedProjectKey } = useSettingsEnvironmentFilter();
   const { environments } = useEnvironments();
   const preferencesResult = useAtomValue(mobilePreferencesAtom);
-  const defaultThreadEnvironmentId = AsyncResult.isSuccess(preferencesResult)
-    ? (preferencesResult.value.defaultThreadEnvironmentId ?? null)
-    : null;
+  const defaultThreadEnvironmentId = resolveDefaultThreadEnvironmentId(
+    AsyncResult.isSuccess(preferencesResult)
+      ? preferencesResult.value.defaultThreadEnvironmentId
+      : null,
+    (environmentId) =>
+      environments.some((environment) => environment.environmentId === environmentId),
+  );
   const savePreferences = useAtomCommand(saveMobilePreferences);
   const setDefaultThreadEnvironmentId = (environmentId: EnvironmentId | null) => {
     void savePreferences({ defaultThreadEnvironmentId: environmentId });
