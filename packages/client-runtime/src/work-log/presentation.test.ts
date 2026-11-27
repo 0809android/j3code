@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { ThreadId, TurnItemId, type OrchestrationV2TurnItem } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
+import { mFallback } from "gt-i18n";
 import type { MFunctionType } from "gt-i18n/types";
 
 import {
@@ -211,11 +212,11 @@ describe("systemNoticeText", () => {
   const english = "Tool output was removed after 30 days without use.";
 
   it("words a history trim notice through the resolver, from the number of days", () => {
-    const resolve = ((_message: unknown, options?: { readonly afterDays?: number }) =>
-      `translated:${options?.afterDays}`) as MFunctionType;
-    expect(systemNoticeText({ message: english, historyTrim: { afterDays: 30 } }, resolve)).toBe(
-      "translated:30",
-    );
+    const resolve = ((message: Parameters<MFunctionType>[0]) =>
+      `translated:${mFallback(message)}`) as MFunctionType;
+    const text = systemNoticeText({ message: english, historyTrim: { afterDays: 30 } }, resolve);
+    expect(text.startsWith("translated:")).toBe(true);
+    expect(text).toContain("after 30 days without use");
   });
 
   it("shows the stored text of a notice saved before the kind existed", () => {

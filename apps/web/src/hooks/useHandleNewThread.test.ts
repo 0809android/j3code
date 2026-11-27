@@ -222,7 +222,8 @@ vi.mock("../lib/utils", () => ({
   newDraftId: () => "draft-delayed",
   newThreadId: () => "thread-delayed",
 }));
-vi.mock("@t3tools/client-runtime/state/project-grouping", () => ({
+vi.mock("@t3tools/client-runtime/state/project-grouping", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   deriveLogicalProjectKeyFromSettings: () => "remote-project",
   getProjectOrderKey: () => "remote-project",
   selectProjectGroupingSettings: () => ({}),
