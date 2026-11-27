@@ -119,9 +119,13 @@ export interface EventSinkV2Shape {
     readonly commandId?: CommandId;
     readonly events: ReadonlyArray<OrchestrationV2DomainEvent>;
   }) => Effect.Effect<ReadonlyArray<OrchestrationV2StoredEvent>, EventSinkV2Error>;
-  /** Builds the events inside the commit transaction, so they reflect what is stored; none commits nothing. */
+  /**
+   * Builds the events inside the commit transaction, so they reflect what is stored; none commits nothing.
+   * The write waits for queued provider snapshots of `threadIds`: name every thread whose events it appends.
+   */
   readonly writeBuilt: <E>(
     build: Effect.Effect<ReadonlyArray<OrchestrationV2DomainEvent>, E>,
+    threadIds?: ReadonlyArray<ThreadId>,
   ) => Effect.Effect<ReadonlyArray<OrchestrationV2StoredEvent>, EventSinkV2Error>;
   readonly writeWithEffects: (input: {
     /**
@@ -548,10 +552,11 @@ const layerBase: Layer.Layer<
 
     const writeBuiltEffect = Effect.fn("orchestrationV2.EventSink.writeBuilt")(function* <E>(
       build: Effect.Effect<ReadonlyArray<OrchestrationV2DomainEvent>, E>,
+      threadIds: ReadonlyArray<ThreadId> = [],
     ) {
-      // Callers write only for threads with no queued provider snapshots, so none is waited on.
+      // Callers name the threads they append to, unless those have no queued provider snapshots.
       const { committed } = yield* commitThenPublish(
-        [],
+        threadIds,
         Effect.gen(function* () {
           const events = yield* build;
           if (events.length === 0) return { committed: [], outcomes: [] };
@@ -1216,8 +1221,8 @@ const layerBase: Layer.Layer<
               }),
           ),
         ),
-      writeBuilt: (build) =>
-        writeBuiltEffect(build).pipe(
+      writeBuilt: (build, threadIds) =>
+        writeBuiltEffect(build, threadIds).pipe(
           Effect.mapError((cause) => new EventSinkWriteError({ eventCount: 0, cause })),
         ),
       writeWithEffects: (input) =>

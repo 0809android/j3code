@@ -591,11 +591,15 @@ const make = Effect.gen(function* () {
    * subscribed fork re-read and resend its whole snapshot, so one per page would repeat that.
    */
   const copyToForks = Effect.fn("ThreadHistoryTrim.copyToForks")(function* (threadId: ThreadId) {
+    // A fork may have started a run during the rests between pages, so the write waits for the
+    // provider snapshots queued for each fork, as any write to that thread does.
+    const forks = yield* readForks(threadId).pipe(NodeSqliteClient.readOnly);
+    if (forks.length === 0) return;
     yield* eventSink.writeBuilt(
       Effect.gen(function* () {
         const occurredAt = yield* DateTime.now;
         const events: Array<OrchestrationV2DomainEvent> = [];
-        for (const { id: fork } of yield* readForks(threadId)) {
+        for (const { id: fork } of forks) {
           events.push({
             id: yield* ids.allocate.event({ threadId: fork }),
             type: "thread.history-trimmed",
@@ -606,6 +610,7 @@ const make = Effect.gen(function* () {
         }
         return events;
       }),
+      forks.map((fork) => fork.id),
     );
   });
 

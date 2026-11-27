@@ -617,19 +617,24 @@ class TrimHook extends Context.Service<
     readonly arm: (hook: Hook, atWrite?: number) => Effect.Effect<void>;
     readonly disarm: Effect.Effect<void>;
     readonly next: Hook;
+    /** The thread ids each write waited on, in order. */
+    readonly waitedOn: Array<ReadonlyArray<ThreadId> | undefined>;
   }
 >()("t3/orchestration-v2/ThreadHistoryTrim.test/TrimHook") {}
 const trimHook = Layer.effect(
   TrimHook,
   Effect.sync(() => {
     let armed: { readonly hook: Hook; readonly atWrite: number; writes: number } | null = null;
+    const waitedOn: Array<ReadonlyArray<ThreadId> | undefined> = [];
     return TrimHook.of({
+      waitedOn,
       arm: (hook, atWrite = 1) =>
         Effect.sync(() => {
           armed = { hook, atWrite, writes: 0 };
         }),
       disarm: Effect.sync(() => {
         armed = null;
+        waitedOn.length = 0;
       }),
       next: Effect.suspend(() =>
         armed !== null && ++armed.writes === armed.atWrite ? armed.hook : Effect.void,
@@ -645,11 +650,16 @@ const hookedSink = Layer.effect(
     const context = yield* Effect.context<Effect.Services<Hook>>();
     return EventSink.EventSinkV2.of({
       ...sink,
-      writeBuilt: (build) =>
+      writeBuilt: (build, threadIds) =>
         hooks.next.pipe(
           Effect.provide(context),
           Effect.orDie,
-          Effect.andThen(sink.writeBuilt(build)),
+          Effect.andThen(
+            Effect.sync(() => {
+              hooks.waitedOn.push(threadIds);
+            }),
+          ),
+          Effect.andThen(sink.writeBuilt(build, threadIds)),
         ),
     });
   }),
@@ -978,6 +988,27 @@ it.layer(hookedFixture)("ThreadHistoryTrim during a pass", (it) => {
       }
       assert.lengthOf(yield* deletedEvents, deletedBefore);
       assert.deepEqual(yield* itemTitles(fork.threadId), everyItem);
+    }),
+  );
+
+  it.effect("waits on each fork's queued provider snapshots before copying a trim to it", () =>
+    Effect.gen(function* () {
+      yield* isolate;
+      const source = yield* seedThread("fork-barrier-source");
+      const fork = yield* seedThread("fork-barrier-fork", {
+        thread: {
+          pinnedAt: old,
+          lineage: {
+            parentThreadId: source.threadId,
+            relationshipToParent: "fork",
+            rootThreadId: source.threadId,
+          },
+          forkedFrom: { type: "run", threadId: source.threadId, runId: source.runId },
+        },
+      });
+      yield* trim;
+      const waited = (yield* TrimHook).waitedOn;
+      assert.isTrue(waited.some((threadIds) => threadIds?.includes(fork.threadId) === true));
     }),
   );
 
