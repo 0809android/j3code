@@ -48,7 +48,7 @@ import {
   type ScopedMobileSettingsTarget,
 } from "./settings-scoped-server";
 import { PullRequestGlyph } from "../pull-requests/pullRequestGlyphs";
-import { resolveDefaultThreadEnvironmentId } from "./defaultThreadEnvironment";
+import { resolveDefaultThreadEnvironmentId } from "@t3tools/client-runtime/state/project-grouping";
 import { AutoSettleSettingsRows } from "./ThreadSettingsSections";
 import { supportsSharedSettingsSync } from "@t3tools/client-runtime/state/shared-settings";
 

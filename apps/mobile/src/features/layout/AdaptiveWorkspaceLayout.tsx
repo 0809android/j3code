@@ -54,7 +54,7 @@ import {
   isWorkspaceListPath,
   nativeInspectorColumnWidth,
 } from "../../lib/layout";
-import { resolveDefaultThreadEnvironmentId } from "../settings/defaultThreadEnvironment";
+import { resolveDefaultThreadEnvironmentId } from "@t3tools/client-runtime/state/project-grouping";
 import type { ThreadListFilters } from "../../persistence/mobile-preferences";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { useProjects } from "../../state/entities";

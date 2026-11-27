@@ -3,6 +3,7 @@ import { useMessages } from "gt-react";
 import { orderItemsByPreferredIds, sortSidebarV2ProjectGroups } from "../components/Sidebar.logic";
 import {
   getProjectOrderKey,
+  resolveDefaultThreadEnvironmentId,
   selectProjectGroupingSettings,
 } from "@t3tools/client-runtime/state/project-grouping";
 import { buildSidebarProjectSnapshots } from "../sidebarProjectGrouping";
@@ -24,6 +25,12 @@ export function useSidebarProjectGroups() {
   const environments = useEnvironmentIdentities();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const resolve = useMessages();
+  // A default whose connection was removed reads as Automatic, so the primary stays preferred.
+  const defaultEnvironmentId = resolveDefaultThreadEnvironmentId(
+    defaultThreadEnvironmentId,
+    (environmentId) =>
+      environments.some((environment) => environment.environmentId === environmentId),
+  );
   const orderedProjects = orderItemsByPreferredIds({
     items: projects,
     preferredIds: projectOrder,
@@ -42,7 +49,7 @@ export function useSidebarProjectGroups() {
       groupScratchProjects: true,
       settings: groupingSettings,
       primaryEnvironmentId,
-      preferredEnvironmentId: defaultThreadEnvironmentId ?? primaryEnvironmentId,
+      preferredEnvironmentId: defaultEnvironmentId ?? primaryEnvironmentId,
       resolveEnvironmentLabel: (environmentId) => labels.get(environmentId) ?? null,
     },
     resolve,

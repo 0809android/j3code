@@ -524,7 +524,14 @@ export function resolveDefaultProjectRef(
 
 export function useHandleNewThread() {
   const projectOrder = useUiStateStore((store) => store.projectOrder);
-  const defaultThreadEnvironmentId = useClientSettings((s) => s.defaultThreadEnvironmentId);
+  const savedDefaultThreadEnvironmentId = useClientSettings((s) => s.defaultThreadEnvironmentId);
+  const environments = useAtomValue(environmentSummaries.identitiesAtom);
+  // A default whose connection was removed reads as Automatic.
+  const defaultThreadEnvironmentId = resolveDefaultThreadEnvironmentId(
+    savedDefaultThreadEnvironmentId,
+    (environmentId) =>
+      environments.some((environment) => environment.environmentId === environmentId),
+  );
   const [lastUsedProjectKey] = useLocalStorage(
     LAST_USED_PROJECT_STORAGE_KEY,
     null,

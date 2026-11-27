@@ -19,7 +19,10 @@ import {
 import { createScratchProjectActions } from "../hooks/useScratchProject";
 import { getClientSettings } from "../hooks/useSettings";
 import { startNewThreadFromContext } from "../lib/chatThreadActions";
-import { selectProjectGroupingSettings } from "@t3tools/client-runtime/state/project-grouping";
+import {
+  resolveDefaultThreadEnvironmentId,
+  selectProjectGroupingSettings,
+} from "@t3tools/client-runtime/state/project-grouping";
 import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { buildSidebarProjectSnapshots } from "../sidebarProjectGrouping";
@@ -52,6 +55,12 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
     registry: appAtomRegistry,
     handleNewThread,
   });
+
+  // A default whose connection was removed reads as Automatic.
+  const readDefaultThreadEnvironmentId = () =>
+    resolveDefaultThreadEnvironmentId(getClientSettings().defaultThreadEnvironmentId, (id) =>
+      appAtomRegistry.get(environmentPresentations.presentationsAtom).has(id),
+    );
 
   const readRouteTarget = () => resolveThreadRouteTarget(router.state.matches.at(-1)?.params ?? {});
   const readRouteThreadRef = () => {
@@ -93,7 +102,7 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
         lastUsedProjectKey,
         appAtomRegistry.get(defaultProjectFallbackReadyAtom(lastUsedProjectKey)),
         selectProjectGroupingSettings(clientSettings),
-        clientSettings.defaultThreadEnvironmentId,
+        readDefaultThreadEnvironmentId(),
       ),
       handleNewThread,
     };
@@ -107,7 +116,7 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
       groupScratchProjects: true,
       settings: selectProjectGroupingSettings(clientSettings),
       primaryEnvironmentId,
-      preferredEnvironmentId: clientSettings.defaultThreadEnvironmentId ?? primaryEnvironmentId,
+      preferredEnvironmentId: readDefaultThreadEnvironmentId() ?? primaryEnvironmentId,
       resolveEnvironmentLabel: () => null,
     });
   };

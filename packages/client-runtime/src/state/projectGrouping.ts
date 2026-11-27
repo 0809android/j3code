@@ -84,6 +84,14 @@ export function selectGroupDefaultProject<
   return projects.find(isRepositoryRootProject) ?? projects[0];
 }
 
+/** A saved default machine whose connection was removed reads as Automatic (null). */
+export function resolveDefaultThreadEnvironmentId(
+  saved: EnvironmentId | null | undefined,
+  isKnownEnvironment: (environmentId: EnvironmentId) => boolean,
+): EnvironmentId | null {
+  return saved != null && isKnownEnvironment(saved) ? saved : null;
+}
+
 export function derivePhysicalProjectKeyFromPath(environmentId: string, cwd: string): string {
   return `${environmentId}:${normalizeProjectPathForComparison(cwd)}`;
 }

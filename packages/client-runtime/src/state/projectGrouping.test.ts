@@ -8,6 +8,7 @@ import {
   deriveLogicalProjectKeyFromSettings,
   pickableProjectGroups,
   derivePhysicalProjectKey,
+  resolveDefaultThreadEnvironmentId,
   resolveGroupDefaultProject,
   resolveScratchProjectScopeKey,
   sortProjectsByGroupOrder,
@@ -541,5 +542,55 @@ describe("sortProjectsByGroupOrder", () => {
       ],
     );
     expect(sorted.map((entry) => entry.id)).toEqual(["pinned", "recent", "archived", "unlisted"]);
+  });
+});
+
+describe("resolveDefaultThreadEnvironmentId", () => {
+  const known = EnvironmentId.make("environment:known");
+  const isKnown = (id: EnvironmentId) => id === known;
+
+  it("keeps a default that is still in the list", () => {
+    expect(resolveDefaultThreadEnvironmentId(known, isKnown)).toBe(known);
+  });
+
+  it("treats a default missing from the list as Automatic", () => {
+    expect(resolveDefaultThreadEnvironmentId(EnvironmentId.make("environment:gone"), isKnown)).toBe(
+      null,
+    );
+  });
+
+  it("treats an unset default as Automatic", () => {
+    expect(resolveDefaultThreadEnvironmentId(null, isKnown)).toBe(null);
+    expect(resolveDefaultThreadEnvironmentId(undefined, isKnown)).toBe(null);
+  });
+});
+
+describe("a default machine that is no longer connected", () => {
+  it("keeps the primary environment preferred for a group's representative", () => {
+    const remoteEnvironmentId = EnvironmentId.make("remote");
+    const goneEnvironmentId = EnvironmentId.make("environment:gone");
+    const knownEnvironmentIds = new Set([environmentId, remoteEnvironmentId]);
+    const projects = [
+      // The primary only has a subfolder of the repository; the remote has its root.
+      makeProject("local-app", "/work/workspace/app-a", {
+        repositoryIdentity: { ...repositoryIdentity, rootPath: "/work/workspace" },
+      }),
+      makeProject("remote-root", "/srv/workspace", {
+        environmentId: remoteEnvironmentId,
+        repositoryIdentity: { ...repositoryIdentity, rootPath: "/srv/workspace" },
+      }),
+    ];
+    const representativeWithDefault = (saved: EnvironmentId | null) =>
+      buildProjectGroups({
+        projects,
+        settings: settings("repository"),
+        preferredEnvironmentId:
+          resolveDefaultThreadEnvironmentId(saved, (id) => knownEnvironmentIds.has(id)) ??
+          environmentId,
+      })[0]?.representative.id;
+
+    expect(representativeWithDefault(goneEnvironmentId)).toBe("local-app");
+    expect(representativeWithDefault(null)).toBe("local-app");
+    expect(representativeWithDefault(remoteEnvironmentId)).toBe("remote-root");
   });
 });
