@@ -165,6 +165,19 @@ const make = Effect.gen(function* () {
       FROM orchestration_v2_projection_threads AS fork
       WHERE json_extract(fork.payload_json, '$.forkedFrom.type') = 'run'
         AND COALESCE(json_extract(fork.payload_json, '$.lineage.sideChat'), 0) = 0
+        -- For one thread, start only from the forks of that thread and of the thread its subagent hangs off.
+        AND ${
+          input.threadId === undefined
+            ? sql`1`
+            : sql`json_extract(fork.payload_json, '$.forkedFrom.threadId') IN (
+          SELECT ${input.threadId}
+          UNION
+          SELECT json_extract(own.payload_json, '$.lineage.rootThreadId')
+          FROM orchestration_v2_projection_threads AS own
+          WHERE own.thread_id = ${input.threadId}
+            AND json_extract(own.payload_json, '$.lineage.relationshipToParent') = 'subagent'
+        )`
+        }
       UNION
       SELECT forks.root_id, fork.thread_id, fork.deleted_at IS NOT NULL
       FROM orchestration_v2_projection_threads AS fork
@@ -659,10 +672,6 @@ const make = Effect.gen(function* () {
       // Checked here, behind the queue, so a requested trim that just finished counts.
       const last = yield* readLastPass;
       if (last !== null && Date.parse(now) - Date.parse(last) < PASS_INTERVAL_MS) return;
-      const report = yield* estimate(true).pipe(NodeSqliteClient.readOnly);
-      if (report.threadCount > 0) {
-        yield* Effect.logInfo("Idle thread history due for trimming", report);
-      }
     }
     let sliceStarted = yield* Clock.currentTimeMillis;
     // The sweep keeps to a 10% duty so a backlog never competes with a turn; a requested trim does not wait.
@@ -678,6 +687,11 @@ const make = Effect.gen(function* () {
     const candidates = yield* readCandidates({ idleBefore, now }).pipe(
       NodeSqliteClient.readOnly,
     );
+    if (mode === "background" && candidates.length > 0) {
+      yield* Effect.logInfo("Idle thread history due for trimming", {
+        threadCount: candidates.length,
+      });
+    }
     let threadCount = 0;
     let itemCount = 0;
     let estimatedBytes = 0;

@@ -859,6 +859,28 @@ it.layer(hookedFixture)("ThreadHistoryTrim during a pass", (it) => {
     }),
   );
 
+  it.effect("stops trimming a thread whose fork is used after the pass chose its rows", () =>
+    Effect.gen(function* () {
+      yield* isolate;
+      const source = yield* seedThread("fork-used-between");
+      const forkUsed: Hook = seedThread("fork-used-between-fork", {
+        userMessageAt: recent,
+        thread: {
+          pinnedAt: old,
+          lineage: {
+            parentThreadId: source.threadId,
+            relationshipToParent: "fork",
+            rootThreadId: source.threadId,
+          },
+          forkedFrom: { type: "run", threadId: source.threadId, runId: source.runId },
+        },
+      }).pipe(Effect.asVoid);
+      yield* arm(forkUsed);
+      yield* trim;
+      assert.deepEqual(yield* itemTitles(source.threadId), everyItem);
+    }),
+  );
+
   it.effect("keeps a row that gains a child after the pass chose it", () =>
     Effect.gen(function* () {
       yield* isolate;
