@@ -1,5 +1,6 @@
 import * as NodeSqlite from "node:sqlite";
 
+import { LegacyImportError } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -72,9 +73,10 @@ export const applyStagedLegacyImport = Effect.fn("LegacyImport.applyStaged")(
     const staged = path.join(stagingDir, DATABASE_FILENAME);
     if (!(yield* fs.exists(staged))) return;
     if (yield* fs.exists(databasePath)) {
-      yield* Effect.try(() => keepEnvironmentAuth(staged, databasePath)).pipe(
-        Effect.ignoreCause({ log: true }),
-      );
+      yield* Effect.try({
+        try: () => keepEnvironmentAuth(staged, databasePath),
+        catch: (cause) => new LegacyImportError({ operation: "sessions", cause }),
+      }).pipe(Effect.ignoreCause({ log: true }));
     }
 
     const stamp = DateTime.formatIso(yield* DateTime.now).replaceAll(":", "-");
