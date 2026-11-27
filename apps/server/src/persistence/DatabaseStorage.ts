@@ -121,22 +121,26 @@ const make = Effect.gen(function* () {
   );
 
   // The driver steps once per statement; incremental_vacuum frees one page per step. Yield between pages.
-  // Pages freed are counted from the freelist before and after each step, so a write reusing free
-  // pages elsewhere does not look like progress.
+  // Pages freed are counted from the file's page count, which only incremental_vacuum shrinks. The
+  // freelist also falls when a concurrent write reuses a free page and rises when one deletes rows.
   const reclaimPass = Effect.suspend(() => {
     const result: ReclaimResult = { freedPages: 0, remainingPages: 0, failed: false };
     let page = 0;
     return Effect.gen(function* () {
       if (!(yield* readLayout).incrementalVacuum) return result;
-      let previous: number | null = null;
+      let previousPageCount: number | null = null;
       for (;;) {
         const free = yield* sql<{ readonly freelist_count: number }>`PRAGMA freelist_count`;
+        const total = yield* sql<{ readonly page_count: number }>`PRAGMA page_count`;
         const current = free[0]?.freelist_count ?? 0;
-        if (previous !== null) result.freedPages += Math.max(0, previous - current);
+        const pageCount = total[0]?.page_count ?? 0;
+        if (previousPageCount !== null) {
+          result.freedPages += pagesShrunk(previousPageCount, pageCount);
+        }
         result.remainingPages = current;
         if (current === 0 || page >= RECLAIM_PAGES_PER_PASS) break;
         yield* sql`PRAGMA incremental_vacuum(1)`;
-        previous = current;
+        previousPageCount = pageCount;
         page++;
         yield* Effect.yieldNow;
       }
@@ -270,6 +274,10 @@ const make = Effect.gen(function* () {
     requestReclaim,
   });
 });
+
+/** Pages the file lost between two readings; growth from concurrent writes counts as none. */
+export const pagesShrunk = (previousPageCount: number, pageCount: number) =>
+  Math.max(0, previousPageCount - pageCount);
 
 export type ReclaimResult = {
   freedPages: number;

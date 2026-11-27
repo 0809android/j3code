@@ -222,3 +222,12 @@ it("drains a reclaim backlog at 10% duty, but backs off when a pass frees nothin
   // Nothing left is the usual minute.
   assert.equal(delayMs(pass(1024, 0), 10), 60_000);
 });
+
+it("counts freed pages by the file shrinking, not by the freelist falling", () => {
+  // A concurrent write reusing free pages lowers the freelist but leaves the file as large.
+  assert.equal(DatabaseStorage.pagesShrunk(5_000, 5_000), 0);
+  // A concurrent write that grows the file never counts as negative progress.
+  assert.equal(DatabaseStorage.pagesShrunk(5_000, 5_010), 0);
+  // incremental_vacuum shrinks the file by the pages it returned.
+  assert.equal(DatabaseStorage.pagesShrunk(5_000, 4_999), 1);
+});
