@@ -104,6 +104,24 @@ const withReaderClient = <A, E>(
     }).pipe(Effect.provide(SqliteClient.layer({ filename, readerWorker: true })));
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
 
+const withWriterAndReader = <A, E>(
+  use: (sql: SqlClient.SqlClient) => Effect.Effect<A, E, SqlClient.SqlClient>,
+) =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const directory = yield* fs.makeTempDirectoryScoped({ prefix: "t3-sqlite-pragmas-" });
+    const filename = path.join(directory, "state.sqlite");
+    return yield* Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`PRAGMA journal_mode = WAL`;
+      yield* sql`CREATE TABLE entries(name TEXT NOT NULL)`;
+      return yield* use(sql);
+    }).pipe(
+      Effect.provide(SqliteClient.layer({ filename, writerWorker: true, readerWorker: true })),
+    );
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
+
 const countEntries = (sql: SqlClient.SqlClient) =>
   Effect.map(
     sql<{ count: number }>`SELECT COUNT(*) AS count FROM entries`,
@@ -656,6 +674,23 @@ it.effect("applies every reader PRAGMA, not just the first", () =>
       );
       assert.equal(cache?.cache_size, -32000);
       assert.equal(temp?.temp_store, 2);
+    }),
+  ),
+);
+
+it.effect("applies the cache and mmap PRAGMAs to readers only, not the writer", () =>
+  withWriterAndReader((sql) =>
+    Effect.gen(function* () {
+      const pragmas = Effect.all({
+        cache: sql<{ readonly cache_size: number }>`PRAGMA cache_size`,
+        mmap: sql<{ readonly mmap_size: number }>`PRAGMA mmap_size`,
+      });
+      const reader = yield* pragmas.pipe(SqliteClient.readOnly);
+      const writer = yield* pragmas;
+      assert.equal(reader.cache[0]?.cache_size, -32000);
+      assert.equal(reader.mmap[0]?.mmap_size, 268435456);
+      assert.notEqual(writer.cache[0]?.cache_size, -32000);
+      assert.equal(writer.mmap[0]?.mmap_size, 0);
     }),
   ),
 );
