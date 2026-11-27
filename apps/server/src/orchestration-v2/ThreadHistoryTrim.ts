@@ -41,7 +41,10 @@ export class ThreadHistoryTrim extends Context.Service<
   {
     /** What the next pass would remove under the current setting. Changes nothing. */
     readonly preview: Effect.Effect<ThreadHistoryTrimReport, ThreadHistoryTrimError>;
-    /** Queues a pass and returns what it is about to remove. */
+    /**
+     * Queues a pass and returns at once. The counts are zero: estimating again would scan every
+     * candidate once more, and a client that wants them already has them from `preview`.
+     */
     readonly trimNow: Effect.Effect<ThreadHistoryTrimReport, ThreadHistoryTrimError>;
     /** When the last pass finished and when the next one is due. */
     readonly status: Stream.Stream<ThreadHistoryTrimStatus>;
@@ -848,11 +851,17 @@ const make = Effect.gen(function* () {
 
   return ThreadHistoryTrim.of({
     preview: estimate(true).pipe(NodeSqliteClient.readOnly, mapError("preview")),
-    trimNow: estimate(false).pipe(
-      NodeSqliteClient.readOnly,
-      Effect.tap(() => worker.enqueue("manual")),
-      mapError("trim"),
-    ),
+    trimNow: Effect.gen(function* () {
+      const { afterDays } = yield* window;
+      yield* worker.enqueue("manual");
+      return {
+        dryRun: false,
+        afterDays,
+        threadCount: 0,
+        itemCount: 0,
+        estimatedBytes: 0,
+      } satisfies ThreadHistoryTrimReport;
+    }).pipe(mapError("trim")),
     status: SubscriptionRef.changes(statusRef),
     drain: worker.drain,
   });

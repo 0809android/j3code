@@ -706,14 +706,19 @@ function ThreadHistorySection() {
       gt("Could not trim threads on {label}", { label }),
     ).finally(() => setPending(null));
     if (results.length === 0) return;
-    const count = results.reduce((sum, { report }) => sum + report.threadCount, 0);
+    // The server queues the pass without estimating again, so the size is the preview's.
+    const previewed = results.flatMap(
+      ({ target }) =>
+        confirming?.filter((entry) => entry.target.environmentId === target.environmentId) ?? [],
+    );
+    const count = previewed.reduce((sum, { report }) => sum + report.threadCount, 0);
     toastManager.add({
       type: "success",
       title: gt("{count, plural, one {Trimming {count} thread} other {Trimming {count} threads}}", {
         count,
       }),
       description: gt("About {size} of tool output and reasoning is being removed.", {
-        size: formatBytes(results.reduce((sum, { report }) => sum + report.estimatedBytes, 0)),
+        size: formatBytes(previewed.reduce((sum, { report }) => sum + report.estimatedBytes, 0)),
       }),
     });
   };

@@ -468,7 +468,7 @@ it.layer(layerTest(30))("ThreadHistoryTrim", (it) => {
       `;
       assert.equal(found[0]?.count, 1);
 
-      assert.equal((yield* trim).threadCount, 0);
+      assert.equal((yield* service.preview).threadCount, 0);
       assert.deepEqual(yield* itemTitles(threadId), trimmedItems);
     }),
   );
@@ -496,8 +496,10 @@ it.layer(layerTest(30))("ThreadHistoryTrim", (it) => {
       const first = yield* seedThread("idle-a");
       const second = yield* seedThread("idle-b");
 
-      const report = yield* trim;
-      assert.equal(report.threadCount, 2);
+      const service = yield* ThreadHistoryTrim.ThreadHistoryTrim;
+      const previewed = yield* service.preview;
+      yield* trim;
+      assert.equal(previewed.threadCount, 2);
       assert.deepEqual(yield* itemTitles(first.threadId), trimmedItems);
       assert.deepEqual(yield* itemTitles(second.threadId), trimmedItems);
     }),
@@ -552,11 +554,12 @@ it.layer(layerTest(30))("ThreadHistoryTrim", (it) => {
         },
       });
 
-      const report = yield* trim;
+      const previewed = yield* (yield* ThreadHistoryTrim.ThreadHistoryTrim).preview;
+      yield* trim;
       for (const thread of kept) {
         assert.deepEqual(yield* itemTitles(thread.threadId), everyItem, thread.threadId);
       }
-      assert.equal(report.threadCount, 2);
+      assert.equal(previewed.threadCount, 2);
       assert.deepEqual(yield* itemTitles(idleRoot.threadId), trimmedItems);
       assert.deepEqual(yield* itemTitles(idleSubagent.threadId), trimmedItems);
     }),
@@ -594,11 +597,12 @@ it.layer(layerTest(30))("ThreadHistoryTrim", (it) => {
       yield* forkOf("fork-grandchild", middle, { userMessageAt: recent });
       yield* forkOf("fork-idle", idle, pinned);
 
-      const report = yield* trim;
+      const previewed = yield* (yield* ThreadHistoryTrim.ThreadHistoryTrim).preview;
+      yield* trim;
       for (const source of [messaged, visited, grandchildUsed]) {
         assert.deepEqual(yield* itemTitles(source.threadId), everyItem, source.threadId);
       }
-      assert.equal(report.threadCount, 1);
+      assert.equal(previewed.threadCount, 1);
       assert.deepEqual(yield* itemTitles(idle.threadId), trimmedItems);
     }),
   );
@@ -632,6 +636,24 @@ it.layer(layerTest(30))("ThreadHistoryTrim", (it) => {
       yield* trim;
       assert.deepEqual(yield* itemTitles(used.threadId), everyItem);
       assert.deepEqual(yield* itemTitles(unused.threadId), trimmedItems);
+    }),
+  );
+
+  it.effect("trimNow queues a pass without estimating again", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(DateTime.toEpochMillis(now));
+      const service = yield* ThreadHistoryTrim.ThreadHistoryTrim;
+      const { threadId } = yield* seedThread("queued");
+      const report = yield* service.trimNow;
+      assert.deepEqual(report, {
+        dryRun: false,
+        afterDays: 30,
+        threadCount: 0,
+        itemCount: 0,
+        estimatedBytes: 0,
+      });
+      yield* service.drain;
+      assert.deepEqual(yield* itemTitles(threadId), trimmedItems);
     }),
   );
 });
@@ -1170,7 +1192,8 @@ it.layer(layerTest(0))("ThreadHistoryTrim turned off", (it) => {
     Effect.gen(function* () {
       yield* TestClock.setTime(DateTime.toEpochMillis(now));
       const { threadId } = yield* seedThread("off");
-      assert.equal((yield* trim).threadCount, 0);
+      assert.equal((yield* (yield* ThreadHistoryTrim.ThreadHistoryTrim).preview).threadCount, 0);
+      yield* trim;
       assert.deepEqual(yield* itemTitles(threadId), everyItem);
     }),
   );
