@@ -17,9 +17,9 @@ import {
   isValidDeviceName,
   ledgerVerifyDevice,
   makeDeviceLedger,
-  makeJsonFileLedgerStore,
   makeMemoryLedgerStore,
 } from "./ledger.ts";
+import { makeJsonFileLedgerStore } from "./ledgerFile.ts";
 
 const NOW = 1_800_000_000_000;
 const edKey = (n: number) => ed25519.getPublicKey(new Uint8Array(32).fill(n));

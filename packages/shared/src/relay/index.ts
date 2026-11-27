@@ -40,7 +40,6 @@ export {
   LedgerStoreError,
   ledgerVerifyDevice,
   makeDeviceLedger,
-  makeJsonFileLedgerStore,
   makeMemoryLedgerStore,
 } from "./ledger.ts";
 export {
