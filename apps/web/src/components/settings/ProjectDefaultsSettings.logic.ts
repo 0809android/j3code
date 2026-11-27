@@ -1,4 +1,10 @@
-import type { ModelSelection, ProjectId, ServerProvider } from "@t3tools/contracts";
+import { resolveDefaultThreadEnvironmentId } from "@t3tools/client-runtime/state/project-grouping";
+import type {
+  EnvironmentId,
+  ModelSelection,
+  ProjectId,
+  ServerProvider,
+} from "@t3tools/contracts";
 import type { UnifiedSettings } from "@t3tools/contracts/settings";
 import { msg } from "gt-react";
 
@@ -61,4 +67,15 @@ function providerNote(entry: ProviderInstanceEntry | undefined, resolve: Message
   if (!entry.enabled)
     return resolve(msg("{provider} is turned off.", { provider: entry.displayName }));
   return resolve(msg("{provider} is unavailable.", { provider: entry.displayName }));
+}
+
+/** A default removed from the list reads as Automatic; an offline one stays selected. */
+export function resolveDefaultThreadEnvironmentSelection(
+  saved: EnvironmentId | null,
+  environments: ReadonlyArray<{ readonly environmentId: EnvironmentId }>,
+) {
+  const environmentId = resolveDefaultThreadEnvironmentId(saved, (id) =>
+    environments.some((environment) => environment.environmentId === id),
+  );
+  return environments.find((environment) => environment.environmentId === environmentId) ?? null;
 }
