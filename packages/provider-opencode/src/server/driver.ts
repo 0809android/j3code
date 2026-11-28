@@ -5,6 +5,12 @@ import {
   type ServerProviderModel,
 } from "@t3tools/contracts";
 import { OpenCodeSettings } from "../settings.ts";
+import {
+  API_SERVICE_PROVIDER_ID,
+  apiServiceModelId,
+  apiServiceStartEnvironment,
+} from "./apiService.ts";
+import { readCustomModelEntries, toCustomModelSetting } from "@t3tools/shared/model";
 import * as Digest from "effect/crypto/Digest";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Deferred from "effect/Deferred";
@@ -277,6 +283,9 @@ export const OpenCodeDriver: ProviderDriver<
     const digest = yield* Digest.Digest;
     const host = yield* ProviderHost.ProviderHost;
     const processEnv = yield* mergeProviderInstanceEnvironment(environment);
+    // API サービスは自前の OpenCode 2 だけで動かし、利用者の OpenCode の設定やサーバーは使わない。
+    const apiService = config.apiService;
+    const customModels = readCustomModelEntries(config.customModels);
     const continuationIdentity = defaultProviderContinuationIdentity({
       driverKind: DRIVER_KIND,
       instanceId,
@@ -294,6 +303,18 @@ export const OpenCodeDriver: ProviderDriver<
       binaryPath: expandHomePath(config.binaryPath, yield* HostProcess.HomeDirectory),
       // The instance registry has already read a referenced password from its secret provider.
       serverPassword: settingsSecretLiteral(config.serverPassword),
+      ...(apiService === undefined
+        ? {}
+        : {
+            serverUrl: "",
+            // 表示名と対応機能は残し、名前だけをそろえる。
+            customModels: customModels.map((entry) =>
+              toCustomModelSetting({
+                ...entry,
+                slug: `${API_SERVICE_PROVIDER_ID}/${apiServiceModelId(entry.slug)}`,
+              }),
+            ),
+          }),
     } satisfies OpenCodeSettings;
     const probeRuntime = (probeEnv: NodeJS.ProcessEnv) =>
       probeOpenCodeRuntime(effectiveConfig, probeEnv).pipe(
@@ -314,6 +335,26 @@ export const OpenCodeDriver: ProviderDriver<
                 onSome: Effect.succeed,
                 onNone: () => probeRuntime(processEnv).pipe(Effect.tap(runtimeProbe.record)),
               }),
+            ),
+          );
+    const requiresOpenCode2 = Effect.fail(
+      new OpenCodeRuntime.OpenCodeRuntimeError({
+        operation: "apiService.version",
+        detail: "API サービスを使うには OpenCode 2 が必要です。",
+      }),
+    );
+    const apiServiceStart =
+      apiService === undefined
+        ? undefined
+        : resolveRuntime.pipe(
+            Effect.flatMap((runtime) =>
+              runtime.generation === "v1"
+                ? requiresOpenCode2
+                : apiServiceStartEnvironment({
+                    service: apiService,
+                    customModels: customModels.map((entry) => entry.slug),
+                    environment: processEnv,
+                  }).pipe(Effect.provideService(HttpClient.HttpClient, httpClient)),
             ),
           );
     const noUpdate = makeManualOnlyProviderMaintenanceCapabilities({
@@ -382,6 +423,7 @@ export const OpenCodeDriver: ProviderDriver<
       serverPassword: effectiveConfig.serverPassword,
       directory: host.paths.cwd,
       environment: processEnv,
+      ...(apiServiceStart ? { startEnvironment: apiServiceStart } : {}),
     }).pipe(
       Effect.provideService(OpenCodeRuntime.OpenCodeRuntime, openCodeRuntime),
       Effect.provideService(
@@ -389,13 +431,14 @@ export const OpenCodeDriver: ProviderDriver<
         yield* OpenCode2Client.make.pipe(Effect.provideService(HttpClient.HttpClient, httpClient)),
       ),
     );
+    const openCode2Adapter = yield* OpenCode2AdapterV2.make(instanceId).pipe(
+      Effect.provideService(OpenCode2Server.OpenCode2Server, openCode2Server),
+    );
     const orchestrationAdapter = selectOpenCodeRuntimeAdapter({
       probe: runtimeProbe,
       resolve: resolveRuntime,
-      v1: openCodeV1Adapter,
-      v2: yield* OpenCode2AdapterV2.make(instanceId).pipe(
-        Effect.provideService(OpenCode2Server.OpenCode2Server, openCode2Server),
-      ),
+      v1: apiService === undefined ? openCodeV1Adapter : openCode2Adapter,
+      v2: openCode2Adapter,
     });
     const loadOpenCode2Models = yield* makeOpenCode2ModelLoader(
       // An external server may not have the host's cwd; without a location it uses its own default.
@@ -455,19 +498,27 @@ export const OpenCodeDriver: ProviderDriver<
       directory: host.paths.cwd,
       ...(effectiveConfig.serverPassword ? { serverPassword: effectiveConfig.serverPassword } : {}),
       environment: processEnv,
+      ...(apiService === undefined
+        ? {}
+        : {
+            startEnvironment: requiresOpenCode2,
+          }),
     });
+    const textGenerationV1 = yield* makeOpenCodeTextGeneration(effectiveConfig).pipe(
+      Effect.provideService(OpenCodeServerOwner.OpenCodeServerOwner, serverOwner),
+    );
+    const textGenerationV2 = yield* OpenCode2TextGeneration.make().pipe(
+      Effect.provideService(OpenCode2Server.OpenCode2Server, openCode2Server),
+    );
     const textGeneration = selectOpenCodeRuntimeTextGeneration(
       resolveRuntime,
-      yield* makeOpenCodeTextGeneration(effectiveConfig).pipe(
-        Effect.provideService(OpenCodeServerOwner.OpenCodeServerOwner, serverOwner),
-      ),
-      yield* OpenCode2TextGeneration.make().pipe(
-        Effect.provideService(OpenCode2Server.OpenCode2Server, openCode2Server),
-      ),
+      apiService === undefined ? textGenerationV1 : textGenerationV2,
+      textGenerationV2,
     );
 
+    // API サービスのインスタンスに、利用者の OpenCode Go の残量を出さない。
     const legacyUsageLimits = readOpenCodeGoUsageLimits({
-      enabled: effectiveConfig.enabled,
+      enabled: effectiveConfig.enabled && apiService === undefined,
       serverUrl: effectiveConfig.serverUrl,
       environment: processEnv,
     }).pipe(
@@ -478,7 +529,7 @@ export const OpenCodeDriver: ProviderDriver<
     );
     let unsupportedUsageVersion: string | undefined;
     const checkUsageLimits = Effect.gen(function* () {
-      if (!effectiveConfig.enabled) return yield* legacyUsageLimits;
+      if (!effectiveConfig.enabled || apiService !== undefined) return yield* legacyUsageLimits;
       const runtime = yield* runtimeProbe.get;
       if (runtime.generation === "v1" || runtime.version === unsupportedUsageVersion)
         return yield* legacyUsageLimits;
