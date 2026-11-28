@@ -9,7 +9,10 @@ import {
   API_SERVICE_PROVIDER_ID,
   apiServiceModelId,
   apiServiceStartEnvironment,
+  isApiServiceKeyName,
+  takeApiServiceKey,
 } from "./apiService.ts";
+import { makeApiServiceRelay } from "./apiServiceRelay.ts";
 import { readCustomModelEntries, toCustomModelSetting } from "@t3tools/shared/model";
 import * as Digest from "effect/crypto/Digest";
 import * as SecureRandom from "effect/crypto/SecureRandom";
@@ -282,9 +285,26 @@ export const OpenCodeDriver: ProviderDriver<
     const latestVersions = yield* ProviderLatestVersions.ProviderLatestVersions;
     const digest = yield* Digest.Digest;
     const host = yield* ProviderHost.ProviderHost;
-    const processEnv = yield* mergeProviderInstanceEnvironment(environment);
     // API サービスは自前の OpenCode 2 だけで動かし、利用者の OpenCode の設定やサーバーは使わない。
     const apiService = config.apiService;
+    const mergedEnv = yield* mergeProviderInstanceEnvironment(environment);
+    // キーはここで抜き取り、以降の子プロセスには渡さない。足すのは手元の中継だけ。
+    const { key: apiServiceKey, environment: processEnv } =
+      apiService === undefined ? { key: "", environment: mergedEnv } : takeApiServiceKey(mergedEnv);
+    const apiServiceRelay =
+      apiService === undefined
+        ? undefined
+        : yield* makeApiServiceRelay({ baseUrl: apiService.baseUrl, key: apiServiceKey }).pipe(
+            Effect.mapError(
+              (cause) =>
+                new ProviderDriverError({
+                  driver: DRIVER_KIND,
+                  instanceId,
+                  detail: cause.detail,
+                  cause,
+                }),
+            ),
+          );
     const customModels = readCustomModelEntries(config.customModels);
     const continuationIdentity = defaultProviderContinuationIdentity({
       driverKind: DRIVER_KIND,
@@ -344,7 +364,7 @@ export const OpenCodeDriver: ProviderDriver<
       }),
     );
     const apiServiceStart =
-      apiService === undefined
+      apiService === undefined || apiServiceRelay === undefined
         ? undefined
         : resolveRuntime.pipe(
             Effect.flatMap((runtime) =>
@@ -353,6 +373,8 @@ export const OpenCodeDriver: ProviderDriver<
                 : apiServiceStartEnvironment({
                     service: apiService,
                     customModels: customModels.map((entry) => entry.slug),
+                    key: apiServiceKey,
+                    relay: apiServiceRelay,
                     environment: processEnv,
                   }).pipe(Effect.provideService(HttpClient.HttpClient, httpClient)),
             ),
@@ -403,7 +425,11 @@ export const OpenCodeDriver: ProviderDriver<
       instanceId,
       displayName,
       accentColor,
-      environment,
+      // 使わないアダプターにも、API サービスのキーは渡さない。
+      environment:
+        apiService === undefined
+          ? environment
+          : environment.filter((entry) => !isApiServiceKeyName(entry.name)),
       enabled,
       config: effectiveConfig,
     }).pipe(

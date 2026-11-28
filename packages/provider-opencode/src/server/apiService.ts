@@ -1,10 +1,11 @@
 // API キーで使うサービス。モデル一覧はサービスの `/models` から直接読み、OpenCode には環境変数で
-// 設定を渡す。利用者の OpenCode の設定ファイルは書き換えない。
+// 設定を渡す。利用者の OpenCode の設定ファイルは書き換えない。キーは OpenCode に渡さない。
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
 
+import type { ApiServiceRelay } from "./apiServiceRelay.ts";
 import { OpenCodeRuntimeError } from "./OpenCodeRuntime.ts";
 
 /** キーを持つ環境変数の名前。インスタンスの秘密の環境変数として保存する。 */
@@ -46,11 +47,30 @@ export const apiServiceModel = (
   ...extra,
 });
 
+// 別名ごとに同じモデルが何行も返るサービス（Mistral）は、1 行にまとめる。残すのは、中身が新しく
+// なっても名前が変わらない `-latest`、次に短い名前。
+const preferredId = (a: string, b: string) =>
+  Number(b.endsWith("-latest")) - Number(a.endsWith("-latest")) ||
+  a.length - b.length ||
+  a.localeCompare(b);
+
+const withoutAliasRows = (rows: ReadonlyArray<Row>): ReadonlyArray<Row> => {
+  const kept = new Set<string>();
+  const aliased = new Set<string>();
+  const named = rows.flatMap((row) => (typeof row.id === "string" ? [{ id: row.id, row }] : []));
+  for (const { id, row } of named.toSorted((a, b) => preferredId(a.id, b.id))) {
+    const aliases = Array.isArray(row.aliases) ? row.aliases : [];
+    if (aliased.has(id) || aliases.some((alias) => kept.has(alias))) continue;
+    kept.add(id);
+    for (const alias of aliases) if (typeof alias === "string") aliased.add(alias);
+  }
+  return rows.filter((row) => typeof row.id === "string" && kept.delete(row.id));
+};
+
 export const parseApiServiceModels = (body: unknown): ReadonlyArray<ApiServiceModel> => {
   const data = Array.isArray(body) ? body : asRow(body).data;
   if (!Array.isArray(data)) return [];
-  return data.flatMap((entry) => {
-    const row = asRow(entry);
+  return withoutAliasRows(data.map(asRow)).flatMap((row) => {
     const capabilities = asRow(row.capabilities);
     const architecture = asRow(row.architecture);
     const { id } = row;
@@ -114,7 +134,7 @@ const encodeConfig = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 /** OpenCode 2 の設定。このインスタンスには、このサービスのモデルだけを出す。 */
 export const apiServiceConfigContent = (input: {
   readonly name: string;
-  readonly baseUrl: string;
+  readonly relay: ApiServiceRelay;
   readonly models: ReadonlyArray<ApiServiceModel>;
 }): string =>
   encodeConfig({
@@ -122,10 +142,8 @@ export const apiServiceConfigContent = (input: {
       [API_SERVICE_PROVIDER_ID]: {
         name: input.name,
         package: "@opencode/ai/providers/openai-compatible",
-        settings: {
-          baseURL: trimSlashes(input.baseUrl),
-          apiKey: `{env:${API_SERVICE_KEY_ENV}}`,
-        },
+        // 本物の接続先とキーは中継だけが持つ。
+        settings: { baseURL: input.relay.url, apiKey: input.relay.token },
         models: Object.fromEntries(
           input.models.map((model) => [
             model.id,
@@ -169,6 +187,28 @@ export const apiServiceModelId = (value: string): string =>
     : value;
 
 /**
+ * 環境変数からキーを抜き取る。残りだけを子プロセスに渡す。Windows の環境変数名は大文字と小文字を
+ * 区別しないので、表記違いも落とす。
+ */
+export const isApiServiceKeyName = (name: string) => name.toUpperCase() === API_SERVICE_KEY_ENV;
+export const takeApiServiceKey = (environment: NodeJS.ProcessEnv) => {
+  const entries = Object.entries(environment);
+  return {
+    key: entries.find(([name]) => isApiServiceKeyName(name))?.[1] ?? "",
+    environment: Object.fromEntries(
+      entries.filter(([name]) => !isApiServiceKeyName(name)),
+    ) as NodeJS.ProcessEnv,
+  };
+};
+
+// 利用者の HTTP プロキシ設定があっても、手元の中継へは直接つなぐ。
+const bypassingProxy = (environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
+  const current = environment["NO_PROXY"] ?? environment["no_proxy"];
+  const value = current ? `${current},127.0.0.1` : "127.0.0.1";
+  return { ...environment, NO_PROXY: value, no_proxy: value };
+};
+
+/**
  * OpenCode を起動する直前に呼ぶ。起動のたびに一覧を読むので、失敗は次の起動でやり直され、理由は
  * プロバイダーの状態に出る。一覧を持たないサービス（404・405）は、手で足したモデルだけで動かす。
  */
@@ -176,9 +216,12 @@ export const apiServiceStartEnvironment = Effect.fn("OpenCodeApiService.startEnv
   function* (input: {
     readonly service: { readonly name: string; readonly baseUrl: string };
     readonly customModels: ReadonlyArray<string>;
+    readonly key: string;
+    readonly relay: ApiServiceRelay;
     readonly environment: NodeJS.ProcessEnv;
   }) {
     const { name, baseUrl } = input.service;
+    const { key, relay } = input;
     const fail = (detail: string) =>
       Effect.fail(
         new OpenCodeRuntimeError({ operation: "apiService.models", detail: `${name}: ${detail}` }),
@@ -186,7 +229,6 @@ export const apiServiceStartEnvironment = Effect.fn("OpenCodeApiService.startEnv
     if (!isAllowedApiServiceUrl(baseUrl)) {
       return yield* fail("接続先の URL が使えません。https の URL を指定してください。");
     }
-    const key = input.environment[API_SERVICE_KEY_ENV] ?? "";
     if (key === "") return yield* fail("API キーが登録されていません。");
     // 元の失敗にはキーを含む要求が入るので、外へは出さない。
     const { status, models: listed } = yield* fetchApiServiceModels({ baseUrl, key }).pipe(
@@ -212,8 +254,8 @@ export const apiServiceStartEnvironment = Effect.fn("OpenCodeApiService.startEnv
       return yield* fail("使えるモデルがありません。モデル名を手で追加してください。");
     }
     return {
-      ...input.environment,
-      OPENCODE_CONFIG_CONTENT: apiServiceConfigContent({ name, baseUrl, models }),
+      ...bypassingProxy(takeApiServiceKey(input.environment).environment),
+      OPENCODE_CONFIG_CONTENT: apiServiceConfigContent({ name, relay, models }),
     } as NodeJS.ProcessEnv;
   },
 );

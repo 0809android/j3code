@@ -10,6 +10,7 @@ import {
   apiServiceStartEnvironment,
   isAllowedApiServiceUrl,
   parseApiServiceModels,
+  takeApiServiceKey,
   withinEnvironmentLimit,
 } from "./apiService.ts";
 
@@ -53,20 +54,37 @@ describe("parseApiServiceModels", () => {
     ).toEqual([]);
     expect(parseApiServiceModels({ error: "unauthorized" })).toEqual([]);
   });
+
+  it("別名で重なる行は 1 つにまとめ、-latest の名前を残す", () => {
+    const group = ["medium-2604", "medium-latest", "medium"];
+    const rows = group.map((id) => ({ id, aliases: group.filter((other) => other !== id) }));
+    const models = parseApiServiceModels([
+      ...rows,
+      { id: "large-2512", aliases: [] },
+      // 別名が片方にしか書かれていなくても、同じモデルとみなす。
+      { id: "small-2603" },
+      { id: "small-latest", aliases: ["small-2603"] },
+    ]);
+    expect(models.map((model) => model.id)).toEqual([
+      "medium-latest",
+      "large-2512",
+      "small-latest",
+    ]);
+  });
 });
 
 describe("apiServiceConfigContent", () => {
-  it("キーは環境変数の参照にして、このサービスだけを使わせる", () => {
+  it("中継へ向け、このサービスだけを使わせる", () => {
     const config = JSON.parse(
       apiServiceConfigContent({
         name: "Example",
-        baseUrl: "https://api.example.com/v1/",
+        relay: { url: "http://127.0.0.1:1", token: "pass" },
         models: [apiServiceModel("m1")],
       }),
     );
     expect(config.providers["k3-api"].settings).toEqual({
-      baseURL: "https://api.example.com/v1",
-      apiKey: "{env:K3_API_SERVICE_KEY}",
+      baseURL: "http://127.0.0.1:1",
+      apiKey: "pass",
     });
     expect(Object.keys(config.providers["k3-api"].models)).toEqual(["m1"]);
     expect(config.policies).toEqual([
@@ -86,6 +104,7 @@ describe("isAllowedApiServiceUrl", () => {
 });
 
 describe("apiServiceStartEnvironment", () => {
+  const relay = { url: "http://127.0.0.1:1", token: "pass" };
   const start = (input: {
     readonly status: number;
     readonly customModels?: ReadonlyArray<string>;
@@ -95,7 +114,9 @@ describe("apiServiceStartEnvironment", () => {
     apiServiceStartEnvironment({
       service: { name: "Example", baseUrl: input.baseUrl ?? "https://api.example.com/v1" },
       customModels: input.customModels ?? [],
-      environment: { K3_API_SERVICE_KEY: "secret" },
+      key: "secret",
+      relay,
+      environment: {},
     }).pipe(
       Effect.map((environment) =>
         Object.keys(JSON.parse(environment.OPENCODE_CONFIG_CONTENT!).providers["k3-api"].models),
@@ -115,6 +136,27 @@ describe("apiServiceStartEnvironment", () => {
         }),
       ),
     );
+
+  effectIt.effect("起動する OpenCode の環境変数と設定には、キーが入らない", () =>
+    apiServiceStartEnvironment({
+      service: { name: "Example", baseUrl: "https://api.example.com/v1" },
+      customModels: ["mine"],
+      key: "secret-key",
+      relay,
+      environment: { K3_API_SERVICE_KEY: "secret-key", k3_api_service_key: "secret-key" },
+    }).pipe(
+      Effect.map((environment) => {
+        expect(JSON.stringify(environment)).not.toContain("secret-key");
+        expect(environment.NO_PROXY).toBe("127.0.0.1");
+      }),
+      Effect.provideService(
+        HttpClient.HttpClient,
+        HttpClient.make((request) =>
+          Effect.succeed(HttpClientResponse.fromWeb(request, new Response("{}", { status: 404 }))),
+        ),
+      ),
+    ),
+  );
 
   effectIt.effect("認証に失敗したら起動せず、理由を返す。手で足したモデルがあっても同じ", () =>
     Effect.gen(function* () {
@@ -151,6 +193,15 @@ describe("apiServiceStartEnvironment", () => {
   );
 });
 
+describe("takeApiServiceKey", () => {
+  it("キーだけを抜き取り、ほかの環境変数は残す", () => {
+    expect(takeApiServiceKey({ PATH: "/bin", K3_API_SERVICE_KEY: "secret" })).toEqual({
+      key: "secret",
+      environment: { PATH: "/bin" },
+    });
+  });
+});
+
 describe("withinEnvironmentLimit", () => {
   it("モデルが多いサービスでも、設定が環境変数の上限を超えない", () => {
     const models = Array.from({ length: 2_000 }, (_, index) =>
@@ -159,7 +210,11 @@ describe("withinEnvironmentLimit", () => {
     const kept = withinEnvironmentLimit(models);
     expect(kept.length).toBeGreaterThan(300);
     expect(
-      apiServiceConfigContent({ name: "A", baseUrl: "https://a.example/v1", models: kept }).length,
+      apiServiceConfigContent({
+        name: "A",
+        relay: { url: "http://127.0.0.1:1", token: "pass" },
+        models: kept,
+      }).length,
     ).toBeLessThan(128 * 1024);
   });
 });
